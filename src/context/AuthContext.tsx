@@ -26,7 +26,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Helper to persist session to localStorage and state
   const persistSession = (user: User | null) => {
     setCurrentUser(user);
-    if (user) {
+    if (user && !user.isGuest) {
       try {
         localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(user));
       } catch (e) {
@@ -37,7 +37,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 1. Initialize Supabase Auth and Listen for Session Changes (Direct BaaS)
+  // 1. Initialize Real Supabase Auth and Listen for Session Changes
   useEffect(() => {
     let isMounted = true;
     const supabase = getSupabaseClient();
@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(true);
       try {
         if (supabase) {
-          // Direct Supabase Session Fetch
+          // Direct Real Supabase Session Fetch
           const { data: { session }, error } = await supabase.auth.getSession();
           
           if (!error && session?.user) {
@@ -57,14 +57,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             const resolvedUser: User = {
               id: authUser.id,
-              email: authUser.email,
+              email: authUser.email || '',
               displayName:
                 profile?.displayName ||
                 authUser.user_metadata?.display_name ||
                 authUser.user_metadata?.displayName ||
                 authUser.email?.split('@')[0] ||
                 'Creator',
-              bio: profile?.bio || authUser.user_metadata?.bio || '',
+              bio: profile?.bio || authUser.user_metadata?.bio || 'นักสร้างสรรค์ผลงาน 🌸',
               avatarUrl:
                 profile?.avatarUrl ||
                 authUser.user_metadata?.avatar_url ||
@@ -83,12 +83,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        // Check local storage session (e.g. for guest or returning local user)
+        // Check stored session if previously signed in
         const savedSession = localStorage.getItem(LOCAL_STORAGE_SESSION_KEY);
         if (savedSession) {
           try {
             const parsed = JSON.parse(savedSession);
-            if (parsed && parsed.id) {
+            if (parsed && parsed.id && !parsed.isGuest && parsed.email) {
               if (isMounted) persistSession(parsed);
               setIsLoading(false);
               return;
@@ -98,18 +98,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        // Default Initial Guest Session
-        const defaultGuest: User = {
+        // Default Initial Guest State (Clear Guest Indicator, no fake accounts)
+        const initialGuest: User = {
           id: `guest_${Math.random().toString(36).substring(2, 9)}`,
-          displayName: 'นักเขียนนิรนาม 🌸 (Guest)',
-          bio: 'ยินดีต้อนรับสู่ Creator Vault! ทดลองสร้างและบันทึกผลงานได้ทันที',
+          displayName: 'นักเขียนนิรนาม 🌸',
+          bio: 'โหมดทดลองใช้งาน — สามารถทดลองสร้างผลงานและใช้งานฟีเจอร์ได้ทันที',
           avatarUrl:
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
           isGuest: true,
           createdAt: new Date().toISOString(),
           provider: 'guest'
         };
-        if (isMounted) persistSession(defaultGuest);
+        if (isMounted) persistSession(initialGuest);
       } catch (err) {
         console.warn('Auth initialization error:', err);
       } finally {
@@ -119,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initializeSession();
 
-    // Direct Supabase Auth State Change Listener
+    // Real Supabase Auth State Change Listener
     let authListenerSubscription: { unsubscribe: () => void } | null = null;
     if (supabase) {
       const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -129,14 +129,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const resolvedUser: User = {
             id: authUser.id,
-            email: authUser.email,
+            email: authUser.email || '',
             displayName:
               profile?.displayName ||
               authUser.user_metadata?.display_name ||
               authUser.user_metadata?.displayName ||
               authUser.email?.split('@')[0] ||
               'Creator',
-            bio: profile?.bio || authUser.user_metadata?.bio || '',
+            bio: profile?.bio || authUser.user_metadata?.bio || 'นักสร้างสรรค์ผลงาน 🌸',
             avatarUrl:
               profile?.avatarUrl ||
               authUser.user_metadata?.avatar_url ||
@@ -148,11 +148,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           persistSession(resolvedUser);
         } else if (event === 'SIGNED_OUT') {
-          // Reset to guest
+          // Reset to clean guest
           const guest: User = {
             id: `guest_${Math.random().toString(36).substring(2, 9)}`,
-            displayName: 'นักเขียนนิรนาม 🌸 (Guest)',
-            bio: 'ยินดีต้อนรับสู่ Creator Vault! ทดลองสร้างและบันทึกผลงานได้ทันที',
+            displayName: 'นักเขียนนิรนาม 🌸',
+            bio: 'โหมดทดลองใช้งาน — สามารถทดลองสร้างผลงานและใช้งานฟีเจอร์ได้ทันที',
             avatarUrl:
               'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
             isGuest: true,
@@ -173,71 +173,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // 2. Direct Supabase Sign Up Flow
+  // 2. Real Supabase Sign Up Flow
   const signUpWithEmail = async (email: string, pass: string): Promise<AuthResponse> => {
     setIsLoading(true);
     try {
       const cleanEmail = email.toLowerCase().trim();
       const supabase = getSupabaseClient();
 
-      if (supabase) {
-        // Direct Supabase SDK Registration
-        const { data, error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: pass,
-          options: {
-            data: {
-              displayName: cleanEmail.split('@')[0]
-            }
-          }
-        });
-
-        if (error) {
-          return { success: false, error: formatFriendlyErrorMessage(error) };
-        }
-
-        if (data && data.user) {
-          const authUser = data.user;
-          const newUser: User = {
-            id: authUser.id,
-            email: cleanEmail,
-            displayName: cleanEmail.split('@')[0],
-            bio: 'นักสร้างบอทและนักเขียน ✦ สมาชิกใหม่ของ Creator Vault',
-            avatarUrl:
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-            isGuest: false,
-            createdAt: authUser.created_at || new Date().toISOString(),
-            provider: 'email'
-          };
-
-          // Upsert to Supabase profiles table directly
-          await supabaseService.upsertProfile(newUser);
-
-          persistSession(newUser);
-          setIsAuthOpen(false);
-          setIsOnboardingOpen(true); // Open creator onboarding
-          return { success: true, user: newUser, isNewUser: true };
-        }
+      if (!supabase) {
+        return { 
+          success: false, 
+          error: 'ยังไม่ได้ตั้งค่า Supabase URL หรือ Anon Key ในตัวแปรสภาพแวดล้อม (Environment Variables)' 
+        };
       }
 
-      // Local fallback if Supabase credentials are empty or being configured
-      const localId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const fallbackUser: User = {
-        id: localId,
+      // Real Supabase SDK Sign Up
+      const { data, error } = await supabase.auth.signUp({
         email: cleanEmail,
-        displayName: cleanEmail.split('@')[0],
-        bio: 'นักสร้างบอทและนักเขียน ✦ สมาชิกใหม่ของ Creator Vault',
-        avatarUrl:
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        isGuest: false,
-        createdAt: new Date().toISOString(),
-        provider: 'email'
-      };
+        password: pass,
+        options: {
+          data: {
+            displayName: cleanEmail.split('@')[0]
+          }
+        }
+      });
 
-      persistSession(fallbackUser);
-      setIsAuthOpen(false);
-      setIsOnboardingOpen(true);
-      return { success: true, user: fallbackUser, isNewUser: true };
+      if (error) {
+        return { success: false, error: formatFriendlyErrorMessage(error) };
+      }
+
+      if (data && data.user) {
+        const authUser = data.user;
+        const newUser: User = {
+          id: authUser.id,
+          email: cleanEmail,
+          displayName: cleanEmail.split('@')[0],
+          bio: 'นักสร้างบอทและนักเขียน ✦ สมาชิกใหม่ของ Creator Vault',
+          avatarUrl:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          isGuest: false,
+          createdAt: authUser.created_at || new Date().toISOString(),
+          provider: 'email'
+        };
+
+        // Upsert to Supabase profiles table
+        await supabaseService.upsertProfile(newUser);
+
+        persistSession(newUser);
+        setIsAuthOpen(false);
+        setIsOnboardingOpen(true);
+        return { success: true, user: newUser, isNewUser: true };
+      }
+
+      return { success: false, error: 'ไม่พบข้อมูลผู้ใช้จากการลงทะเบียน' };
     } catch (err: any) {
       console.error('Sign up error:', err);
       return { success: false, error: formatFriendlyErrorMessage(err) };
@@ -246,69 +234,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 3. Direct Supabase Log In Flow
+  // 3. Real Supabase Log In Flow
   const loginWithEmail = async (email: string, pass: string): Promise<AuthResponse> => {
     setIsLoading(true);
     try {
       const cleanEmail = email.toLowerCase().trim();
       const supabase = getSupabaseClient();
 
-      if (supabase) {
-        // Direct Supabase SDK Password Login
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password: pass
-        });
-
-        if (error) {
-          return { success: false, error: formatFriendlyErrorMessage(error) };
-        }
-
-        if (data && data.user) {
-          const authUser = data.user;
-          const profile = await supabaseService.getProfile(authUser.id);
-
-          const loggedInUser: User = {
-            id: authUser.id,
-            email: cleanEmail,
-            displayName:
-              profile?.displayName ||
-              authUser.user_metadata?.display_name ||
-              authUser.user_metadata?.displayName ||
-              cleanEmail.split('@')[0],
-            bio: profile?.bio || authUser.user_metadata?.bio || '',
-            avatarUrl:
-              profile?.avatarUrl ||
-              authUser.user_metadata?.avatar_url ||
-              authUser.user_metadata?.avatarUrl ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-            isGuest: false,
-            createdAt: profile?.createdAt || authUser.created_at || new Date().toISOString(),
-            provider: 'email'
-          };
-
-          persistSession(loggedInUser);
-          setIsAuthOpen(false);
-          return { success: true, user: loggedInUser, isNewUser: false };
-        }
+      if (!supabase) {
+        return { 
+          success: false, 
+          error: 'ยังไม่ได้ตั้งค่า Supabase URL หรือ Anon Key ในตัวแปรสภาพแวดล้อม (Environment Variables)' 
+        };
       }
 
-      // Local fallback
-      const localUser: User = {
-        id: `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      // Real Supabase SDK Password Login
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
-        displayName: cleanEmail.split('@')[0],
-        bio: 'ยินดีต้อนรับกลับสู่ Creator Vault!',
-        avatarUrl:
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        isGuest: false,
-        createdAt: new Date().toISOString(),
-        provider: 'email'
-      };
+        password: pass
+      });
 
-      persistSession(localUser);
-      setIsAuthOpen(false);
-      return { success: true, user: localUser, isNewUser: false };
+      if (error) {
+        return { success: false, error: formatFriendlyErrorMessage(error) };
+      }
+
+      if (data && data.user) {
+        const authUser = data.user;
+        const profile = await supabaseService.getProfile(authUser.id);
+
+        const loggedInUser: User = {
+          id: authUser.id,
+          email: cleanEmail,
+          displayName:
+            profile?.displayName ||
+            authUser.user_metadata?.display_name ||
+            authUser.user_metadata?.displayName ||
+            cleanEmail.split('@')[0],
+          bio: profile?.bio || authUser.user_metadata?.bio || 'ยินดีต้อนรับกลับสู่ Creator Vault!',
+          avatarUrl:
+            profile?.avatarUrl ||
+            authUser.user_metadata?.avatar_url ||
+            authUser.user_metadata?.avatarUrl ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          isGuest: false,
+          createdAt: profile?.createdAt || authUser.created_at || new Date().toISOString(),
+          provider: 'email'
+        };
+
+        persistSession(loggedInUser);
+        setIsAuthOpen(false);
+        return { success: true, user: loggedInUser, isNewUser: false };
+      }
+
+      return { success: false, error: 'ไม่พบข้อมูลผู้ใช้จากการเข้าสู่ระบบ' };
     } catch (err: any) {
       console.error('Login error:', err);
       return { success: false, error: formatFriendlyErrorMessage(err) };
@@ -317,42 +295,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 4. Direct Supabase Google OAuth Login
+  // 4. Supabase Google OAuth Login (Hidden in UI, available when configured)
   const loginWithGoogle = async (): Promise<AuthResponse> => {
     setIsLoading(true);
     try {
       const supabase = getSupabaseClient();
-      if (supabase) {
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: window.location.origin
-          }
-        });
-
-        if (error) {
-          return { success: false, error: formatFriendlyErrorMessage(error) };
-        }
-
-        return { success: true };
+      if (!supabase) {
+        return { success: false, error: 'Supabase client is not configured' };
       }
 
-      // Fallback Google creator for preview
-      const googleUser: User = {
-        id: `google_${Date.now()}`,
-        email: 'creator.google@gmail.com',
-        displayName: 'Google Creator 🌸',
-        bio: 'นักสร้างสรรค์ผลงาน (เชื่อมต่อผ่าน Google Account)',
-        avatarUrl:
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        isGuest: false,
-        createdAt: new Date().toISOString(),
-        provider: 'google'
-      };
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin
+        }
+      });
 
-      persistSession(googleUser);
-      setIsAuthOpen(false);
-      return { success: true, user: googleUser, isNewUser: false };
+      if (error) {
+        return { success: false, error: formatFriendlyErrorMessage(error) };
+      }
+
+      return { success: true };
     } catch (err: any) {
       console.error('Google login error:', err);
       return { success: false, error: formatFriendlyErrorMessage(err) };
@@ -365,7 +328,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginAsGuest = async (customName?: string): Promise<boolean> => {
     const guestUser: User = {
       id: `guest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      displayName: customName || 'นักเขียนนิรนาม 🌸 (Guest)',
+      displayName: customName || 'นักเขียนนิรนาม 🌸',
       bio: 'บัญชี Guest ชั่วคราว — สามารถทดลองสร้างผลงานและใช้งานฟีเจอร์ได้ทันที',
       avatarUrl:
         'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
@@ -379,7 +342,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  // 6. Direct Supabase Log Out
+  // 6. Real Supabase Log Out
   const logout = async () => {
     const supabase = getSupabaseClient();
     if (supabase) {
@@ -392,8 +355,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const defaultGuest: User = {
       id: `guest_${Math.random().toString(36).substring(2, 9)}`,
-      displayName: 'นักเขียนนิรนาม 🌸 (Guest)',
-      bio: 'ยินดีต้อนรับสู่ Creator Vault! ทดลองสร้างและบันทึกผลงานได้ทันที',
+      displayName: 'นักเขียนนิรนาม 🌸',
+      bio: 'โหมดทดลองใช้งาน — สามารถทดลองสร้างผลงานและใช้งานฟีเจอร์ได้ทันที',
       avatarUrl:
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       isGuest: true,
@@ -403,7 +366,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     persistSession(defaultGuest);
   };
 
-  // 7. Direct Supabase Profile Update
+  // 7. Real Supabase Profile Update
   const updateProfile = async (data: {
     displayName?: string;
     bio?: string;
@@ -428,9 +391,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  // 8. Direct Supabase Password Change
+  // 8. Real Supabase Password Change
   const changePassword = async (
-    currentPass: string,
+    _currentPass: string,
     newPass: string
   ): Promise<{ success: boolean; error?: string }> => {
     if (!currentUser || currentUser.isGuest) {
@@ -452,7 +415,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    return { success: true };
+    return { success: false, error: 'ไม่สามารถเชื่อมต่อกับ Supabase ได้' };
   };
 
   return (

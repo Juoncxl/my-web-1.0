@@ -13,7 +13,6 @@ import { AuthModal } from './components/AuthModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ProfileEditModal } from './components/ProfileEditModal';
-import { SupabaseInfoModal } from './components/SupabaseInfoModal';
 import { PersonalVaultHeader } from './components/PersonalVaultHeader';
 import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
@@ -65,7 +64,6 @@ function MainApp() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
   const [isMoveToFolderOpen, setIsMoveToFolderOpen] = useState(false);
   const [movingAsset, setMovingAsset] = useState<Asset | null>(null);
@@ -376,7 +374,6 @@ function MainApp() {
         onOpenSignUpModal={() => openAuthModal('signup')}
         onOpenProfileModal={() => setIsProfileOpen(true)}
         onOpenSettingsModal={() => setIsSettingsOpen(true)}
-        onOpenSupabaseModal={() => setIsSupabaseOpen(true)}
       />
 
       {/* Main Container */}
@@ -521,15 +518,11 @@ function MainApp() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => setIsSupabaseOpen(true)}
-              className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline font-semibold"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Supabase RLS & Cloud Engine</span>
-            </button>
+            <span className="flex items-center gap-1 text-purple-700 dark:text-purple-400 font-medium">
+              <span>🌸 สำหรับนักสร้างแชทบอท & นักเขียน</span>
+            </span>
             <span>•</span>
-            <span>สร้างด้วย Google AI Studio & React</span>
+            <span>Google AI Studio & Supabase BaaS</span>
           </div>
         </div>
       </footer>
@@ -631,12 +624,6 @@ function MainApp() {
         isOpen={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
       />
-
-      <SupabaseInfoModal
-        isOpen={isSupabaseOpen}
-        onClose={() => setIsSupabaseOpen(false)}
-      />
-
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Mail, Lock, Sparkles, LogIn, UserPlus, AlertCircle, CheckCircle2, Shield, RefreshCw } from 'lucide-react';
+import { X, Mail, Lock, Sparkles, LogIn, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { formatFriendlyErrorMessage } from '../lib/apiHelper';
 
@@ -12,7 +12,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const { 
     loginWithEmail, 
     signUpWithEmail, 
-    loginWithGoogle, 
     loginAsGuest, 
     authDefaultTab 
   } = useAuth();
@@ -90,23 +89,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleGoogleSubmit = async () => {
-    setIsLoading(true);
-    setError('');
-    try {
-      const res = await loginWithGoogle();
-      if (res && res.success) {
-        onClose();
-      } else {
-        setError(formatFriendlyErrorMessage(res?.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ'));
-      }
-    } catch (err: any) {
-      setError(formatFriendlyErrorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleGuestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -136,14 +118,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 {mode === 'login' ? 'เข้าสู่ระบบ Creator Vault' : mode === 'signup' ? 'สมัครสมาชิกผู้สร้าง' : 'โหมดทดลองใช้งาน (Guest)'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {mode === 'login' ? 'เชื่อมต่อและซิงค์ผลงานของคุณบนทุกอุปกรณ์' : mode === 'signup' ? 'บันทึก Character, Lore & Code ลง Cloud ถาวร' : 'ทดลองสร้างผลงานได้ 2 ชิ้นโดยไม่ต้องสมัคร'}
+                {mode === 'login' ? 'เชื่อมต่อและซิงค์ผลงานของคุณบนทุกอุปกรณ์' : mode === 'signup' ? 'บันทึก Character, Lore & Code ลง Supabase ถาวร' : 'ทดลองสร้างผลงานได้ 2 ชิ้นโดยไม่ต้องสมัคร'}
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -154,7 +136,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={() => { setMode('login'); setError(''); }}
-            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               mode === 'login'
                 ? 'bg-purple-600 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -167,7 +149,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={() => { setMode('signup'); setError(''); }}
-            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               mode === 'signup'
                 ? 'bg-purple-600 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -180,7 +162,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={() => { setMode('guest'); setError(''); }}
-            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               mode === 'guest'
                 ? 'bg-pink-500 text-white shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -208,34 +190,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* Social Login Button (Google Only - No Apple ID) */}
-          {mode !== 'guest' && (
-            <div className="space-y-3 mb-4">
-              <button
-                type="button"
-                onClick={handleGoogleSubmit}
-                disabled={isLoading}
-                className="w-full py-2.5 px-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2.5 shadow-xs active:scale-98 disabled:opacity-50"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
-                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
-                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                </svg>
-                <span>Continue with Google</span>
-              </button>
-
-              <div className="relative flex items-center justify-center">
-                <div className="border-t border-slate-200 dark:border-slate-800 w-full"></div>
-                <span className="bg-white dark:bg-slate-900 px-3 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider relative">
-                  หรือใช้อีเมล
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Mode 1: Log In */}
+          {/* Mode 1: Log In (Email & Password) */}
           {mode === 'login' && (
             <form onSubmit={handleLoginSubmit} className="space-y-3.5">
               <div className="space-y-1">
@@ -287,7 +242,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   <button
                     type="button"
                     onClick={() => { setMode('signup'); setError(''); }}
-                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline"
+                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
                   >
                     สมัครสมาชิกที่นี่
                   </button>
@@ -296,7 +251,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </form>
           )}
 
-          {/* Mode 2: Sign Up */}
+          {/* Mode 2: Sign Up (Email & Password) */}
           {mode === 'signup' && (
             <form onSubmit={handleSignUpSubmit} className="space-y-3.5">
               <div className="space-y-1">
@@ -356,7 +311,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 className="w-full py-2.5 mt-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <UserPlus className="w-4 h-4" />
-                <span>{isLoading ? 'กำลังสร้างบัญชี...' : 'สมัครสมาชิก & ตั้งค่าโปรไฟล์ (Sign Up)'}</span>
+                <span>{isLoading ? 'กำลังสร้างบัญชี...' : 'สมัครสมาชิก & ใช้งาน (Sign Up)'}</span>
               </button>
 
               <div className="text-center pt-2">
@@ -365,7 +320,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   <button
                     type="button"
                     onClick={() => { setMode('login'); setError(''); }}
-                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline"
+                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
                   >
                     เข้าสู่ระบบที่นี่
                   </button>

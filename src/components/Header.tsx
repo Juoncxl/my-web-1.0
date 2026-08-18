@@ -3,16 +3,12 @@ import {
   Search, 
   Plus, 
   Sparkles, 
-  Database, 
   User as UserIcon, 
   Lock, 
   Globe, 
   LogOut, 
   LogIn, 
   Settings, 
-  BookOpen, 
-  Code,
-  ShieldCheck,
   ChevronDown,
   Sun,
   Moon
@@ -31,7 +27,6 @@ interface HeaderProps {
   onOpenSignUpModal?: () => void;
   onOpenProfileModal: () => void;
   onOpenSettingsModal?: () => void;
-  onOpenSupabaseModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,8 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   onOpenSignUpModal,
   onOpenProfileModal,
-  onOpenSettingsModal,
-  onOpenSupabaseModal
+  onOpenSettingsModal
 }) => {
   const { currentUser, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -63,6 +57,10 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const userAvatar = currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+  const displayName = currentUser?.displayName || (currentUser?.isGuest ? 'นักเขียนนิรนาม 🌸 (Guest)' : 'Creator');
+  const userEmail = currentUser?.email || (currentUser?.isGuest ? 'โหมดทดลองใช้งาน (Guest)' : '');
+
   return (
     <header className="sticky top-0 z-30 bg-[#FAF8F5]/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-purple-100/70 dark:border-purple-950/70 transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -72,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-3 shrink-0">
             <button 
               onClick={() => onViewChange('feed')}
-              className="flex items-center gap-2 text-left group transition-transform active:scale-95"
+              className="flex items-center gap-2 text-left group transition-transform active:scale-95 cursor-pointer"
             >
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-500 via-pink-400 to-amber-300 flex items-center justify-center text-white shadow-sm shadow-purple-200 dark:shadow-purple-950 group-hover:shadow-md transition-shadow">
                 <span className="text-xl">🌸</span>
@@ -93,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* Center Search Bar (Compact & Functional) */}
+          {/* Center Search Bar */}
           <div className="flex-1 max-w-md mx-2">
             <div className="relative group">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400 group-focus-within:text-purple-600 transition-colors" />
@@ -107,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
               {searchQuery && (
                 <button
                   onClick={() => onSearchChange('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-700 rounded-full w-4 h-4 flex items-center justify-center"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-700 rounded-full w-4 h-4 flex items-center justify-center cursor-pointer"
                 >
                   ×
                 </button>
@@ -122,7 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="hidden md:flex items-center bg-purple-50/80 dark:bg-slate-800/80 p-1 rounded-full border border-purple-100 dark:border-purple-900/60">
               <button
                 onClick={() => onViewChange('feed')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                   activeView === 'feed'
                     ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-purple-700 dark:hover:text-purple-300'
@@ -133,7 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
               <button
                 onClick={() => onViewChange('vault')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                   activeView === 'vault'
                     ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-purple-700 dark:hover:text-purple-300'
@@ -144,15 +142,15 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
 
-            {/* Dark / Light Theme Mode Toggle Button */}
+            {/* Dark / Light Theme Toggle */}
             <button
               onClick={toggleTheme}
               title={isDark ? "เปลี่ยนเป็นโหมดสว่าง (Light Mode)" : "เปลี่ยนเป็นโหมดมืด (Dark Mode)"}
-              className="p-2 rounded-full bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900 text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 transition-all hover:scale-105 shadow-xs"
+              className="p-2 rounded-full bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900 text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 transition-all hover:scale-105 shadow-xs cursor-pointer"
               aria-label="Toggle Theme"
             >
               {isDark ? (
-                <Sun className="w-4 h-4 text-amber-400 animate-spin-once" />
+                <Sun className="w-4 h-4 text-amber-400" />
               ) : (
                 <Moon className="w-4 h-4 text-indigo-600" />
               )}
@@ -162,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenAIModal}
               title="AI ผู้ช่วยสร้าง Prompt / Lore / UI Code"
-              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-pink-50 dark:from-amber-950/40 dark:to-pink-950/40 hover:from-amber-100 hover:to-pink-100 dark:hover:from-amber-900/60 dark:hover:to-pink-900/60 text-amber-900 dark:text-amber-200 border border-amber-200/70 dark:border-amber-800/70 rounded-full text-xs font-medium transition-all shadow-xs active:scale-95"
+              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-pink-50 dark:from-amber-950/40 dark:to-pink-950/40 hover:from-amber-100 hover:to-pink-100 dark:hover:from-amber-900/60 dark:hover:to-pink-900/60 text-amber-900 dark:text-amber-200 border border-amber-200/70 dark:border-amber-800/70 rounded-full text-xs font-medium transition-all shadow-xs active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
               <span className="hidden lg:inline">AI ผู้ช่วย</span>
@@ -171,20 +169,20 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Create Asset Button */}
             <button
               onClick={onOpenCreateModal}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-full text-xs font-medium transition-all shadow-sm shadow-purple-200 dark:shadow-purple-950 active:scale-95"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-full text-xs font-medium transition-all shadow-sm shadow-purple-200 dark:shadow-purple-950 active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">สร้างผลงาน</span>
             </button>
 
-            {/* User Avatar with Popover Menu */}
+            {/* User Profile Avatar with Dropdown Menu */}
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="flex items-center gap-1.5 p-1 bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900 rounded-full hover:border-purple-300 transition-all focus:outline-none focus:ring-2 focus:ring-purple-300/50"
+                className="flex items-center gap-1.5 p-1 bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900 rounded-full hover:border-purple-300 transition-all focus:outline-none focus:ring-2 focus:ring-purple-300/50 cursor-pointer"
               >
                 <img
-                  src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
+                  src={userAvatar}
                   alt="Avatar"
                   className="w-8 h-8 rounded-full object-cover ring-2 ring-purple-200/60 dark:ring-purple-800/60"
                 />
@@ -194,33 +192,33 @@ export const Header: React.FC<HeaderProps> = ({
               {dropdownOpen && (
                 <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-purple-100 dark:border-purple-900/70 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                   
-                  {/* User Header in Dropdown */}
+                  {/* User Profile Header in Dropdown */}
                   <div className="px-3 py-2.5 border-b border-purple-50 dark:border-purple-950 mb-1">
                     <div className="flex items-center gap-2.5">
                       <img
-                        src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
+                        src={userAvatar}
                         alt="Avatar"
                         className="w-10 h-10 rounded-full object-cover ring-2 ring-purple-100 dark:ring-purple-900"
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
-                          {currentUser?.displayName || 'Creator'}
+                          {displayName}
                         </p>
                         <p className="text-[11px] text-slate-400 truncate">
-                          {currentUser?.isGuest ? 'โหมดทดลองใช้งาน (Guest)' : currentUser?.email || 'สมาชิก'}
+                          {userEmail}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Menu Items */}
+                  {/* Menu Navigation Items */}
                   <div className="space-y-0.5">
                     <button
                       onClick={() => {
                         onViewChange('vault');
                         setDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                     >
                       <UserIcon className="w-4 h-4 text-purple-500" />
                       <span>คลังผลงานของฉัน (My Vault)</span>
@@ -231,7 +229,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onViewChange('feed');
                         setDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left md:hidden"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left md:hidden cursor-pointer"
                     >
                       <Globe className="w-4 h-4 text-indigo-500" />
                       <span>ฟีดสาธารณะ (Public Feed)</span>
@@ -243,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
                         else onOpenProfileModal();
                         setDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                     >
                       <Settings className="w-4 h-4 text-purple-500" />
                       <span>ตั้งค่าบัญชี & รหัสผ่าน (Settings)</span>
@@ -254,33 +252,23 @@ export const Header: React.FC<HeaderProps> = ({
                         onOpenProfileModal();
                         setDropdownOpen(false);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                     >
                       <UserIcon className="w-4 h-4 text-slate-400" />
-                      <span>แก้ไขโปรไฟล์ด่วน (Edit Profile)</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        onOpenSupabaseModal();
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-400 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/50 rounded-xl transition-colors text-left"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                      <span>Supabase Cloud & Data Sync</span>
+                      <span>แก้ไขโปรไฟล์ (Edit Profile)</span>
                     </button>
                   </div>
 
+                  {/* Auth Actions */}
                   <div className="border-t border-purple-50 dark:border-purple-950 my-1 pt-1 space-y-0.5">
-                    {currentUser?.isGuest ? (
+                    {currentUser?.isGuest || !currentUser ? (
                       <>
                         <button
                           onClick={() => {
                             onOpenAuthModal();
                             setDropdownOpen(false);
                           }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950 rounded-xl transition-colors text-left"
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <LogIn className="w-4 h-4" />
                           <span>เข้าสู่ระบบ (Log In)</span>
@@ -291,7 +279,7 @@ export const Header: React.FC<HeaderProps> = ({
                             else onOpenAuthModal();
                             setDropdownOpen(false);
                           }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-950 rounded-xl transition-colors text-left"
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-950 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <Sparkles className="w-4 h-4" />
                           <span>สมัครสมาชิกใหม่ (Sign Up)</span>
@@ -303,7 +291,7 @@ export const Header: React.FC<HeaderProps> = ({
                           logout();
                           setDropdownOpen(false);
                         }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors text-left"
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors text-left cursor-pointer"
                       >
                         <LogOut className="w-4 h-4" />
                         <span>ออกจากระบบ</span>
@@ -322,4 +310,3 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
-
