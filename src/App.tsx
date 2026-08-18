@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Asset, AssetCategory, Folder } from './types';
-import { safeFetchJson } from './lib/apiHelper';
+import { supabaseService } from './lib/supabaseService';
 import { Header } from './components/Header';
 import { CategoryNav } from './components/CategoryNav';
 import { AssetCard } from './components/AssetCard';
@@ -72,16 +72,14 @@ function MainApp() {
   const [isGuestLimitOpen, setIsGuestLimitOpen] = useState(false);
   const [aiContext, setAiContext] = useState<{ type: string; context: string } | null>(null);
 
-  // Fetch Assets from server API
+  // Fetch Assets via direct Supabase BaaS
   const fetchAssets = async () => {
     try {
       setIsLoadingAssets(true);
-      const headers: Record<string, string> = {};
-      if (currentUser?.id) {
-        headers['x-user-id'] = currentUser.id;
-      }
-      const res = await safeFetchJson<Asset[]>('/api/assets', { headers });
-      if (res.success && Array.isArray(res.data)) {
+      const res = await supabaseService.fetchAssets({
+        currentUserId: currentUser?.id
+      });
+      if (res.data) {
         setAssets(res.data);
       }
     } catch (e) {
@@ -91,17 +89,15 @@ function MainApp() {
     }
   };
 
-  // Fetch Folders for current user
+  // Fetch Folders via direct Supabase BaaS
   const fetchFolders = async () => {
     if (!currentUser?.id) {
       setFolders([]);
       return;
     }
     try {
-      const res = await safeFetchJson<Folder[]>('/api/folders', {
-        headers: { 'x-user-id': currentUser.id }
-      });
-      if (res.success && Array.isArray(res.data)) {
+      const res = await supabaseService.fetchFolders(currentUser.id);
+      if (res.data) {
         setFolders(res.data);
       }
     } catch (e) {
@@ -130,7 +126,7 @@ function MainApp() {
     setIsCreateOpen(true);
   };
 
-  // Handle Save (Create or Update)
+  // Handle Save (Create or Update) via direct Supabase BaaS
   const handleSaveAsset = async (assetData: Partial<Asset>): Promise<boolean> => {
     if (!currentUser) return false;
 
@@ -142,16 +138,9 @@ function MainApp() {
 
     try {
       if (editingAsset) {
-        // Update existing
-        const res = await safeFetchJson<Asset>(`/api/assets/${editingAsset.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': currentUser.id
-          },
-          body: JSON.stringify(assetData)
-        });
-        if (res.success && res.data) {
+        // Update existing directly in Supabase
+        const res = await supabaseService.updateAsset(editingAsset.id, assetData);
+        if (res.data) {
           setAssets(prev => prev.map(a => (a.id === editingAsset.id ? res.data! : a)));
           if (viewingAsset?.id === editingAsset.id) {
             setViewingAsset(res.data);
@@ -160,27 +149,26 @@ function MainApp() {
           return true;
         }
       } else {
-        // Create new
-        const res = await safeFetchJson<Asset>('/api/assets', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': currentUser.id
-          },
-          body: JSON.stringify({
-            ...assetData,
-            userId: currentUser.id,
-            authorName: currentUser.displayName,
-            authorAvatar: currentUser.avatarUrl
-          })
+        // Create new directly in Supabase
+        const res = await supabaseService.createAsset({
+          userId: currentUser.id,
+          authorName: currentUser.displayName,
+          authorAvatar: currentUser.avatarUrl,
+          title: assetData.title || 'Untitled Asset',
+          icon: assetData.icon || { type: 'emoji', value: '✨' },
+          category: assetData.category || 'character',
+          content: assetData.content || '',
+          uiCodeSnippet: assetData.uiCodeSnippet || '',
+          previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : []),
+          folderId: assetData.folderId || null,
+          isPublic: assetData.isPublic !== undefined ? assetData.isPublic : true,
+          tags: assetData.tags || []
         });
-        if (res.success && res.data) {
+
+        if (res.data) {
           setAssets(prev => [res.data!, ...prev]);
           setIsCreateOpen(false);
           return true;
-        } else if (res.error && res.error.includes('Guest')) {
-          setIsGuestLimitOpen(true);
-          return false;
         }
       }
     } catch (err) {
@@ -189,14 +177,11 @@ function MainApp() {
     return false;
   };
 
-  // Handle Delete Asset
+  // Handle Delete Asset via direct Supabase BaaS
   const handleDeleteAsset = async (assetId: string) => {
     if (!currentUser) return;
     try {
-      const res = await safeFetchJson(`/api/assets/${assetId}`, {
-        method: 'DELETE',
-        headers: { 'x-user-id': currentUser.id }
-      });
+      const res = await supabaseService.deleteAsset(assetId);
       if (res.success) {
         setAssets(prev => prev.filter(a => a.id !== assetId));
         setViewingAsset(null);
@@ -206,19 +191,12 @@ function MainApp() {
     }
   };
 
-  // Handle Move to Folder
+  // Handle Move to Folder via direct Supabase BaaS
   const handleMoveToFolder = async (assetId: string, folderId: string | null): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await safeFetchJson<Asset>(`/api/assets/${assetId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id
-        },
-        body: JSON.stringify({ folderId })
-      });
-      if (res.success && res.data) {
+      const res = await supabaseService.updateAsset(assetId, { folderId });
+      if (res.data) {
         setAssets(prev => prev.map(a => (a.id === assetId ? res.data! : a)));
         if (viewingAsset?.id === assetId) {
           setViewingAsset(res.data);
@@ -231,19 +209,17 @@ function MainApp() {
     return false;
   };
 
-  // Folder CRUD
+  // Folder CRUD via direct Supabase BaaS
   const handleCreateFolder = async (name: string, icon = '📁', color = 'purple'): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await safeFetchJson<Folder>('/api/folders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id
-        },
-        body: JSON.stringify({ name, icon, color })
+      const res = await supabaseService.createFolder({
+        userId: currentUser.id,
+        name,
+        icon,
+        color
       });
-      if (res.success && res.data) {
+      if (res.data) {
         setFolders(prev => [...prev, res.data!]);
         return true;
       }
@@ -256,15 +232,8 @@ function MainApp() {
   const handleUpdateFolder = async (id: string, name: string, icon?: string, color?: string): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await safeFetchJson<Folder>(`/api/folders/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id
-        },
-        body: JSON.stringify({ name, icon, color })
-      });
-      if (res.success && res.data) {
+      const res = await supabaseService.updateFolder(id, currentUser.id, { name, icon, color });
+      if (res.data) {
         setFolders(prev => prev.map(f => (f.id === id ? res.data! : f)));
         return true;
       }
@@ -277,10 +246,7 @@ function MainApp() {
   const handleDeleteFolder = async (id: string): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await safeFetchJson(`/api/folders/${id}`, {
-        method: 'DELETE',
-        headers: { 'x-user-id': currentUser.id }
-      });
+      const res = await supabaseService.deleteFolder(id, currentUser.id);
       if (res.success) {
         setFolders(prev => prev.filter(f => f.id !== id));
         // Reset assets that belonged to deleted folder
@@ -296,10 +262,15 @@ function MainApp() {
     return false;
   };
 
-  // Handle Like
+  // Handle Like via direct Supabase BaaS
   const handleLikeAsset = async (assetId: string) => {
     try {
-      await safeFetchJson(`/api/assets/${assetId}/like`, { method: 'POST' });
+      const currentAsset = assets.find(a => a.id === assetId);
+      const newCount = await supabaseService.likeAsset(assetId, currentAsset?.likesCount || 0);
+      setAssets(prev => prev.map(a => (a.id === assetId ? { ...a, likesCount: newCount } : a)));
+      if (viewingAsset?.id === assetId) {
+        setViewingAsset(prev => prev ? { ...prev, likesCount: newCount } : null);
+      }
     } catch (e) {
       console.error(e);
     }

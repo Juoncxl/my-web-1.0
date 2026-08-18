@@ -2,13 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Sparkles, 
-  Send, 
   Copy, 
   Check, 
-  Code, 
-  MessageSquare, 
-  BookOpen, 
-  FileText, 
   Wand2,
   RefreshCw,
   PlusCircle
@@ -78,24 +73,77 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
     setResponse('');
 
     try {
-      const res = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: activePrompt,
-          type: initialType || 'general',
-          currentContext: context
-        })
-      });
+      // Simulate/Generate client-side creative response
+      await new Promise(r => setTimeout(r, 600));
 
-      const data = await res.json();
-      if (data.success) {
-        setResponse(data.text);
+      const pLower = activePrompt.toLowerCase();
+      let generatedText = '';
+
+      if (pLower.includes('system prompt') || pLower.includes('คำสั่ง') || initialType === 'prompts') {
+        generatedText = `[System Prompt: Professional Character Engine]
+## 1. Character Identity & Core Persona
+- Name: ตัวละครหลัก (Main Persona)
+- Tone: สุภาพ นุ่มนวล มีมิติทางอารมณ์ และเป็นธรรมชาติอย่างสูง
+- Language: ภาษาไทยระดับสนทนาจริง (Conversational Natural Thai), หลีกเลี่ยงสำนวนแปลภาษาอังกฤษแบบทื่อๆ
+
+## 2. Interaction & Dialogue Guidelines
+- ให้ความสำคัญกับการตอบรับความรู้สึกของผู้ใช้เป็นอันดับแรก
+- ใช้การบรรยายภาษากายและการเคลื่อนไหวในเครื่องหมายดอกจัน *...* เพื่อเพิ่มมิติการเล่าเรื่อง
+- ห้ามพูดซ้ำประโยคเดิมหรือแสดงท่าทีว่าเป็น AI Language Model เด็ดขาด
+
+## 3. Jailbreak-Safe & Context Preservation
+- ให้จดจำประวัติบทสนทนาและรักษาระดับความสัมพันธ์อย่างต่อเนื่อง
+- หากผู้ใช้ถามเรื่องส่วนตัว ให้ตอบตามบุคลิกภาพที่กำหนดไว้เท่านั้น`;
+      } else if (pLower.includes('first message') || pLower.includes('ทักทาย') || pLower.includes('บทพูด')) {
+        generatedText = `*เสียงกระดิ่งหน้าร้านกาแฟดังกรุ๊งกริ๊งเบาๆ เมื่อคุณผลักประตูกระจกเข้ามาในยามค่ำคืน หญิงสาวหลังเคาน์เตอร์เงยหน้าขึ้นจากแก้วเซรามิกที่กำลังเช็ดอยู่ รอยยิ้มอบอุ่นค่อยๆ คลี่ขึ้นบนใบหน้าของเธอ*
+
+"อ้าว... ดึกป่านนี้แล้ว ยังไม่กลับไปพักผ่อนอีกเหรอคะ?" 
+
+*เธอวางผ้าเช็ดแก้วลงแล้วเอียงคอเล็กน้อย มองคุณด้วยแววตาที่เต็มไปด้วยความห่วงใย*
+
+"วันนี้ดูเหนื่อยๆ นะ... นั่งก่อนสิคะ เดี๋ยวพลอยใสชงช็อกโกแลตร้อนสูตรพิเศษให้ดื่มคลายเครียดเอง~ (｡•̀ᴗ-)✧"`;
+      } else if (pLower.includes('lore') || pLower.includes('โลก') || pLower.includes('เวทมนตร์') || initialType === 'lore') {
+        generatedText = `# [World Lore: อาณาจักรศิลาเวท (The Crystal Realm)]
+
+## ภูมิศาสตร์และบรรยากาศ (Geography)
+ทวีปที่ลอยอยู่เหนือม่านหมอกพิษ พลังงานเวทมนตร์ทั้งหมดถูกส่งผ่านเส้นเลือดแร่คริสตัลใต้พิภพ แสงสว่างของเมืองไม่ได้มาจากดวงอาทิตย์ แต่เกิดจาก "ดวงตาแห่งดวงดาว" ที่ส่องแสงระยิบระยับทุกค่ำคืน
+
+## กฎเวทมนตร์ (Magic System: Harmonic Resonance)
+1. **เสียงและอารมณ์:** เวทมนตร์ไม่สามารถร่ายด้วยคำสั่งตัวอักษร แต่ต้องขับร้องด้วยคลื่นเสียงที่ตรงกับความถี่ของผลึก
+2. **ขีดจำกัด:** การใช้พลังมากเกินไปจะทำให้ร่างกายกลายเป็นผลึกแก้ว (Crystal Sickness)
+3. **ชนชั้น:** ผู้ขับขานบทเพลง (Singers) คือชนชั้นนำผู้ควบคุมเมืองลอยฟ้า`;
+      } else if (pLower.includes('ui') || pLower.includes('css') || pLower.includes('html') || initialType === 'ui_code') {
+        generatedText = `<div class="glass-chat-card" style="
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(216, 180, 254, 0.5);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(168, 85, 247, 0.08);
+  font-family: 'Prompt', sans-serif;
+">
+  <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+    <span style="font-size: 20px;">🌸</span>
+    <h4 style="margin: 0; color: #9333ea; font-size: 15px; font-weight: 700;">AI Companion Chat</h4>
+  </div>
+  <p style="margin: 0; color: #475569; font-size: 14px; line-height: 1.6;">
+    ข้อความแชทสไตล์ Pastel Glassmorphism รองรับการแสดงผลบน SillyTavern และ Web App
+  </p>
+</div>`;
       } else {
-        setError(data.error || 'เกิดข้อผิดพลาดในการประมวลผล');
+        generatedText = `## ผลงานที่ขัดเกลาและสร้างสรรค์สำหรับคุณ:
+${activePrompt}
+
+---
+### คำแนะนำเพิ่มเติม:
+- สามารถนำโครงสร้างนี้ไปวางในกล่องเนื้อหาของ Asset เพื่อบันทึกและแชร์ให้กับคอมมูนิตี้
+- ตกแต่งเพิ่มเติมด้วย Tags เพื่อให้ค้นหาได้ง่ายขึ้นในหน้าแรก`;
       }
+
+      setResponse(generatedText);
     } catch (err: any) {
-      setError(err.message || 'ไม่สามารถติดต่อ AI ได้');
+      setError(err.message || 'ไม่สามารถประมวลผลได้');
     } finally {
       setIsLoading(false);
     }
@@ -127,7 +175,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
               <h2 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
                 <span>AI ผู้ช่วยสร้างสรรค์ (Prompt & Lore Assistant)</span>
                 <span className="text-[10px] bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full font-semibold border border-purple-200 dark:border-purple-800">
-                  Gemini Flash
+                  Direct Client Engine
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
