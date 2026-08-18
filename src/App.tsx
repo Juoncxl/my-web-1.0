@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Asset, AssetCategory, Folder } from './types';
+import { safeFetchJson } from './lib/apiHelper';
 import { Header } from './components/Header';
 import { CategoryNav } from './components/CategoryNav';
 import { AssetCard } from './components/AssetCard';
@@ -79,10 +80,9 @@ function MainApp() {
       if (currentUser?.id) {
         headers['x-user-id'] = currentUser.id;
       }
-      const res = await fetch('/api/assets', { headers });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setAssets(data.data);
+      const res = await safeFetchJson<Asset[]>('/api/assets', { headers });
+      if (res.success && Array.isArray(res.data)) {
+        setAssets(res.data);
       }
     } catch (e) {
       console.error('Error loading assets:', e);
@@ -98,12 +98,11 @@ function MainApp() {
       return;
     }
     try {
-      const res = await fetch('/api/folders', {
+      const res = await safeFetchJson<Folder[]>('/api/folders', {
         headers: { 'x-user-id': currentUser.id }
       });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setFolders(data.data);
+      if (res.success && Array.isArray(res.data)) {
+        setFolders(res.data);
       }
     } catch (e) {
       console.error('Error loading folders:', e);
@@ -144,7 +143,7 @@ function MainApp() {
     try {
       if (editingAsset) {
         // Update existing
-        const res = await fetch(`/api/assets/${editingAsset.id}`, {
+        const res = await safeFetchJson<Asset>(`/api/assets/${editingAsset.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -152,18 +151,17 @@ function MainApp() {
           },
           body: JSON.stringify(assetData)
         });
-        const data = await res.json();
-        if (data.success) {
-          setAssets(prev => prev.map(a => (a.id === editingAsset.id ? data.data : a)));
+        if (res.success && res.data) {
+          setAssets(prev => prev.map(a => (a.id === editingAsset.id ? res.data! : a)));
           if (viewingAsset?.id === editingAsset.id) {
-            setViewingAsset(data.data);
+            setViewingAsset(res.data);
           }
           setEditingAsset(null);
           return true;
         }
       } else {
         // Create new
-        const res = await fetch('/api/assets', {
+        const res = await safeFetchJson<Asset>('/api/assets', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -176,12 +174,11 @@ function MainApp() {
             authorAvatar: currentUser.avatarUrl
           })
         });
-        const data = await res.json();
-        if (data.success) {
-          setAssets(prev => [data.data, ...prev]);
+        if (res.success && res.data) {
+          setAssets(prev => [res.data!, ...prev]);
           setIsCreateOpen(false);
           return true;
-        } else if (data.error && data.error.includes('Guest')) {
+        } else if (res.error && res.error.includes('Guest')) {
           setIsGuestLimitOpen(true);
           return false;
         }
@@ -196,12 +193,11 @@ function MainApp() {
   const handleDeleteAsset = async (assetId: string) => {
     if (!currentUser) return;
     try {
-      const res = await fetch(`/api/assets/${assetId}`, {
+      const res = await safeFetchJson(`/api/assets/${assetId}`, {
         method: 'DELETE',
         headers: { 'x-user-id': currentUser.id }
       });
-      const data = await res.json();
-      if (data.success) {
+      if (res.success) {
         setAssets(prev => prev.filter(a => a.id !== assetId));
         setViewingAsset(null);
       }
@@ -214,7 +210,7 @@ function MainApp() {
   const handleMoveToFolder = async (assetId: string, folderId: string | null): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await fetch(`/api/assets/${assetId}`, {
+      const res = await safeFetchJson<Asset>(`/api/assets/${assetId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -222,11 +218,10 @@ function MainApp() {
         },
         body: JSON.stringify({ folderId })
       });
-      const data = await res.json();
-      if (data.success) {
-        setAssets(prev => prev.map(a => (a.id === assetId ? data.data : a)));
+      if (res.success && res.data) {
+        setAssets(prev => prev.map(a => (a.id === assetId ? res.data! : a)));
         if (viewingAsset?.id === assetId) {
-          setViewingAsset(data.data);
+          setViewingAsset(res.data);
         }
         return true;
       }
@@ -240,7 +235,7 @@ function MainApp() {
   const handleCreateFolder = async (name: string, icon = '📁', color = 'purple'): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await fetch('/api/folders', {
+      const res = await safeFetchJson<Folder>('/api/folders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -248,9 +243,8 @@ function MainApp() {
         },
         body: JSON.stringify({ name, icon, color })
       });
-      const data = await res.json();
-      if (data.success) {
-        setFolders(prev => [...prev, data.data]);
+      if (res.success && res.data) {
+        setFolders(prev => [...prev, res.data!]);
         return true;
       }
     } catch (e) {
@@ -262,7 +256,7 @@ function MainApp() {
   const handleUpdateFolder = async (id: string, name: string, icon?: string, color?: string): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await fetch(`/api/folders/${id}`, {
+      const res = await safeFetchJson<Folder>(`/api/folders/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -270,9 +264,8 @@ function MainApp() {
         },
         body: JSON.stringify({ name, icon, color })
       });
-      const data = await res.json();
-      if (data.success) {
-        setFolders(prev => prev.map(f => (f.id === id ? data.data : f)));
+      if (res.success && res.data) {
+        setFolders(prev => prev.map(f => (f.id === id ? res.data! : f)));
         return true;
       }
     } catch (e) {
@@ -284,12 +277,11 @@ function MainApp() {
   const handleDeleteFolder = async (id: string): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await fetch(`/api/folders/${id}`, {
+      const res = await safeFetchJson(`/api/folders/${id}`, {
         method: 'DELETE',
         headers: { 'x-user-id': currentUser.id }
       });
-      const data = await res.json();
-      if (data.success) {
+      if (res.success) {
         setFolders(prev => prev.filter(f => f.id !== id));
         // Reset assets that belonged to deleted folder
         setAssets(prev => prev.map(a => (a.folderId === id ? { ...a, folderId: null } : a)));
@@ -307,7 +299,7 @@ function MainApp() {
   // Handle Like
   const handleLikeAsset = async (assetId: string) => {
     try {
-      await fetch(`/api/assets/${assetId}/like`, { method: 'POST' });
+      await safeFetchJson(`/api/assets/${assetId}/like`, { method: 'POST' });
     } catch (e) {
       console.error(e);
     }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuthContextType, AuthResponse } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { safeFetchJson, formatFriendlyErrorMessage } from '../lib/apiHelper';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -21,11 +22,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAuthOpen(true);
   };
 
-  // Helper to persist user and notify server
+  // Helper to persist user and notify state
   const persistSession = (user: User | null) => {
     setCurrentUser(user);
     if (user) {
-      localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(user));
+      try {
+        localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(user));
+      } catch (e) {
+        console.warn('Could not write to localStorage:', e);
+      }
     } else {
       localStorage.removeItem(LOCAL_STORAGE_SESSION_KEY);
     }
@@ -38,61 +43,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const supabase = getSupabaseClient();
         if (supabase) {
-          const { data } = await supabase.auth.getSession();
-          if (data.session?.user) {
-            const authUid = data.session.user.id;
-            // Fetch profile from supabase profiles table
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', authUid)
-              .single();
+          try {
+            const sessionRes = await supabase.auth.getSession();
+            if (sessionRes && sessionRes.data && sessionRes.data.session?.user) {
+              const authUser = sessionRes.data.session.user;
+              const authUid = authUser.id;
 
-            if (profile) {
-              const u: User = {
-                id: authUid,
-                email: data.session.user.email,
-                displayName: profile.display_name || profile.displayName || data.session.user.email?.split('@')[0] || 'Creator',
-                bio: profile.bio || '',
-                avatarUrl: profile.avatar_url || profile.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-                isGuest: false,
-                createdAt: profile.created_at || data.session.user.created_at || new Date().toISOString(),
-                provider: data.session.user.app_metadata?.provider === 'google' ? 'google' : 'email'
-              };
-              persistSession(u);
-              setIsLoading(false);
-              return;
+              // Fetch profile from supabase profiles table safely
+              const profileRes = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', authUid)
+                .single();
+
+              const profile = profileRes?.data;
+              if (profile) {
+                const u: User = {
+                  id: authUid,
+                  email: authUser.email,
+                  displayName:
+                    profile.display_name ||
+                    profile.displayName ||
+                    authUser.email?.split('@')[0] ||
+                    'Creator',
+                  bio: profile.bio || '',
+                  avatarUrl:
+                    profile.avatar_url ||
+                    profile.avatarUrl ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+                  isGuest: false,
+                  createdAt: profile.created_at || authUser.created_at || new Date().toISOString(),
+                  provider: authUser.app_metadata?.provider === 'google' ? 'google' : 'email'
+                };
+                persistSession(u);
+                setIsLoading(false);
+                return;
+              }
             }
+          } catch (supInitErr) {
+            console.warn('Supabase session fetch skipped or failed:', formatFriendlyErrorMessage(supInitErr));
           }
         }
 
         // Restore from Local Storage session & sync with server database
         const savedSession = localStorage.getItem(LOCAL_STORAGE_SESSION_KEY);
         if (savedSession) {
-          const parsed = JSON.parse(savedSession);
-          if (parsed && parsed.id) {
-            if (parsed.isGuest) {
-              setCurrentUser(parsed);
-            } else {
-              // Fetch latest profile from server to guarantee sync
-              try {
-                const res = await fetch(`/api/profiles/${parsed.id}`);
-                const data = await res.json();
-                if (data.success && data.data) {
+          try {
+            const parsed = JSON.parse(savedSession);
+            if (parsed && parsed.id) {
+              if (parsed.isGuest) {
+                setCurrentUser(parsed);
+              } else {
+                // Fetch latest profile from server to guarantee sync using safeFetchJson
+                const res = await safeFetchJson<any>(`/api/profiles/${parsed.id}`);
+                if (res.success && res.data) {
                   const syncedUser: User = {
                     ...parsed,
-                    displayName: data.data.displayName || parsed.displayName,
-                    bio: data.data.bio !== undefined ? data.data.bio : parsed.bio,
-                    avatarUrl: data.data.avatarUrl || parsed.avatarUrl
+                    displayName: res.data.displayName || parsed.displayName,
+                    bio: res.data.bio !== undefined ? res.data.bio : parsed.bio,
+                    avatarUrl: res.data.avatarUrl || parsed.avatarUrl
                   };
                   persistSession(syncedUser);
                 } else {
                   setCurrentUser(parsed);
                 }
-              } catch {
-                setCurrentUser(parsed);
               }
             }
+          } catch {
+            // Bad local JSON, clear it
+            localStorage.removeItem(LOCAL_STORAGE_SESSION_KEY);
           }
         } else {
           // Default initial friendly Guest session
@@ -100,7 +119,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: `guest_${Math.random().toString(36).substring(2, 9)}`,
             displayName: 'นักเขียนนิรนาม 🌸 (Guest)',
             bio: 'ยินดีต้อนรับสู่ Creator Vault! ทดลองสร้างและบันทึกผลงานได้ทันที',
-            avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            avatarUrl:
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
             isGuest: true,
             createdAt: new Date().toISOString(),
             provider: 'guest'
@@ -108,7 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           persistSession(defaultGuest);
         }
       } catch (err) {
-        console.error('Session initialization error:', err);
+        console.error('Session initialization error:', formatFriendlyErrorMessage(err));
       } finally {
         setIsLoading(false);
       }
@@ -124,9 +144,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cleanEmail = email.toLowerCase().trim();
       const supabase = getSupabaseClient();
 
+      // Attempt Supabase Auth if client is configured
       if (supabase) {
         try {
-          const { data, error } = await supabase.auth.signUp({
+          const authRes = await supabase.auth.signUp({
             email: cleanEmail,
             password: pass,
             options: {
@@ -136,31 +157,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           });
 
-          if (error) throw error;
-
-          if (data.user) {
+          if (authRes?.error) {
+            console.warn('Supabase signUp reported error:', authRes.error);
+          } else if (authRes && authRes.data && authRes.data.user) {
+            const authUser = authRes.data.user;
             const newUser: User = {
-              id: data.user.id,
+              id: authUser.id,
               email: cleanEmail,
               displayName: cleanEmail.split('@')[0],
               bio: 'นักสร้างบอทและนักเขียน ✦ สมาชิกใหม่ของ Creator Vault',
-              avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+              avatarUrl:
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
               isGuest: false,
-              createdAt: data.user.created_at || new Date().toISOString(),
+              createdAt: authUser.created_at || new Date().toISOString(),
               provider: 'email'
             };
 
-            // Save to Supabase profiles table
-            await supabase.from('profiles').upsert({
-              id: newUser.id,
-              display_name: newUser.displayName,
-              bio: newUser.bio,
-              avatar_url: newUser.avatarUrl,
-              is_guest: false
-            });
+            // Save to Supabase profiles table safely
+            try {
+              await supabase.from('profiles').upsert({
+                id: newUser.id,
+                display_name: newUser.displayName,
+                bio: newUser.bio,
+                avatar_url: newUser.avatarUrl,
+                is_guest: false
+              });
+            } catch (pErr) {
+              console.warn('Could not upsert Supabase profile:', pErr);
+            }
 
-            // Also mirror to server DB
-            await fetch(`/api/profiles/${newUser.id}`, {
+            // Mirror to server DB
+            await safeFetchJson(`/api/profiles/${newUser.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(newUser)
@@ -172,29 +199,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return { success: true, user: newUser, isNewUser: true };
           }
         } catch (supabaseErr: any) {
-          console.warn('Supabase signup error, falling back to server DB:', supabaseErr);
+          console.warn('Supabase signup threw error, falling back to Server DB:', formatFriendlyErrorMessage(supabaseErr));
         }
       }
 
-      // Server DB Auth
-      const res = await fetch('/api/auth/signup', {
+      // Server DB Auth (Safe Fetch JSON)
+      const res = await safeFetchJson<{ user: User; message?: string }>('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail, password: pass })
       });
-      const data = await res.json();
 
-      if (!data.success) {
-        return { success: false, error: data.error || 'การสมัครสมาชิกไม่สำเร็จ' };
+      if (!res.success || !res.data?.user) {
+        return {
+          success: false,
+          error: res.error || 'การสมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
+        };
       }
 
-      persistSession(data.user);
+      persistSession(res.data.user);
       setIsAuthOpen(false);
       setIsOnboardingOpen(true); // Open profile setup onboarding immediately
-      return { success: true, user: data.user, isNewUser: true };
+      return { success: true, user: res.data.user, isNewUser: true };
     } catch (err: any) {
       console.error('Sign up error:', err);
-      return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการลงทะเบียน' };
+      return { success: false, error: formatFriendlyErrorMessage(err) };
     } finally {
       setIsLoading(false);
     }
@@ -209,27 +238,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (supabase) {
         try {
-          const { data, error } = await supabase.auth.signInWithPassword({
+          const authRes = await supabase.auth.signInWithPassword({
             email: cleanEmail,
             password: pass
           });
 
-          if (!error && data.user) {
-            // Fetch profile from supabase profiles table
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', data.user.id)
-              .single();
+          if (authRes && !authRes.error && authRes.data?.user) {
+            const authUser = authRes.data.user;
+
+            // Fetch profile from supabase profiles table safely
+            let profile: any = null;
+            try {
+              const profileRes = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', authUser.id)
+                .single();
+              profile = profileRes?.data;
+            } catch (profErr) {
+              console.warn('Supabase profile fetch error:', profErr);
+            }
 
             const loggedInUser: User = {
-              id: data.user.id,
+              id: authUser.id,
               email: cleanEmail,
-              displayName: profile?.display_name || profile?.displayName || data.user.user_metadata?.displayName || cleanEmail.split('@')[0],
-              bio: profile?.bio || data.user.user_metadata?.bio || '',
-              avatarUrl: profile?.avatar_url || profile?.avatarUrl || data.user.user_metadata?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+              displayName:
+                profile?.display_name ||
+                profile?.displayName ||
+                authUser.user_metadata?.displayName ||
+                cleanEmail.split('@')[0],
+              bio: profile?.bio || authUser.user_metadata?.bio || '',
+              avatarUrl:
+                profile?.avatar_url ||
+                profile?.avatarUrl ||
+                authUser.user_metadata?.avatarUrl ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
               isGuest: false,
-              createdAt: profile?.created_at || data.user.created_at || new Date().toISOString(),
+              createdAt: profile?.created_at || authUser.created_at || new Date().toISOString(),
               provider: 'email'
             };
 
@@ -238,28 +283,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return { success: true, user: loggedInUser, isNewUser: false };
           }
         } catch (supabaseErr) {
-          console.warn('Supabase login fallback:', supabaseErr);
+          console.warn('Supabase login fallback:', formatFriendlyErrorMessage(supabaseErr));
         }
       }
 
       // Server DB Auth
-      const res = await fetch('/api/auth/login', {
+      const res = await safeFetchJson<{ user: User; message?: string }>('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail, password: pass })
       });
-      const data = await res.json();
 
-      if (!data.success) {
-        return { success: false, error: data.error || 'เข้าสู่ระบบไม่สำเร็จ' };
+      if (!res.success || !res.data?.user) {
+        return {
+          success: false,
+          error: res.error || 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลหรือรหัสผ่าน'
+        };
       }
 
-      persistSession(data.user);
+      persistSession(res.data.user);
       setIsAuthOpen(false);
-      return { success: true, user: data.user, isNewUser: false };
+      return { success: true, user: res.data.user, isNewUser: false };
     } catch (err: any) {
       console.error('Login error:', err);
-      return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ' };
+      return { success: false, error: formatFriendlyErrorMessage(err) };
     } finally {
       setIsLoading(false);
     }
@@ -272,47 +319,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const supabase = getSupabaseClient();
       if (supabase) {
         try {
-          const { data, error } = await supabase.auth.signInWithOAuth({
+          const authRes = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
               redirectTo: window.location.origin
             }
           });
-          if (error) throw error;
+          if (authRes?.error) {
+            console.warn('Supabase Google OAuth returned error:', authRes.error);
+          }
         } catch (supGoogleErr) {
-          console.warn('Supabase Google OAuth fallback:', supGoogleErr);
+          console.warn('Supabase Google OAuth fallback:', formatFriendlyErrorMessage(supGoogleErr));
         }
       }
 
       // Google OAuth simulation/flow for preview environment
       const promptEmail = `creator.${Math.random().toString(36).substring(2, 6)}@gmail.com`;
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: promptEmail,
-          displayName: 'Google Creator 🌸',
-          avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          googleId: `g_${Date.now()}`
-        })
-      });
-      const data = await res.json();
+      const res = await safeFetchJson<{ user: User; isNewUser: boolean; message?: string }>(
+        '/api/auth/google',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: promptEmail,
+            displayName: 'Google Creator 🌸',
+            avatarUrl:
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            googleId: `g_${Date.now()}`
+          })
+        }
+      );
 
-      if (!data.success) {
-        return { success: false, error: data.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ' };
+      if (!res.success || !res.data?.user) {
+        return {
+          success: false,
+          error: res.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ'
+        };
       }
 
-      persistSession(data.user);
+      persistSession(res.data.user);
       setIsAuthOpen(false);
 
-      if (data.isNewUser) {
+      if (res.data.isNewUser) {
         setIsOnboardingOpen(true);
       }
 
-      return { success: true, user: data.user, isNewUser: data.isNewUser };
+      return { success: true, user: res.data.user, isNewUser: res.data.isNewUser };
     } catch (err: any) {
       console.error('Google login error:', err);
-      return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google' };
+      return { success: false, error: formatFriendlyErrorMessage(err) };
     } finally {
       setIsLoading(false);
     }
@@ -324,7 +379,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       id: `guest_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       displayName: customName || 'นักเขียนนิรนาม 🌸 (Guest)',
       bio: 'บัญชี Guest ชั่วคราว — สามารถทดลองสร้างผลงานได้ 2 ชิ้น',
-      avatarUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+      avatarUrl:
+        'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
       isGuest: true,
       createdAt: new Date().toISOString(),
       provider: 'guest'
@@ -339,14 +395,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => {
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase.auth.signOut().catch(() => {});
+      try {
+        supabase.auth.signOut().catch(() => {});
+      } catch (e) {
+        console.warn('Supabase signout catch:', e);
+      }
     }
 
     const defaultGuest: User = {
       id: `guest_${Math.random().toString(36).substring(2, 9)}`,
       displayName: 'นักเขียนนิรนาม 🌸 (Guest)',
       bio: 'ยินดีต้อนรับสู่ Creator Vault! ทดลองสร้างและบันทึกผลงานได้ทันที',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      avatarUrl:
+        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       isGuest: true,
       createdAt: new Date().toISOString(),
       provider: 'guest'
@@ -355,19 +416,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // 6. Update Profile Flow (Saved to Supabase profiles & backend database)
-  const updateProfile = async (data: { displayName?: string; bio?: string; avatarUrl?: string }): Promise<boolean> => {
+  const updateProfile = async (data: {
+    displayName?: string;
+    bio?: string;
+    avatarUrl?: string;
+  }): Promise<boolean> => {
     if (!currentUser) return false;
 
     const updatedUser: User = {
       ...currentUser,
-      displayName: data.displayName !== undefined ? data.displayName.trim() : currentUser.displayName,
+      displayName:
+        data.displayName !== undefined ? data.displayName.trim() : currentUser.displayName,
       bio: data.bio !== undefined ? data.bio.trim() : currentUser.bio,
       avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : currentUser.avatarUrl
     };
 
     persistSession(updatedUser);
 
-    // Save to Supabase profiles table
+    // Save to Supabase profiles table if configured
     const supabase = getSupabaseClient();
     if (supabase && !currentUser.isGuest) {
       try {
@@ -379,13 +445,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           is_guest: false
         });
       } catch (supErr) {
-        console.warn('Supabase profile sync error:', supErr);
+        console.warn('Supabase profile sync error:', formatFriendlyErrorMessage(supErr));
       }
     }
 
     // Save to Server database
     try {
-      await fetch(`/api/profiles/${currentUser.id}`, {
+      await safeFetchJson(`/api/profiles/${currentUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -398,7 +464,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // 7. Change Password Flow
-  const changePassword = async (currentPass: string, newPass: string): Promise<{ success: boolean; error?: string }> => {
+  const changePassword = async (
+    currentPass: string,
+    newPass: string
+  ): Promise<{ success: boolean; error?: string }> => {
     if (!currentUser || currentUser.isGuest) {
       return { success: false, error: 'คุณต้องเข้าสู่ระบบด้วยบัญชีสมาชิกเพื่อเปลี่ยนรหัสผ่าน' };
     }
@@ -406,19 +475,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { error } = await supabase.auth.updateUser({
+        const supRes = await supabase.auth.updateUser({
           password: newPass
         });
-        if (!error) {
+        if (supRes && !supRes.error) {
           return { success: true };
         }
       } catch (e) {
-        console.warn('Supabase password update fallback:', e);
+        console.warn('Supabase password update fallback:', formatFriendlyErrorMessage(e));
       }
     }
 
     try {
-      const res = await fetch('/api/auth/change-password', {
+      const res = await safeFetchJson('/api/auth/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -426,13 +495,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass })
       });
-      const data = await res.json();
-      if (!data.success) {
-        return { success: false, error: data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ' };
+
+      if (!res.success) {
+        return { success: false, error: res.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ' };
       }
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน' };
+      return { success: false, error: formatFriendlyErrorMessage(err) };
     }
   };
 
@@ -471,4 +540,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

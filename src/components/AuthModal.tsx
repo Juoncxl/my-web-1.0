@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Mail, Lock, Sparkles, LogIn, UserPlus, AlertCircle, CheckCircle2, Shield } from 'lucide-react';
+import { X, Mail, Lock, Sparkles, LogIn, UserPlus, AlertCircle, CheckCircle2, Shield, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { formatFriendlyErrorMessage } from '../lib/apiHelper';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -46,13 +47,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setError('');
     try {
       const res = await loginWithEmail(email, password);
-      if (res.success) {
+      if (res && res.success) {
         onClose();
       } else {
-        setError(res.error || 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลหรือรหัสผ่าน');
+        setError(formatFriendlyErrorMessage(res?.error || 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลหรือรหัสผ่าน'));
       }
     } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
+      setError(formatFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -77,13 +78,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setError('');
     try {
       const res = await signUpWithEmail(email, password);
-      if (res.success) {
+      if (res && res.success) {
         onClose();
       } else {
-        setError(res.error || 'การลงทะเบียนไม่สำเร็จ');
+        setError(formatFriendlyErrorMessage(res?.error || 'การลงทะเบียนไม่สำเร็จ'));
       }
     } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดในการสมัครสมาชิก');
+      setError(formatFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -94,13 +95,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setError('');
     try {
       const res = await loginWithGoogle();
-      if (res.success) {
+      if (res && res.success) {
         onClose();
       } else {
-        setError(res.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ');
+        setError(formatFriendlyErrorMessage(res?.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ'));
       }
     } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google');
+      setError(formatFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -113,7 +114,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       await loginAsGuest(guestName.trim() || 'นักเขียนนิรนาม 🌸 (Guest)');
       onClose();
     } catch (err: any) {
-      setError(err.message || 'เข้าสู่ระบบ Guest ไม่สำเร็จ');
+      setError(formatFriendlyErrorMessage(err));
     } finally {
       setIsLoading(false);
     }

@@ -14,6 +14,8 @@ export const SupabaseInfoModal: React.FC<SupabaseInfoModalProps> = ({ isOpen, on
   const [supabaseKey, setSupabaseKey] = useState(localStorage.getItem('creator_vault_supabase_key') || '');
   const [savedMsg, setSavedMsg] = useState(false);
 
+  const [errorMsg, setErrorMsg] = useState('');
+
   if (!isOpen) return null;
 
   const handleCopySchema = () => {
@@ -24,9 +26,14 @@ export const SupabaseInfoModal: React.FC<SupabaseInfoModalProps> = ({ isOpen, on
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    saveCustomSupabaseConfig(supabaseUrl.trim(), supabaseKey.trim());
-    setSavedMsg(true);
-    setTimeout(() => setSavedMsg(false), 2500);
+    setErrorMsg('');
+    const result = saveCustomSupabaseConfig(supabaseUrl.trim(), supabaseKey.trim());
+    if (result.success) {
+      setSavedMsg(true);
+      setTimeout(() => setSavedMsg(false), 2500);
+    } else {
+      setErrorMsg(result.error || 'การตั้งค่าไม่ถูกต้อง');
+    }
   };
 
   return (
@@ -112,6 +119,12 @@ export const SupabaseInfoModal: React.FC<SupabaseInfoModalProps> = ({ isOpen, on
                 className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100"
               />
             </div>
+
+            {errorMsg && (
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+                ⚠️ {errorMsg}
+              </p>
+            )}
 
             <div className="flex justify-end gap-2">
               <button
