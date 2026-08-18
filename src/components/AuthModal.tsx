@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Mail, Lock, User, Sparkles, LogIn, UserCheck, Shield } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Mail, Lock, Sparkles, LogIn, UserPlus, AlertCircle, CheckCircle2, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
@@ -8,35 +8,99 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { loginWithEmail, loginAsGuest } = useAuth();
+  const { 
+    loginWithEmail, 
+    signUpWithEmail, 
+    loginWithGoogle, 
+    loginAsGuest, 
+    authDefaultTab 
+  } = useAuth();
 
-  const [tab, setTab] = useState<'email' | 'guest'>('email');
+  const [mode, setMode] = useState<'login' | 'signup' | 'guest'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [guestName, setGuestName] = useState('นักเขียนนิรนาม 🌸');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  // Sync mode with authDefaultTab when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setMode(authDefaultTab || 'login');
+      setError('');
+      setSuccessMsg('');
+    }
+  }, [isOpen, authDefaultTab]);
 
   if (!isOpen) return null;
 
-  const handleEmailSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('กรุณากรอกอีเมลและรหัสผ่าน');
+      setError('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน');
       return;
     }
     setIsLoading(true);
     setError('');
     try {
-      const ok = await loginWithEmail(email, password, name);
-      if (ok) {
+      const res = await loginWithEmail(email, password);
+      if (res.success) {
         onClose();
       } else {
-        setError('เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล');
+        setError(res.error || 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลหรือรหัสผ่าน');
       }
     } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาด');
+      setError(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSignUpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setError('กรุณากรอกอีเมลและรหัสผ่าน');
+      return;
+    }
+    if (password.length < 6) {
+      setError('รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    try {
+      const res = await signUpWithEmail(email, password);
+      if (res.success) {
+        onClose();
+      } else {
+        setError(res.error || 'การลงทะเบียนไม่สำเร็จ');
+      }
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการสมัครสมาชิก');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSubmit = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const res = await loginWithGoogle();
+      if (res.success) {
+        onClose();
+      } else {
+        setError(res.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ');
+      }
+    } catch (err: any) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google');
     } finally {
       setIsLoading(false);
     }
@@ -56,136 +120,268 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       
-      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-purple-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 transition-colors">
         
         {/* Header */}
-        <div className="p-6 pb-4 border-b border-purple-50 bg-gradient-to-r from-purple-50/70 via-pink-50/50 to-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center text-xl shadow-sm">
+        <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center text-xl shadow-md shadow-purple-500/20">
               🌸
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-800">
-                เข้าสู่ระบบ Creator Vault
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
+                {mode === 'login' ? 'เข้าสู่ระบบ Creator Vault' : mode === 'signup' ? 'สมัครสมาชิกผู้สร้าง' : 'โหมดทดลองใช้งาน (Guest)'}
               </h2>
-              <p className="text-xs text-slate-500">
-                คลังผลงานสำหรับนักสร้างแชทบอท & นักเขียน
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {mode === 'login' ? 'เชื่อมต่อและซิงค์ผลงานของคุณบนทุกอุปกรณ์' : mode === 'signup' ? 'บันทึก Character, Lore & Code ลง Cloud ถาวร' : 'ทดลองสร้างผลงานได้ 2 ชิ้นโดยไม่ต้องสมัคร'}
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full"
+            className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="px-6 pt-4 flex gap-2">
+        {/* Mode Switcher Tabs */}
+        <div className="px-6 pt-4 grid grid-cols-3 gap-1.5 bg-slate-50/60 dark:bg-slate-900/60 p-2 m-4 mb-0 rounded-2xl border border-slate-100 dark:border-slate-800">
           <button
-            onClick={() => setTab('email')}
-            className={`flex-1 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-              tab === 'email'
-                ? 'bg-purple-600 text-white shadow-sm shadow-purple-200'
-                : 'bg-purple-50/70 text-slate-600 hover:bg-purple-100/70'
+            type="button"
+            onClick={() => { setMode('login'); setError(''); }}
+            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              mode === 'login'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Mail className="w-3.5 h-3.5" />
-            <span>อีเมล & รหัสผ่าน</span>
+            <LogIn className="w-3.5 h-3.5" />
+            <span>เข้าสู่ระบบ</span>
           </button>
 
           <button
-            onClick={() => setTab('guest')}
-            className={`flex-1 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-              tab === 'guest'
-                ? 'bg-pink-500 text-white shadow-sm shadow-pink-200'
-                : 'bg-pink-50/70 text-slate-600 hover:bg-pink-100/70'
+            type="button"
+            onClick={() => { setMode('signup'); setError(''); }}
+            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              mode === 'signup'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>สมัครสมาชิก</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setMode('guest'); setError(''); }}
+            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              mode === 'guest'
+                ? 'bg-pink-500 text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>เข้าใช้ทันที (Guest)</span>
+            <span>Guest</span>
           </button>
         </div>
 
-        {/* Body Form */}
+        {/* Form Body */}
         <div className="p-6 pt-4">
           
           {error && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-600 font-medium">
-              {error}
+            <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl text-xs text-rose-600 dark:text-rose-300 flex items-start gap-2 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
             </div>
           )}
 
-          {tab === 'email' ? (
-            <form onSubmit={handleEmailSubmit} className="space-y-3.5">
-              
+          {successMsg && (
+            <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs text-emerald-600 dark:text-emerald-300 flex items-start gap-2 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          {/* Social Login Button (Google Only - No Apple ID) */}
+          {mode !== 'guest' && (
+            <div className="space-y-3 mb-4">
+              <button
+                type="button"
+                onClick={handleGoogleSubmit}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2.5 shadow-xs active:scale-98 disabled:opacity-50"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                </svg>
+                <span>Continue with Google</span>
+              </button>
+
+              <div className="relative flex items-center justify-center">
+                <div className="border-t border-slate-200 dark:border-slate-800 w-full"></div>
+                <span className="bg-white dark:bg-slate-900 px-3 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider relative">
+                  หรือใช้อีเมล
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Mode 1: Log In */}
+          {mode === 'login' && (
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">
-                  ชื่อแสดงของคุณ (Display Name)
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  อีเมล (Email)
                 </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="เช่น: MochiWriterr 🌸"
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-purple-100 rounded-xl text-xs focus:ring-2 focus:ring-purple-300 focus:bg-white text-slate-800"
-                />
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">
-                  อีเมล (Email) <span className="text-rose-500">*</span>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  รหัสผ่าน (Password)
                 </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-purple-100 rounded-xl text-xs focus:ring-2 focus:ring-purple-300 focus:bg-white text-slate-800"
-                  required
-                />
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                    required
+                  />
+                </div>
               </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">
-                  รหัสผ่าน (Password) <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-purple-100 rounded-xl text-xs focus:ring-2 focus:ring-purple-300 focus:bg-white text-slate-800"
-                  required
-                />
-              </div>
-
-              <p className="text-[11px] text-slate-400">
-                💡 หากยังไม่มีบัญชี ระบบจะสร้างบัญชีใหม่ให้อัตโนมัติด้วยอีเมลและรหัสผ่านที่คุณระบุ
-              </p>
 
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 mt-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 mt-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogIn className="w-4 h-4" />
-                <span>{isLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ / ลงทะเบียน'}</span>
+                <span>{isLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ (Log In)'}</span>
               </button>
+
+              <div className="text-center pt-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  ยังไม่มีบัญชีสมาชิกใช่ไหม?{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setMode('signup'); setError(''); }}
+                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline"
+                  >
+                    สมัครสมาชิกที่นี่
+                  </button>
+                </p>
+              </div>
             </form>
-          ) : (
-            <form onSubmit={handleGuestSubmit} className="space-y-4">
-              
-              <div className="p-4 bg-pink-50/60 rounded-2xl border border-pink-100 text-xs text-pink-900 leading-relaxed">
-                🌸 <strong>โหมด Guest (Anonymous)</strong> ช่วยให้คุณสามารถทดลองสร้างผลงาน บันทึก Prompt และทดสอบระบบได้ทันทีโดยไม่ต้องสมัครสมาชิก
+          )}
+
+          {/* Mode 2: Sign Up */}
+          {mode === 'signup' && (
+            <form onSubmit={handleSignUpSubmit} className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  อีเมล (Email) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  รหัสผ่าน (Password) <span className="text-rose-500">* (อย่างน้อย 6 ตัวอักษร)</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  ยืนยันรหัสผ่าน (Confirm Password) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 mt-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>{isLoading ? 'กำลังสร้างบัญชี...' : 'สมัครสมาชิก & ตั้งค่าโปรไฟล์ (Sign Up)'}</span>
+              </button>
+
+              <div className="text-center pt-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  มีบัญชีอยู่แล้วใช่ไหม?{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setMode('login'); setError(''); }}
+                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline"
+                  >
+                    เข้าสู่ระบบที่นี่
+                  </button>
+                </p>
+              </div>
+            </form>
+          )}
+
+          {/* Mode 3: Guest */}
+          {mode === 'guest' && (
+            <form onSubmit={handleGuestSubmit} className="space-y-4">
+              <div className="p-4 bg-pink-50/80 dark:bg-pink-950/40 rounded-2xl border border-pink-100 dark:border-pink-900/60 text-xs text-pink-900 dark:text-pink-200 leading-relaxed">
+                🌸 <strong>โหมด Guest (Anonymous)</strong> ช่วยให้คุณสามารถทดลองสร้าง Character Card, บันทึก Prompt และทดลองใช้ AI Assistant ได้ทันที (จำกัดผลงาน 2 ชิ้นในเซสชันชั่วคราว)
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                   ตั้งชื่อชั่วคราวสำหรับผลงาน
                 </label>
                 <input
@@ -193,16 +389,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   value={guestName}
                   onChange={(e) => setGuestName(e.target.value)}
                   placeholder="เช่น: นักเขียนนิรนาม 🌸"
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-purple-100 rounded-xl text-xs focus:ring-2 focus:ring-purple-300 focus:bg-white text-slate-800"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-pink-200 active:scale-95 flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-pink-200 dark:shadow-pink-950/50 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
               >
-                <UserCheck className="w-4 h-4" />
+                <Sparkles className="w-4 h-4" />
                 <span>เริ่มใช้งานในโหมด Guest ทันที</span>
               </button>
             </form>

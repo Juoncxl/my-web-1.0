@@ -13,6 +13,7 @@ interface AssetCardProps {
   onSelectTag?: (tag: string) => void;
   onOpenMoveToFolder?: (asset: Asset) => void;
   folderName?: string;
+  folderIcon?: string;
   isOwner?: boolean;
 }
 
@@ -24,6 +25,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   onSelectTag,
   onOpenMoveToFolder,
   folderName,
+  folderIcon,
   isOwner = false
 }) => {
   const [copied, setCopied] = useState(false);

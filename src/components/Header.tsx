@@ -28,7 +28,9 @@ interface HeaderProps {
   onOpenCreateModal: () => void;
   onOpenAIModal: () => void;
   onOpenAuthModal: () => void;
+  onOpenSignUpModal?: () => void;
   onOpenProfileModal: () => void;
+  onOpenSettingsModal?: () => void;
   onOpenSupabaseModal: () => void;
 }
 
@@ -40,7 +42,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateModal,
   onOpenAIModal,
   onOpenAuthModal,
+  onOpenSignUpModal,
   onOpenProfileModal,
+  onOpenSettingsModal,
   onOpenSupabaseModal
 }) => {
   const { currentUser, logout } = useAuth();
@@ -235,13 +239,25 @@ export const Header: React.FC<HeaderProps> = ({
 
                     <button
                       onClick={() => {
+                        if (onOpenSettingsModal) onOpenSettingsModal();
+                        else onOpenProfileModal();
+                        setDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
+                    >
+                      <Settings className="w-4 h-4 text-purple-500" />
+                      <span>ตั้งค่าบัญชี & รหัสผ่าน (Settings)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
                         onOpenProfileModal();
                         setDropdownOpen(false);
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
                     >
-                      <Settings className="w-4 h-4 text-slate-400" />
-                      <span>แก้ไขโปรไฟล์ & รูปประจำตัว</span>
+                      <UserIcon className="w-4 h-4 text-slate-400" />
+                      <span>แก้ไขโปรไฟล์ด่วน (Edit Profile)</span>
                     </button>
 
                     <button
@@ -252,22 +268,35 @@ export const Header: React.FC<HeaderProps> = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-400 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/50 rounded-xl transition-colors text-left"
                     >
                       <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                      <span>Supabase & RLS Security</span>
+                      <span>Supabase Cloud & Data Sync</span>
                     </button>
                   </div>
 
-                  <div className="border-t border-purple-50 dark:border-purple-950 my-1 pt-1">
+                  <div className="border-t border-purple-50 dark:border-purple-950 my-1 pt-1 space-y-0.5">
                     {currentUser?.isGuest ? (
-                      <button
-                        onClick={() => {
-                          onOpenAuthModal();
-                          setDropdownOpen(false);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950 rounded-xl transition-colors text-left"
-                      >
-                        <LogIn className="w-4 h-4" />
-                        <span>เข้าสู่ระบบ / ลงทะเบียน</span>
-                      </button>
+                      <>
+                        <button
+                          onClick={() => {
+                            onOpenAuthModal();
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950 rounded-xl transition-colors text-left"
+                        >
+                          <LogIn className="w-4 h-4" />
+                          <span>เข้าสู่ระบบ (Log In)</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (onOpenSignUpModal) onOpenSignUpModal();
+                            else onOpenAuthModal();
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-950 rounded-xl transition-colors text-left"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>สมัครสมาชิกใหม่ (Sign Up)</span>
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => {

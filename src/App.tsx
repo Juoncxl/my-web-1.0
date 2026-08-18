@@ -9,12 +9,15 @@ import { AssetViewModal } from './components/AssetViewModal';
 import { AssetEditorModal } from './components/AssetEditorModal';
 import { AIAssistantModal } from './components/AIAssistantModal';
 import { AuthModal } from './components/AuthModal';
+import { OnboardingModal } from './components/OnboardingModal';
+import { SettingsModal } from './components/SettingsModal';
 import { ProfileEditModal } from './components/ProfileEditModal';
 import { SupabaseInfoModal } from './components/SupabaseInfoModal';
 import { PersonalVaultHeader } from './components/PersonalVaultHeader';
 import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { GuestLimitModal } from './components/GuestLimitModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { 
   Sparkles, 
   Globe, 
@@ -30,7 +33,17 @@ import {
 } from 'lucide-react';
 
 function MainApp() {
-  const { currentUser, isLoading: authLoading } = useAuth();
+  const { 
+    currentUser, 
+    isLoading: authLoading,
+    isAuthOpen,
+    setIsAuthOpen,
+    openAuthModal,
+    isOnboardingOpen,
+    setIsOnboardingOpen,
+    isSettingsOpen,
+    setIsSettingsOpen
+  } = useAuth();
 
   // Navigation State
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
@@ -50,7 +63,6 @@ function MainApp() {
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
@@ -397,8 +409,10 @@ function MainApp() {
           setAiContext(null);
           setIsAIOpen(true);
         }}
-        onOpenAuthModal={() => setIsAuthOpen(true)}
+        onOpenAuthModal={() => openAuthModal('login')}
+        onOpenSignUpModal={() => openAuthModal('signup')}
         onOpenProfileModal={() => setIsProfileOpen(true)}
+        onOpenSettingsModal={() => setIsSettingsOpen(true)}
         onOpenSupabaseModal={() => setIsSupabaseOpen(true)}
       />
 
@@ -412,9 +426,8 @@ function MainApp() {
             publicCount={vaultStats.publicCount}
             privateCount={vaultStats.privateCount}
             folders={folders}
-            userAssets={assets.filter(a => a.userId === currentUser?.id)}
             selectedFolderId={selectedFolderId}
-            onSelectFolderId={setSelectedFolderId}
+            onSelectFolder={setSelectedFolderId}
             onOpenFolderManager={() => setIsFolderManagerOpen(true)}
             onEditProfile={() => setIsProfileOpen(true)}
             onCreateAsset={handleOpenCreateModal}
@@ -647,6 +660,10 @@ function MainApp() {
         onClose={() => setIsAuthOpen(false)}
       />
 
+      <OnboardingModal />
+
+      <SettingsModal />
+
       <ProfileEditModal
         isOpen={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
@@ -663,10 +680,12 @@ function MainApp() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <MainApp />
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <MainApp />
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

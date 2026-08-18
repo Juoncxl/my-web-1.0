@@ -59,8 +59,18 @@ interface UserProfile {
   createdAt: string;
 }
 
+interface AccountRecord {
+  email: string;
+  password?: string;
+  userId: string;
+  googleId?: string;
+  createdAt: string;
+}
+
 interface DBStructure {
   users: Record<string, UserProfile>;
+  profiles?: Record<string, UserProfile>;
+  accounts?: Record<string, AccountRecord>;
   assets: AssetRecord[];
   folders: FolderRecord[];
 }
@@ -294,6 +304,15 @@ function loadDB(): DBStructure {
       const raw = fs.readFileSync(DB_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (!parsed.folders) parsed.folders = [];
+      if (!parsed.accounts) parsed.accounts = {};
+      if (!parsed.profiles) parsed.profiles = {};
+      if (!parsed.users) parsed.users = {};
+      // Sync profiles and users
+      Object.keys(parsed.users).forEach(uid => {
+        if (!parsed.profiles[uid]) {
+          parsed.profiles[uid] = parsed.users[uid];
+        }
+      });
       return parsed;
     }
   } catch (err) {
@@ -731,11 +750,261 @@ async function startServer() {
     res.json({ success: true, likesCount: asset.likesCount });
   });
 
-  // User Profile Endpoints
+  // Auth Endpoints: Sign Up
+  app.post("/api/auth/signup", (req, res) => {
+    const { email, password, displayName } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: "กรุณาระบุอีเมลและรหัสผ่าน" });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, error: "รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const db = loadDB();
+    db.accounts = db.accounts || {};
+    db.profiles = db.profiles || {};
+    db.users = db.users || {};
+
+    // Check if account already exists
+    if (db.accounts[cleanEmail]) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "อีเมลนี้ถูกลงทะเบียนไว้แล้วในระบบ กรุณาเข้าสู่ระบบ (Log In)" 
+      });
+    }
+
+    // Deterministic unique user UID (similar to auth.uid in Supabase)
+    const userId = `usr_${Buffer.from(cleanEmail).toString("hex").substring(0, 16)}`;
+
+    // Create account record
+    db.accounts[cleanEmail] = {
+      email: cleanEmail,
+      password: String(password),
+      userId,
+      createdAt: new Date().toISOString()
+    };
+
+    // Initial Profile in profiles / users table
+    const newProfile: UserProfile = {
+      id: userId,
+      email: cleanEmail,
+      displayName: displayName?.trim() || cleanEmail.split("@")[0],
+      bio: "นักสร้างบอทและนักเขียน ✦ สมาชิกใหม่ของ Creator Vault",
+      avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`,
+      isGuest: false,
+      createdAt: new Date().toISOString()
+    };
+
+    db.profiles[userId] = newProfile;
+    db.users[userId] = newProfile;
+
+    saveDB(db);
+
+    res.json({
+      success: true,
+      user: newProfile,
+      isNewUser: true,
+      message: "ลงทะเบียนสมาชิกใหม่สำเร็จ กรุณาตั้งค่าโปรไฟล์"
+    });
+  });
+
+  // Auth Endpoints: Log In
+  app.post("/api/auth/login", (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: "กรุณาระบุอีเมลและรหัสผ่าน" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const db = loadDB();
+    db.accounts = db.accounts || {};
+    db.profiles = db.profiles || {};
+    db.users = db.users || {};
+
+    const account = db.accounts[cleanEmail];
+    if (!account) {
+      return res.status(401).json({ 
+        success: false, 
+        error: "ไม่พบบัญชีผู้ใช้นี้ในระบบ กรุณาเลือกแท็บ 'สมัครสมาชิก' (Sign Up)" 
+      });
+    }
+
+    if (account.password && account.password !== String(password)) {
+      return res.status(401).json({ 
+        success: false, 
+        error: "รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง" 
+      });
+    }
+
+    // Fetch existing profile (Do NOT overwrite user's profile or data)
+    let profile = db.profiles[account.userId] || db.users[account.userId];
+    if (!profile) {
+      profile = {
+        id: account.userId,
+        email: cleanEmail,
+        displayName: cleanEmail.split("@")[0],
+        bio: "นักสร้างบอทและนักเขียน ✦ สมาชิก Creator Vault",
+        avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`,
+        isGuest: false,
+        createdAt: account.createdAt || new Date().toISOString()
+      };
+      db.profiles[account.userId] = profile;
+      db.users[account.userId] = profile;
+      saveDB(db);
+    }
+
+    res.json({
+      success: true,
+      user: profile,
+      isNewUser: false,
+      message: "เข้าสู่ระบบสำเร็จ ยินดีต้อนรับกลับ!"
+    });
+  });
+
+  // Auth Endpoints: Google Sign In / OAuth
+  app.post("/api/auth/google", (req, res) => {
+    const { email, displayName, avatarUrl, googleId } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: "ข้อมูลจาก Google ไม่สมบูรณ์" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const db = loadDB();
+    db.accounts = db.accounts || {};
+    db.profiles = db.profiles || {};
+    db.users = db.users || {};
+
+    const existingAccount = db.accounts[cleanEmail];
+    if (existingAccount) {
+      // Returning user via Google -> preserve existing profile
+      const profile = db.profiles[existingAccount.userId] || db.users[existingAccount.userId];
+      return res.json({
+        success: true,
+        user: profile,
+        isNewUser: false,
+        message: "เข้าสู่ระบบด้วย Google สำเร็จ"
+      });
+    }
+
+    // New User via Google
+    const userId = `usr_${Buffer.from(cleanEmail).toString("hex").substring(0, 16)}`;
+    db.accounts[cleanEmail] = {
+      email: cleanEmail,
+      userId,
+      googleId: googleId || `g_${Date.now()}`,
+      createdAt: new Date().toISOString()
+    };
+
+    const newProfile: UserProfile = {
+      id: userId,
+      email: cleanEmail,
+      displayName: displayName?.trim() || cleanEmail.split("@")[0],
+      bio: "นักสร้างบอทและนักเขียน ✦ สมาชิก Creator Vault",
+      avatarUrl: avatarUrl || `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`,
+      isGuest: false,
+      createdAt: new Date().toISOString()
+    };
+
+    db.profiles[userId] = newProfile;
+    db.users[userId] = newProfile;
+    saveDB(db);
+
+    res.json({
+      success: true,
+      user: newProfile,
+      isNewUser: true,
+      message: "ลงทะเบียนด้วย Google สำเร็จ"
+    });
+  });
+
+  // Auth Endpoints: Change Password
+  app.post("/api/auth/change-password", (req, res) => {
+    const currentUserId = req.headers["x-user-id"] as string;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentUserId) {
+      return res.status(401).json({ success: false, error: "กรุณาเข้าสู่ระบบก่อนเปลี่ยนรหัสผ่าน" });
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: "รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร" });
+    }
+
+    const db = loadDB();
+    db.accounts = db.accounts || {};
+
+    // Find account by userId
+    const accountEntry = Object.entries(db.accounts).find(([_, acc]) => acc.userId === currentUserId);
+    if (!accountEntry) {
+      return res.status(404).json({ success: false, error: "ไม่พบบัญชีผู้ใช้ในระบบ" });
+    }
+
+    const [emailKey, account] = accountEntry;
+    if (account.password && currentPassword && account.password !== String(currentPassword)) {
+      return res.status(400).json({ success: false, error: "รหัสผ่านปัจจุบันไม่ถูกต้อง" });
+    }
+
+    account.password = String(newPassword);
+    db.accounts[emailKey] = account;
+    saveDB(db);
+
+    res.json({ success: true, message: "เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว" });
+  });
+
+  // Profile Endpoints (Supabase profiles table parity)
+  app.get("/api/profiles/:id", (req, res) => {
+    const { id } = req.params;
+    const db = loadDB();
+    db.profiles = db.profiles || {};
+    const profile = db.profiles[id] || db.users[id];
+    if (!profile) {
+      return res.status(404).json({ success: false, error: "ไม่พบโปรไฟล์" });
+    }
+    res.json({ success: true, data: profile });
+  });
+
+  app.put("/api/profiles/:id", (req, res) => {
+    const { id } = req.params;
+    const { displayName, bio, avatarUrl } = req.body;
+    const db = loadDB();
+    db.profiles = db.profiles || {};
+    db.users = db.users || {};
+
+    const existing = db.profiles[id] || db.users[id] || {
+      id,
+      displayName: "Creator",
+      isGuest: false,
+      createdAt: new Date().toISOString()
+    };
+
+    const updated: UserProfile = {
+      ...existing,
+      displayName: displayName !== undefined ? displayName.trim() || "Creator" : existing.displayName,
+      bio: bio !== undefined ? bio.trim() : existing.bio,
+      avatarUrl: avatarUrl !== undefined ? avatarUrl : existing.avatarUrl
+    };
+
+    db.profiles[id] = updated;
+    db.users[id] = updated;
+
+    // Update author info across owned assets
+    db.assets.forEach(a => {
+      if (a.userId === id) {
+        if (displayName) a.authorName = updated.displayName;
+        if (avatarUrl !== undefined) a.authorAvatar = updated.avatarUrl;
+      }
+    });
+
+    saveDB(db);
+    res.json({ success: true, data: updated });
+  });
+
+  // User Profile Endpoints (Legacy parity)
   app.get("/api/users/:id", (req, res) => {
     const { id } = req.params;
     const db = loadDB();
-    const user = db.users[id];
+    db.profiles = db.profiles || {};
+    const user = db.profiles[id] || db.users[id];
     if (!user) {
       return res.status(404).json({ success: false, error: "ไม่พบผู้ใช้" });
     }
@@ -746,35 +1015,35 @@ async function startServer() {
     const { id } = req.params;
     const { displayName, bio, avatarUrl } = req.body;
     const db = loadDB();
+    db.profiles = db.profiles || {};
+    db.users = db.users || {};
     
-    if (!db.users[id]) {
-      db.users[id] = {
-        id,
-        displayName: displayName || "Creator",
-        bio: bio || "",
-        avatarUrl: avatarUrl || "",
-        isGuest: false,
-        createdAt: new Date().toISOString()
-      };
-    } else {
-      db.users[id] = {
-        ...db.users[id],
-        displayName: displayName !== undefined ? displayName : db.users[id].displayName,
-        bio: bio !== undefined ? bio : db.users[id].bio,
-        avatarUrl: avatarUrl !== undefined ? avatarUrl : db.users[id].avatarUrl
-      };
-    }
+    const existing = db.profiles[id] || db.users[id] || {
+      id,
+      displayName: "Creator",
+      isGuest: false,
+      createdAt: new Date().toISOString()
+    };
 
-    // Also update authorName/authorAvatar on their assets
+    const updated: UserProfile = {
+      ...existing,
+      displayName: displayName !== undefined ? displayName.trim() || "Creator" : existing.displayName,
+      bio: bio !== undefined ? bio.trim() : existing.bio,
+      avatarUrl: avatarUrl !== undefined ? avatarUrl : existing.avatarUrl
+    };
+
+    db.profiles[id] = updated;
+    db.users[id] = updated;
+
     db.assets.forEach(a => {
       if (a.userId === id) {
-        if (displayName) a.authorName = displayName;
-        if (avatarUrl !== undefined) a.authorAvatar = avatarUrl;
+        if (displayName) a.authorName = updated.displayName;
+        if (avatarUrl !== undefined) a.authorAvatar = updated.avatarUrl;
       }
     });
 
     saveDB(db);
-    res.json({ success: true, data: db.users[id] });
+    res.json({ success: true, data: updated });
   });
 
   // Gemini AI Assistant Endpoint for Creators & Writers

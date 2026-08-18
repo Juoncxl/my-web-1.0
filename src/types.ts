@@ -65,15 +65,36 @@ export interface User {
   bio?: string;
   avatarUrl?: string;
   isGuest: boolean;
+  isAnonymous?: boolean;
   createdAt: string;
+  provider?: 'email' | 'google' | 'guest';
+}
+
+export interface AuthResponse {
+  success: boolean;
+  user?: User;
+  isNewUser?: boolean;
+  error?: string;
+  message?: string;
 }
 
 export interface AuthContextType {
   currentUser: User | null;
   isLoading: boolean;
-  loginWithEmail: (email: string, pass: string, name?: string) => Promise<boolean>;
+  isAuthenticated: boolean;
+  signUpWithEmail: (email: string, pass: string) => Promise<AuthResponse>;
+  loginWithEmail: (email: string, pass: string, name?: string) => Promise<AuthResponse>;
+  loginWithGoogle: () => Promise<AuthResponse>;
   loginAsGuest: (customName?: string) => Promise<boolean>;
   logout: () => void;
   updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<boolean>;
-  isAuthenticated: boolean;
+  changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
+  isOnboardingOpen: boolean;
+  setIsOnboardingOpen: (open: boolean) => void;
+  isSettingsOpen: boolean;
+  setIsSettingsOpen: (open: boolean) => void;
+  isAuthOpen: boolean;
+  setIsAuthOpen: (open: boolean) => void;
+  authDefaultTab: 'login' | 'signup';
+  openAuthModal: (tab?: 'login' | 'signup') => void;
 }

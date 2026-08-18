@@ -509,7 +509,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
               )}
 
               {iconType === 'kaomoji' && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <span className="px-3 py-1.5 bg-white dark:bg-slate-800 rounded-xl border border-purple-200 dark:border-purple-800 font-mono text-sm text-purple-800 dark:text-purple-200 font-bold">
                       {iconValue || '(づ｡◕‿‿◕｡)づ'}
@@ -519,19 +519,32 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
                       value={iconValue}
                       onChange={(e) => setIconValue(e.target.value)}
                       placeholder="พิมพ์ Kaomoji ตามต้องการ"
-                      className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-xl text-xs font-mono"
+                      className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-400"
                     />
                   </div>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {KAOMOJI_COLLECTIONS.map((kao, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setIconValue(kao)}
-                        className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900 text-xs font-mono text-purple-800 dark:text-purple-200 border border-purple-100 dark:border-slate-700 transition-transform active:scale-95"
-                      >
-                        {kao}
-                      </button>
+                  <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
+                    {KAOMOJI_COLLECTIONS.map((groupObj, gIdx) => (
+                      <div key={gIdx} className="space-y-1">
+                        <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                          {groupObj.group}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {groupObj.items.map((kaoStr, kIdx) => (
+                            <button
+                              key={kIdx}
+                              type="button"
+                              onClick={() => setIconValue(kaoStr)}
+                              className={`px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900 text-xs font-mono text-purple-800 dark:text-purple-200 border transition-all active:scale-95 ${
+                                iconValue === kaoStr
+                                  ? 'border-purple-500 ring-2 ring-purple-300 dark:ring-purple-700'
+                                  : 'border-purple-100 dark:border-slate-700'
+                              }`}
+                            >
+                              {kaoStr}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
