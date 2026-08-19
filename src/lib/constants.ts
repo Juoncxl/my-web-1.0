@@ -144,7 +144,7 @@ export const FOLDER_COLOR_PRESETS = [
 export const STATUS_PRESETS = {
   idea: {
     id: 'idea',
-    name: 'ไอเดียเริ่มต้น',
+    name: 'ไอเดีย',
     nameEn: 'Idea',
     emoji: '💡',
     bg: 'bg-amber-50 dark:bg-amber-950/60',
@@ -162,7 +162,7 @@ export const STATUS_PRESETS = {
   },
   in_progress: {
     id: 'in_progress',
-    name: 'กำลังพัฒนา',
+    name: 'กำลังทำ',
     nameEn: 'In Progress',
     emoji: '⏳',
     bg: 'bg-sky-50 dark:bg-sky-950/60',
@@ -180,7 +180,7 @@ export const STATUS_PRESETS = {
   },
   archived: {
     id: 'archived',
-    name: 'เก็บถาวร',
+    name: 'จัดเก็บแล้ว',
     nameEn: 'Archived',
     emoji: '📦',
     bg: 'bg-purple-50 dark:bg-purple-950/60',

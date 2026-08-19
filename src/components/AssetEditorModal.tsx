@@ -61,7 +61,8 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   );
   const [status, setStatus] = useState<AssetStatus>(initialData?.status || 'finished');
 
-  const [tagsInput, setTagsInput] = useState(initialData?.tags?.join(', ') || '');
+  const [tags, setTags] = useState<string[]>(initialData?.tags || []);
+  const [tagInputValue, setTagInputValue] = useState('');
   const [folderId, setFolderId] = useState<string | null>(initialData?.folderId || null);
   const [linkedAssetIds, setLinkedAssetIds] = useState<string[]>(initialData?.linkedAssetIds || []);
   
@@ -95,7 +96,8 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setUiCodeSnippet(initialData.uiCodeSnippet || '');
       setVisibility(initialData.visibility || (initialData.isPublic ? 'public' : 'private'));
       setStatus(initialData.status || 'finished');
-      setTagsInput(initialData.tags?.join(', ') || '');
+      setTags(initialData.tags || []);
+      setTagInputValue('');
       setIconType(initialData.icon?.type || 'emoji');
       setIconValue(initialData.icon?.value || '🌸');
       setFolderId(initialData.folderId || null);
@@ -112,7 +114,8 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setUiCodeSnippet('');
       setVisibility('public');
       setStatus('finished');
-      setTagsInput('');
+      setTags([]);
+      setTagInputValue('');
       setIconType('emoji');
       setIconValue('🌸');
       setFolderId(null);
@@ -121,6 +124,31 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
     }
     setErrorMsg('');
   }, [initialData, isOpen]);
+
+  // Interactive Tag Manager Handlers
+  const handleAddTag = () => {
+    const clean = tagInputValue.trim().replace(/^#/, '');
+    if (!clean) return;
+    if (tags.length >= 10) {
+      setErrorMsg('สามารถเพิ่มแท็กได้สูงสุด 10 แท็ก');
+      return;
+    }
+    if (!tags.includes(clean)) {
+      setTags([...tags, clean]);
+    }
+    setTagInputValue('');
+  };
+
+  const handleRemoveTag = (indexToRemove: number) => {
+    setTags(tags.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      handleAddTag();
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -251,10 +279,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
     setErrorMsg('');
 
     try {
-      const tags = tagsInput
-        .split(',')
-        .map(t => t.trim().replace(/^#/, ''))
-        .filter(Boolean);
+      const finalTags = tags.map(t => t.trim().replace(/^#/, '')).filter(Boolean);
 
       const icon: AssetIcon = {
         type: iconType,
@@ -274,7 +299,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
         visibility,
         status,
         linkedAssetIds,
-        tags,
+        tags: finalTags,
         authorName: currentUser?.displayName || 'Anonymous Creator',
         authorAvatar: currentUser?.avatarUrl || ''
       };
@@ -369,7 +394,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
                 <Activity className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>สถานะงาน (Workflow Status)</span>
               </label>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
                 {(['idea', 'draft', 'in_progress', 'finished', 'archived'] as AssetStatus[]).map((s) => {
                   const meta = STATUS_PRESETS[s];
                   const isSelected = status === s;
@@ -383,10 +408,10 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
                           ? `${meta.bg} ${meta.text} ${meta.border} shadow-xs scale-102`
                           : 'border-transparent bg-slate-100/70 dark:bg-slate-800/50 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                       }`}
-                      title={meta.name}
+                      title={`${meta.emoji} ${meta.name}`}
                     >
                       <span className="text-xs">{meta.emoji}</span>
-                      <span className="truncate max-w-[55px]">{meta.nameEn}</span>
+                      <span className="truncate max-w-[55px] text-[10.5px] font-bold">{meta.name}</span>
                     </button>
                   );
                 })}
@@ -723,18 +748,60 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
             )}
           </div>
 
-          {/* Tags */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-              แท็กค้นหา (คั่นด้วยจุลภาค)
-            </label>
-            <input
-              type="text"
-              value={tagsInput}
-              onChange={(e) => setTagsInput(e.target.value)}
-              placeholder="เช่น: Roleplay, Tsundere, SillyTavern, Cyberpunk"
-              className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800 focus:bg-white dark:focus:bg-slate-850"
-            />
+          {/* Interactive Tag Manager */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                แท็กค้นหา (พิมพ์แล้วกด + เพื่อเพิ่มแท็ก - สูงสุด 10 แท็ก)
+              </label>
+              <span className="text-[11px] font-mono text-purple-600 dark:text-purple-400 font-bold">
+                {tags.length}/10
+              </span>
+            </div>
+
+            {/* Tag Input Field with "+" Button */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={tagInputValue}
+                onChange={(e) => setTagInputValue(e.target.value)}
+                onKeyDown={handleTagInputKeyDown}
+                disabled={tags.length >= 10}
+                placeholder={tags.length >= 10 ? "เพิ่มแท็กครบ 10 รายการแล้ว" : "เช่น: Roleplay, Tsundere, Prompt (กด Enter หรือคลิก +)"}
+                className="flex-1 px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800 focus:bg-white dark:focus:bg-slate-850 disabled:opacity-60"
+              />
+              <button
+                type="button"
+                onClick={handleAddTag}
+                disabled={!tagInputValue.trim() || tags.length >= 10}
+                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 text-white rounded-2xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer disabled:cursor-not-allowed active:scale-95 shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>เพิ่ม</span>
+              </button>
+            </div>
+
+            {/* Added Tag Chips / Badges */}
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {tags.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 dark:bg-purple-950/70 border border-purple-200 dark:border-purple-800/80 rounded-full text-xs font-semibold text-purple-700 dark:text-purple-300 shadow-xs animate-in fade-in zoom-in-95 duration-150"
+                  >
+                    <span>#{tag}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTag(idx)}
+                      className="w-4 h-4 rounded-full bg-purple-200/60 dark:bg-purple-800/60 hover:bg-rose-500 hover:text-white text-purple-700 dark:text-purple-200 flex items-center justify-center transition-colors cursor-pointer"
+                      title="ลบแท็กนี้"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Proof of Copyright Note */}

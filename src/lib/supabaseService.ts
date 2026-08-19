@@ -1,140 +1,14 @@
 import { Asset, Folder, User, AssetVisibility, AssetStatus, ContentReport, AssetVersion } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 
-// Initial Starter Sample Data
-const SAMPLE_ASSETS: Asset[] = [
-  {
-    id: 'asset_init_1',
-    userId: 'creator_mai',
-    authorName: 'Mai (Creator)',
-    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    title: '🌸 พลอยใส (Ploysai) — AI เพื่อนสนิทสายให้กำลังใจ',
-    icon: { type: 'emoji', value: '🌸' },
-    category: 'character',
-    content: `# [Character Profile: Ploysai 🌸]
-- **ชื่อ:** พลอยใส (Ploysai)
-- **อายุ:** 22 ปี
-- **อาชีพ:** บาริสต้า & นักวาดภาพประกอบอิสระ
-- **บุคลิกภาพ:** อ่อนโยน ขี้เล่นเล็กน้อย ช่างสังเกต และพร้อมรับฟังเสมอ ไม่ตัดสินใคร
-- **คำพูดติดปาก:** "วันนี้เหนื่อยไหมคะ? ดื่มโกโก้อุ่นๆ สักแก้วก่อนนะ~ (｡•̀ᴗ-)✧"
-
-## [System Prompt Instructions]
-1. จงสวมบทบาทเป็น "พลอยใส" อย่างเคร่งครัด
-2. ใช้ภาษาไทยที่เป็นธรรมชาติ สุภาพแต่เป็นกันเอง มีอีโมจิดอกไม้หรือความน่ารักแทรกตามอารมณ์
-3. เมื่อผู้ใช้เล่าเรื่องทุกข์ใจ ให้รับฟังและปลอบประโลมก่อนเสมอ`,
-    uiCodeSnippet: '',
-    previewImages: [
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=600&auto=format&fit=crop&q=80'
-    ],
-    folderId: null,
-    isPublic: true,
-    visibility: 'public',
-    status: 'finished',
-    tags: ['บอทเพื่อนสนิท', 'Roleplay', 'Healใจ', 'ThaiPrompt'],
-    createdAt: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-    likesCount: 24,
-    forkCount: 6,
-    linkedAssetIds: ['asset_init_3'],
-    versions: [
-      {
-        version: 1,
-        updatedAt: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
-        title: '🌸 พลอยใส (Ploysai) — ฉบับร่างแรก',
-        summary: 'สร้างตัวละครและกำหนดบุคลิกภาพพื้นฐาน'
-      },
-      {
-        version: 2,
-        updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-        title: '🌸 พลอยใส (Ploysai) — AI เพื่อนสนิทสายให้กำลังใจ',
-        summary: 'เพิ่ม System Prompt ปลอบประโลม และเชื่อมต่อการแสดงผล UI'
-      }
-    ]
-  },
-  {
-    id: 'asset_init_2',
-    userId: 'creator_kenshi',
-    authorName: 'Kenshi Lore Master',
-    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    title: '📖 มหานครลอยฟ้า เอเธอเรีย (Aetheria World Lore)',
-    icon: { type: 'emoji', value: '📖' },
-    category: 'lore',
-    content: `# [World Lore: มหานครลอยฟ้า Aetheria]
-Aetheria คือทวีปเกาะลอยฟ้าที่ลอยอยู่เหนือก้อนเมฆพิษเบื้องล่างกว่า 3,000 เมตร พลังงานที่ค้ำจุนเมืองคือ "ผลึกแอร์เธอไรต์" (Aetherite Core)
-
-## [Factions & Magic System]
-- **Order of Celestia:** สภาผู้ควบคุมผลึกเวทมนตร์และกองเรือเหาะ
-- **Cloud Walkers:** กลุ่มนักผจญภัยที่โรยตัวลงไปสำรวจซากอารยธรรมภาคพื้นดิน
-- **The Resonance:** ระบบเวทมนตร์ที่ต้องสวดภาวนาด้วยเสียงดนตรีเพื่อสั่งการผลึก`,
-    uiCodeSnippet: '',
-    previewImages: [
-      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80'
-    ],
-    folderId: null,
-    isPublic: true,
-    visibility: 'public',
-    status: 'in_progress',
-    tags: ['Worldbuilding', 'Fantasy', 'Lore', 'Steampunk'],
-    createdAt: new Date(Date.now() - 3600000 * 24 * 4).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    likesCount: 18,
-    forkCount: 3,
-    versions: [
-      {
-        version: 1,
-        updatedAt: new Date(Date.now() - 3600000 * 24 * 4).toISOString(),
-        title: '📖 มหานครลอยฟ้า เอเธอเรีย (Aetheria World Lore)',
-        summary: 'โครงสร้างหลักของโลกและเวทมนตร์ผลึก'
-      }
-    ]
-  },
-  {
-    id: 'asset_init_3',
-    userId: 'creator_ui_dev',
-    authorName: 'PastelCoder 💻',
-    authorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    title: '💻 Glassmorphism Pastel Chat Bubble for SillyTavern',
-    icon: { type: 'emoji', value: '💻' },
-    category: 'ui_code',
-    content: `โค้ด CSS สำหรับแต่งหน้าต่างแชทบอทแนว Pastel Frosted Glass พร้อมแอนิเมชัน Fade-in เมื่อบอทตอบ`,
-    uiCodeSnippet: `<div class="chat-wrapper" style="font-family: 'Prompt', sans-serif; padding: 20px; background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%); min-height: 240px; display: flex; flex-direction: column; gap: 14px;">
-  <!-- User Message -->
-  <div style="align-self: flex-end; max-width: 80%; background: linear-gradient(135deg, #a855f7, #ec4899); color: white; padding: 12px 18px; border-radius: 20px 20px 4px 20px; box-shadow: 0 4px 15px rgba(168, 85, 247, 0.25);">
-    <p style="margin: 0; font-size: 14px; font-weight: 500;">สวัสดีพลอยใส วันนี้มีเครื่องดื่มอะไรแนะนำบ้าง?</p>
-  </div>
-  
-  <!-- AI Bot Message -->
-  <div style="align-self: flex-start; max-width: 80%; background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); border: 1px solid rgba(233, 213, 255, 0.8); color: #334155; padding: 14px 18px; border-radius: 20px 20px 20px 4px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);">
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-      <span style="font-size: 16px;">🌸</span>
-      <strong style="font-size: 13px; color: #9333ea;">พลอยใส (Ploysai)</strong>
-    </div>
-    <p style="margin: 0; font-size: 14px; line-height: 1.6;">
-      ยินดีต้อนรับค่ะ! วันนี้พลอยใสแนะนำเป็น <em>"ลาเวนเดอร์มิลค์ทีอุ่นๆ"</em> ค่ะ หอมละมุนช่วยให้ผ่อนคลายจากความเหนื่อยล้าแน่นอนค่ะ~ (✿◠‿◠)
-    </p>
-  </div>
-</div>`,
-    previewImages: [],
-    folderId: null,
-    isPublic: true,
-    visibility: 'public',
-    status: 'finished',
-    tags: ['CSS', 'HTML', 'SillyTavern', 'Glassmorphism', 'Pastel'],
-    createdAt: new Date(Date.now() - 3600000 * 24 * 7).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 24 * 1).toISOString(),
-    likesCount: 39,
-    forkCount: 12
-  }
-];
-
+// Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
 const LOCAL_STORAGE_FOLDERS = 'creator_vault_local_folders';
 const LOCAL_STORAGE_BOOKMARKS = 'creator_vault_bookmarks';
 const LOCAL_STORAGE_RECENT_VIEWED = 'creator_vault_recent_viewed';
 const LOCAL_STORAGE_REPORTS = 'creator_vault_reports';
 
-// Helper to get local fallback assets
+// Helper to get local fallback assets (Empty by default, no mock data)
 function getLocalAssets(): Asset[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_ASSETS);
@@ -142,8 +16,7 @@ function getLocalAssets(): Asset[] {
   } catch (e) {
     console.warn('Local assets read error:', e);
   }
-  localStorage.setItem(LOCAL_STORAGE_ASSETS, JSON.stringify(SAMPLE_ASSETS));
-  return SAMPLE_ASSETS;
+  return [];
 }
 
 function saveLocalAssets(assets: Asset[]) {

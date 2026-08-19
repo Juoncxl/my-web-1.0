@@ -168,7 +168,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-md ${statusMeta.bg} ${statusMeta.text} border ${statusMeta.border} shadow-xs flex items-center gap-0.5`}
             >
               <span>{statusMeta.emoji}</span>
-              <span>{statusMeta.nameEn}</span>
+              <span>{statusMeta.name}</span>
             </span>
           </div>
 
@@ -231,7 +231,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusMeta.bg} ${statusMeta.text} border ${statusMeta.border} flex items-center gap-0.5`}
             >
               <span>{statusMeta.emoji}</span>
-              <span>{statusMeta.nameEn}</span>
+              <span>{statusMeta.name}</span>
             </span>
           </div>
 

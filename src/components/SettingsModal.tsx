@@ -13,12 +13,9 @@ import {
   Download, 
   Upload, 
   FileJson, 
-  Copy, 
-  Code2, 
   HardDrive
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { SUPABASE_SQL_SCHEMA } from '../lib/constants';
 import { supabaseService } from '../lib/supabaseService';
 import confetti from 'canvas-confetti';
 
@@ -34,7 +31,7 @@ const PRESET_AVATARS = [
 export const SettingsModal: React.FC = () => {
   const { currentUser, isSettingsOpen, setIsSettingsOpen, updateProfile, changePassword } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'backup' | 'sql'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'backup'>('profile');
 
   // Profile Form State
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
@@ -53,7 +50,6 @@ export const SettingsModal: React.FC = () => {
   // Backup State
   const [isExporting, setIsExporting] = useState(false);
   const [backupMsg, setBackupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isSettingsOpen) return null;
@@ -124,25 +120,32 @@ export const SettingsModal: React.FC = () => {
     }
   };
 
-  // Feature 7: Export & Backup Full Vault (1-click JSON backup)
+  // Feature 7: Export & Backup Personal Vault (Strictly Current User)
   const handleExportFullVault = async () => {
+    if (!currentUser?.id) {
+      setBackupMsg({ type: 'error', text: 'กรุณาเข้าสู่ระบบเพื่อสำรองข้อมูลผลงานส่วนตัว' });
+      return;
+    }
+
     setIsExporting(true);
     setBackupMsg(null);
 
     try {
-      const assetsRes = await supabaseService.fetchAssets({ userId: currentUser?.id, includeDeleted: true });
-      const foldersRes = await supabaseService.fetchFolders(currentUser?.id || '');
-      const userAssets = assetsRes.data || [];
-      const userFolders = foldersRes.data || [];
+      const assetsRes = await supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true });
+      const foldersRes = await supabaseService.fetchFolders(currentUser.id);
+      
+      // Strictly export only current logged-in user's assets and folders
+      const userAssets = (assetsRes.data || []).filter(a => a.userId === currentUser.id);
+      const userFolders = (foldersRes.data || []).filter(f => f.userId === currentUser.id);
 
       const backupData = {
         app: 'Creator Vault',
         version: '2.0.0',
         exportedAt: new Date().toISOString(),
         creator: {
-          id: currentUser?.id,
-          name: currentUser?.displayName,
-          email: currentUser?.email
+          id: currentUser.id,
+          name: currentUser.displayName,
+          email: currentUser.email
         },
         folders: userFolders,
         assets: userAssets
@@ -151,7 +154,7 @@ export const SettingsModal: React.FC = () => {
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `creator_vault_backup_${new Date().toISOString().slice(0,10)}.json`);
+      downloadAnchor.setAttribute("download", `creator_vault_backup_${currentUser.id.slice(0,8)}_${new Date().toISOString().slice(0,10)}.json`);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
@@ -162,18 +165,12 @@ export const SettingsModal: React.FC = () => {
         origin: { y: 0.6 }
       });
 
-      setBackupMsg({ type: 'success', text: `สำรองข้อมูลสำเร็จ! ดาวน์โหลด ${userAssets.length} ผลงาน และ ${userFolders.length} โฟลเดอร์เรียบร้อยแล้ว` });
+      setBackupMsg({ type: 'success', text: `สำรองข้อมูลสำเร็จ! ดาวน์โหลด ${userAssets.length} ผลงาน และ ${userFolders.length} โฟลเดอร์ของ ${currentUser.displayName || 'คุณ'} เรียบร้อยแล้ว` });
     } catch (err: any) {
       setBackupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการสำรองข้อมูล' });
     } finally {
       setIsExporting(false);
     }
-  };
-
-  const handleCopySqlSchema = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2000);
   };
 
   return (
@@ -191,7 +188,7 @@ export const SettingsModal: React.FC = () => {
                 ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                จัดการโปรไฟล์, ความปลอดภัย, สำรองข้อมูล และสคริปต์ Supabase
+                จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน
               </p>
             </div>
           </div>
@@ -240,18 +237,6 @@ export const SettingsModal: React.FC = () => {
           >
             <HardDrive className="w-3.5 h-3.5" />
             <span>สำรองข้อมูล (Backup)</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('sql')}
-            className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'sql'
-                ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span>SQL Schema</span>
           </button>
         </div>
 
@@ -463,7 +448,7 @@ export const SettingsModal: React.FC = () => {
               <div className="p-4 bg-purple-50/80 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900 rounded-2xl space-y-2">
                 <div className="flex items-center gap-2 text-purple-900 dark:text-purple-200 font-bold">
                   <HardDrive className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                  <span>สำรองข้อมูลคลังผลงานทั้งระบบ (1-Click Full Backup)</span>
+                  <span>ส่งออกข้อมูลคลังผลงานส่วนตัวของฉัน (JSON Backup)</span>
                 </div>
                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-[11.5px]">
                   ดาวน์โหลดไฟล์ JSON สำรองข้อมูลผลงานทั้งหมดของคุณ ทั้งโปรไฟล์บอท, สคริปต์ Prompts, โค้ดตกแต่ง UI, โฟลเดอร์, และเวอร์ชันประวัติ เพื่อเก็บไว้อย่างปลอดภัยบนเครื่องของคุณ
@@ -475,44 +460,16 @@ export const SettingsModal: React.FC = () => {
                   type="button"
                   onClick={handleExportFullVault}
                   disabled={isExporting}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-2xl font-bold shadow-md shadow-purple-200 dark:shadow-purple-950 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-2xl font-bold shadow-md shadow-purple-200 dark:shadow-purple-950 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
-                  <span>{isExporting ? 'กำลังรวบรวมข้อมูล...' : 'ส่งออกไฟล์สำรองข้อมูล (.JSON Backup)'}</span>
+                  <span>{isExporting ? 'กำลังรวบรวมข้อมูล...' : 'ส่งออกข้อมูลคลังผลงานส่วนตัวของฉัน (JSON Backup)'}</span>
                 </button>
               </div>
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
                 💡 <strong>เคล็ดลับ:</strong> คุณสามารถนำไฟล์ JSON นี้ไปเปิดดูหรือนำเข้าได้ทุกเมื่อ ปลอดภัย 100%
               </div>
-            </div>
-          )}
-
-          {/* Tab 4: SQL Migration Schema */}
-          {activeTab === 'sql' && (
-            <div className="p-6 space-y-4 text-xs">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold text-slate-800 dark:text-slate-100">
-                    Supabase PostgreSQL SQL Schema & RLS
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    สคริปต์สำหรับรันใน Supabase SQL Editor เพื่อสร้างตารางและการจัดการสิทธิ์
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleCopySqlSchema}
-                  className="px-3 py-1.5 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 rounded-xl font-bold border border-purple-200 dark:border-purple-800 hover:bg-purple-100 flex items-center gap-1.5 transition-colors"
-                >
-                  {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedSql ? 'คัดลอกแล้ว!' : 'คัดลอก SQL'}</span>
-                </button>
-              </div>
-
-              <pre className="p-4 bg-slate-900 text-purple-200 rounded-2xl overflow-x-auto max-h-72 font-mono text-[10.5px] border border-slate-800 leading-relaxed">
-                <code>{SUPABASE_SQL_SCHEMA}</code>
-              </pre>
             </div>
           )}
 
