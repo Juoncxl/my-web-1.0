@@ -6,6 +6,10 @@ export type AssetCategory =
   | 'collab'
   | 'app_data';
 
+export type AssetVisibility = 'public' | 'private' | 'draft';
+
+export type AssetStatus = 'idea' | 'draft' | 'in_progress' | 'finished' | 'archived';
+
 export interface CategoryMeta {
   id: AssetCategory;
   name: string;
@@ -35,6 +39,14 @@ export interface Folder {
   assetsCount?: number;
 }
 
+export interface AssetVersion {
+  version: number;
+  updatedAt: string;
+  title: string;
+  summary?: string;
+  editorName?: string;
+}
+
 export interface Asset {
   id: string;
   userId: string;
@@ -46,14 +58,39 @@ export interface Asset {
   content: string;
   uiCodeSnippet?: string;
   previewImage?: string; // legacy single image support
-  previewImages?: string[]; // up to 5 gallery images
+  previewImages?: string[]; // up to 6 gallery images
   folderId?: string | null;
   isPublic: boolean;
+  visibility: AssetVisibility;
+  status: AssetStatus;
   tags?: string[];
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
   likesCount?: number;
   forkCount?: number;
+  forkedFromId?: string | null;
+  forkedFromAuthor?: string | null;
+  linkedAssetIds?: string[];
+  versions?: AssetVersion[];
+}
+
+export interface Bookmark {
+  id: string;
+  userId: string;
+  assetId: string;
+  createdAt: string;
+}
+
+export interface ContentReport {
+  id: string;
+  assetId: string;
+  reporterId?: string;
+  reporterName?: string;
+  reason: 'copyright' | 'inappropriate' | 'spam' | 'harassment' | 'other';
+  details?: string;
+  createdAt: string;
+  status: 'pending' | 'reviewed' | 'resolved';
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -98,3 +135,4 @@ export interface AuthContextType {
   authDefaultTab: 'login' | 'signup';
   openAuthModal: (tab?: 'login' | 'signup') => void;
 }
+

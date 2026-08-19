@@ -1,7 +1,7 @@
-import { Asset, Folder, User } from '../types';
+import { Asset, Folder, User, AssetVisibility, AssetStatus, ContentReport, AssetVersion } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 
-// Initial Starter Sample Data when starting fresh or running offline/guest
+// Initial Starter Sample Data
 const SAMPLE_ASSETS: Asset[] = [
   {
     id: 'asset_init_1',
@@ -29,11 +29,28 @@ const SAMPLE_ASSETS: Asset[] = [
     ],
     folderId: null,
     isPublic: true,
+    visibility: 'public',
+    status: 'finished',
     tags: ['บอทเพื่อนสนิท', 'Roleplay', 'Healใจ', 'ThaiPrompt'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
     likesCount: 24,
-    forkCount: 6
+    forkCount: 6,
+    linkedAssetIds: ['asset_init_3'],
+    versions: [
+      {
+        version: 1,
+        updatedAt: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+        title: '🌸 พลอยใส (Ploysai) — ฉบับร่างแรก',
+        summary: 'สร้างตัวละครและกำหนดบุคลิกภาพพื้นฐาน'
+      },
+      {
+        version: 2,
+        updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+        title: '🌸 พลอยใส (Ploysai) — AI เพื่อนสนิทสายให้กำลังใจ',
+        summary: 'เพิ่ม System Prompt ปลอบประโลม และเชื่อมต่อการแสดงผล UI'
+      }
+    ]
   },
   {
     id: 'asset_init_2',
@@ -56,11 +73,21 @@ Aetheria คือทวีปเกาะลอยฟ้าที่ลอย�
     ],
     folderId: null,
     isPublic: true,
+    visibility: 'public',
+    status: 'in_progress',
     tags: ['Worldbuilding', 'Fantasy', 'Lore', 'Steampunk'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: new Date(Date.now() - 3600000 * 24 * 4).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
     likesCount: 18,
-    forkCount: 3
+    forkCount: 3,
+    versions: [
+      {
+        version: 1,
+        updatedAt: new Date(Date.now() - 3600000 * 24 * 4).toISOString(),
+        title: '📖 มหานครลอยฟ้า เอเธอเรีย (Aetheria World Lore)',
+        summary: 'โครงสร้างหลักของโลกและเวทมนตร์ผลึก'
+      }
+    ]
   },
   {
     id: 'asset_init_3',
@@ -91,9 +118,11 @@ Aetheria คือทวีปเกาะลอยฟ้าที่ลอย�
     previewImages: [],
     folderId: null,
     isPublic: true,
+    visibility: 'public',
+    status: 'finished',
     tags: ['CSS', 'HTML', 'SillyTavern', 'Glassmorphism', 'Pastel'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: new Date(Date.now() - 3600000 * 24 * 7).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000 * 24 * 1).toISOString(),
     likesCount: 39,
     forkCount: 12
   }
@@ -101,6 +130,9 @@ Aetheria คือทวีปเกาะลอยฟ้าที่ลอย�
 
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
 const LOCAL_STORAGE_FOLDERS = 'creator_vault_local_folders';
+const LOCAL_STORAGE_BOOKMARKS = 'creator_vault_bookmarks';
+const LOCAL_STORAGE_RECENT_VIEWED = 'creator_vault_recent_viewed';
+const LOCAL_STORAGE_REPORTS = 'creator_vault_reports';
 
 // Helper to get local fallback assets
 function getLocalAssets(): Asset[] {
@@ -145,6 +177,10 @@ function saveLocalFolders(folders: Folder[]) {
 
 // Convert Supabase DB snake_case record to Client Asset
 function mapDbToAsset(row: any): Asset {
+  const isPublicVal = row.is_public !== undefined ? row.is_public : (row.visibility === 'public');
+  const visibilityVal: AssetVisibility = row.visibility || (isPublicVal ? 'public' : 'private');
+  const statusVal: AssetStatus = row.status || 'finished';
+
   return {
     id: row.id,
     userId: row.user_id || row.userId,
@@ -158,12 +194,19 @@ function mapDbToAsset(row: any): Asset {
     previewImage: row.preview_image || row.previewImage,
     previewImages: row.preview_images || (row.preview_image ? [row.preview_image] : []),
     folderId: row.folder_id || row.folderId || null,
-    isPublic: row.is_public !== undefined ? row.is_public : true,
+    isPublic: visibilityVal === 'public',
+    visibility: visibilityVal,
+    status: statusVal,
     tags: row.tags || [],
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
     updatedAt: row.updated_at || row.updatedAt || new Date().toISOString(),
+    deletedAt: row.deleted_at || row.deletedAt || null,
     likesCount: row.likes_count || row.likesCount || 0,
-    forkCount: row.fork_count || row.forkCount || 0
+    forkCount: row.fork_count || row.forkCount || 0,
+    forkedFromId: row.forked_from_id || row.forkedFromId || null,
+    forkedFromAuthor: row.forked_from_author || row.forkedFromAuthor || null,
+    linkedAssetIds: row.linked_asset_ids || row.linkedAssetIds || [],
+    versions: typeof row.versions === 'string' ? JSON.parse(row.versions) : (row.versions || [])
   };
 }
 
@@ -182,10 +225,25 @@ function mapAssetToDb(asset: Partial<Asset>) {
   if (asset.previewImage !== undefined) dbPayload.preview_image = asset.previewImage;
   if (asset.previewImages !== undefined) dbPayload.preview_images = asset.previewImages;
   if (asset.folderId !== undefined) dbPayload.folder_id = asset.folderId;
-  if (asset.isPublic !== undefined) dbPayload.is_public = asset.isPublic;
-  if (asset.tags) dbPayload.tags = asset.tags;
+  
+  if (asset.visibility !== undefined) {
+    dbPayload.visibility = asset.visibility;
+    dbPayload.is_public = asset.visibility === 'public';
+  } else if (asset.isPublic !== undefined) {
+    dbPayload.is_public = asset.isPublic;
+    dbPayload.visibility = asset.isPublic ? 'public' : 'private';
+  }
+
+  if (asset.status !== undefined) dbPayload.status = asset.status;
+  if (asset.tags !== undefined) dbPayload.tags = asset.tags;
   if (asset.likesCount !== undefined) dbPayload.likes_count = asset.likesCount;
   if (asset.forkCount !== undefined) dbPayload.fork_count = asset.forkCount;
+  if (asset.forkedFromId !== undefined) dbPayload.forked_from_id = asset.forkedFromId;
+  if (asset.forkedFromAuthor !== undefined) dbPayload.forked_from_author = asset.forkedFromAuthor;
+  if (asset.linkedAssetIds !== undefined) dbPayload.linked_asset_ids = asset.linkedAssetIds;
+  if (asset.versions !== undefined) dbPayload.versions = asset.versions;
+  if (asset.deletedAt !== undefined) dbPayload.deleted_at = asset.deletedAt;
+
   dbPayload.updated_at = new Date().toISOString();
   return dbPayload;
 }
@@ -203,21 +261,29 @@ function mapDbToFolder(row: any): Folder {
   };
 }
 
-// DIRECT SUPABASE DATABASE SERVICE (CRUD)
+// DIRECT SUPABASE DATABASE SERVICE (CRUD & ADVANCED LOGIC)
 export const supabaseService = {
-  // 1. Fetch Assets (Public assets or user assets)
+  // 1. Fetch Assets (Public feed or personal vault)
   async fetchAssets(options?: {
     category?: string;
     userId?: string;
     folderId?: string | null;
     search?: string;
     currentUserId?: string;
+    includeDeleted?: boolean;
+    onlyDeleted?: boolean;
   }): Promise<{ data: Asset[]; error: string | null }> {
     const supabase = getSupabaseClient();
 
     if (supabase) {
       try {
         let query = supabase.from('assets').select('*');
+
+        if (options?.onlyDeleted) {
+          query = query.not('deleted_at', 'is', null);
+        } else if (!options?.includeDeleted) {
+          query = query.is('deleted_at', null);
+        }
 
         if (options?.category && options.category !== 'all') {
           query = query.eq('category', options.category);
@@ -236,9 +302,9 @@ export const supabaseService = {
         } else {
           // Public community exploration: show public assets OR user's own items
           if (options?.currentUserId) {
-            query = query.or(`is_public.eq.true,user_id.eq.${options.currentUserId}`);
+            query = query.or(`visibility.eq.public,is_public.eq.true,user_id.eq.${options.currentUserId}`);
           } else {
-            query = query.eq('is_public', true);
+            query = query.or('visibility.eq.public,is_public.eq.true');
           }
         }
 
@@ -260,6 +326,12 @@ export const supabaseService = {
     // Local fallback for guest or when Supabase is offline
     let list = getLocalAssets();
 
+    if (options?.onlyDeleted) {
+      list = list.filter(a => !!a.deletedAt);
+    } else if (!options?.includeDeleted) {
+      list = list.filter(a => !a.deletedAt);
+    }
+
     if (options?.category && options.category !== 'all') {
       list = list.filter(a => a.category === options.category);
     }
@@ -270,9 +342,9 @@ export const supabaseService = {
       }
     } else {
       if (options?.currentUserId) {
-        list = list.filter(a => a.isPublic || a.userId === options.currentUserId);
+        list = list.filter(a => a.visibility === 'public' || a.isPublic || a.userId === options.currentUserId);
       } else {
-        list = list.filter(a => a.isPublic);
+        list = list.filter(a => a.visibility === 'public' || a.isPublic);
       }
     }
 
@@ -296,13 +368,31 @@ export const supabaseService = {
     const newId = `asset_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
+    const visibility = assetData.visibility || (assetData.isPublic === false ? 'private' : 'public');
+    const status = assetData.status || 'finished';
+
+    const initialVersion: AssetVersion = {
+      version: 1,
+      updatedAt: now,
+      title: assetData.title || 'Untitled Asset',
+      summary: 'สร้างผลงานเริ่มต้น'
+    };
+
     const newAsset: Asset = {
       ...assetData,
       id: newId,
+      visibility,
+      isPublic: visibility === 'public',
+      status,
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
       likesCount: 0,
       forkCount: 0,
+      forkedFromId: assetData.forkedFromId || null,
+      forkedFromAuthor: assetData.forkedFromAuthor || null,
+      linkedAssetIds: assetData.linkedAssetIds || [],
+      versions: [initialVersion],
       previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : [])
     };
 
@@ -341,10 +431,33 @@ export const supabaseService = {
     updates: Partial<Asset>
   ): Promise<{ data: Asset | null; error: string | null }> {
     const supabase = getSupabaseClient();
+    const now = new Date().toISOString();
+
+    // Prepare version tracking
+    const list = getLocalAssets();
+    const existing = list.find(a => a.id === id);
+
+    let updatedVersions = updates.versions || existing?.versions || [];
+    if (updates.title || updates.content || updates.uiCodeSnippet) {
+      const nextVerNum = (updatedVersions[updatedVersions.length - 1]?.version || 1) + 1;
+      const newVersion: AssetVersion = {
+        version: nextVerNum,
+        updatedAt: now,
+        title: updates.title || existing?.title || 'Updated Asset',
+        summary: updates.status ? `อัปเดตสถานะเป็น ${updates.status}` : 'บันทึกการแก้ไขเนื้อหา'
+      };
+      updatedVersions = [...updatedVersions, newVersion];
+    }
+
+    const payloadWithVersions = {
+      ...updates,
+      versions: updatedVersions,
+      updatedAt: now
+    };
 
     if (supabase) {
       try {
-        const dbPayload = mapAssetToDb(updates);
+        const dbPayload = mapAssetToDb(payloadWithVersions);
         const { data, error } = await supabase
           .from('assets')
           .update(dbPayload)
@@ -363,13 +476,11 @@ export const supabaseService = {
     }
 
     // Local fallback
-    const list = getLocalAssets();
     const idx = list.findIndex(a => a.id === id);
     if (idx !== -1) {
       list[idx] = {
         ...list[idx],
-        ...updates,
-        updatedAt: new Date().toISOString()
+        ...payloadWithVersions
       };
       saveLocalAssets(list);
       return { data: list[idx], error: null };
@@ -378,15 +489,80 @@ export const supabaseService = {
     return { data: null, error: 'Asset not found' };
   },
 
-  // 4. Delete Asset
-  async deleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
+  // 4. Soft Delete Asset (Moves to Trash)
+  async softDeleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
+    const supabase = getSupabaseClient();
+    const now = new Date().toISOString();
+
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('assets')
+          .update({ deleted_at: now })
+          .eq('id', id);
+
+        if (error) {
+          console.warn('Supabase softDelete error:', error);
+        } else {
+          return { success: true, error: null };
+        }
+      } catch (err: any) {
+        console.warn('Supabase soft delete error:', err);
+      }
+    }
+
+    // Local fallback
+    const list = getLocalAssets();
+    const idx = list.findIndex(a => a.id === id);
+    if (idx !== -1) {
+      list[idx].deletedAt = now;
+      saveLocalAssets(list);
+      return { success: true, error: null };
+    }
+    return { success: false, error: 'Asset not found' };
+  },
+
+  // 5. Restore Asset (From Trash)
+  async restoreAsset(id: string): Promise<{ success: boolean; error: string | null }> {
+    const supabase = getSupabaseClient();
+
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('assets')
+          .update({ deleted_at: null })
+          .eq('id', id);
+
+        if (error) {
+          console.warn('Supabase restoreAsset error:', error);
+        } else {
+          return { success: true, error: null };
+        }
+      } catch (err: any) {
+        console.warn('Supabase restore error:', err);
+      }
+    }
+
+    // Local fallback
+    const list = getLocalAssets();
+    const idx = list.findIndex(a => a.id === id);
+    if (idx !== -1) {
+      list[idx].deletedAt = null;
+      saveLocalAssets(list);
+      return { success: true, error: null };
+    }
+    return { success: false, error: 'Asset not found' };
+  },
+
+  // 6. Hard Delete Asset (Permanent Deletion)
+  async permanentDeleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
 
     if (supabase) {
       try {
         const { error } = await supabase.from('assets').delete().eq('id', id);
         if (error) {
-          console.warn('Supabase deleteAsset error:', error);
+          console.warn('Supabase permanentDelete error:', error);
         } else {
           return { success: true, error: null };
         }
@@ -402,7 +578,128 @@ export const supabaseService = {
     return { success: true, error: null };
   },
 
-  // 5. Like Asset
+  // 7. Empty Trash
+  async emptyTrash(userId: string): Promise<{ success: boolean; error: string | null }> {
+    const supabase = getSupabaseClient();
+
+    if (supabase && userId) {
+      try {
+        const { error } = await supabase
+          .from('assets')
+          .delete()
+          .eq('user_id', userId)
+          .not('deleted_at', 'is', null);
+
+        if (error) {
+          console.warn('Supabase emptyTrash error:', error);
+        }
+      } catch (e) {
+        console.warn('Supabase emptyTrash exception:', e);
+      }
+    }
+
+    // Local fallback
+    let list = getLocalAssets();
+    list = list.filter(a => !(a.userId === userId && a.deletedAt));
+    saveLocalAssets(list);
+    return { success: true, error: null };
+  },
+
+  // 8. Fork / Duplicate Asset
+  async forkAsset(
+    originalAsset: Asset,
+    newUserId: string,
+    newAuthorName: string,
+    newAuthorAvatar?: string
+  ): Promise<{ data: Asset | null; error: string | null }> {
+    const supabase = getSupabaseClient();
+    const newId = `asset_fork_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const now = new Date().toISOString();
+
+    const forkedAsset: Asset = {
+      ...originalAsset,
+      id: newId,
+      userId: newUserId,
+      authorName: newAuthorName,
+      authorAvatar: newAuthorAvatar,
+      title: `[สำเนา] ${originalAsset.title}`,
+      visibility: 'draft',
+      isPublic: false,
+      status: 'draft',
+      folderId: null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      likesCount: 0,
+      forkCount: 0,
+      forkedFromId: originalAsset.id,
+      forkedFromAuthor: originalAsset.authorName,
+      versions: [
+        {
+          version: 1,
+          updatedAt: now,
+          title: `[สำเนา] ${originalAsset.title}`,
+          summary: `โคลนมาจากผลงานของ ${originalAsset.authorName}`
+        }
+      ]
+    };
+
+    // Increment original asset fork count
+    await this.incrementForkCount(originalAsset.id, originalAsset.forkCount || 0);
+
+    if (supabase) {
+      try {
+        const dbPayload = mapAssetToDb(forkedAsset);
+        dbPayload.id = newId;
+        dbPayload.created_at = now;
+
+        const { data, error } = await supabase
+          .from('assets')
+          .insert(dbPayload)
+          .select()
+          .single();
+
+        if (error) {
+          console.warn('Supabase forkAsset insert error:', error);
+        } else if (data) {
+          return { data: mapDbToAsset(data), error: null };
+        }
+      } catch (err: any) {
+        console.warn('Supabase fork error:', err);
+      }
+    }
+
+    // Local fallback
+    const list = getLocalAssets();
+    list.unshift(forkedAsset);
+    saveLocalAssets(list);
+    return { data: forkedAsset, error: null };
+  },
+
+  async incrementForkCount(assetId: string, currentCount: number = 0): Promise<void> {
+    const supabase = getSupabaseClient();
+    const newCount = (currentCount || 0) + 1;
+
+    if (supabase) {
+      try {
+        await supabase
+          .from('assets')
+          .update({ fork_count: newCount })
+          .eq('id', assetId);
+      } catch (e) {
+        console.warn('Increment fork count error:', e);
+      }
+    }
+
+    const list = getLocalAssets();
+    const item = list.find(a => a.id === assetId);
+    if (item) {
+      item.forkCount = newCount;
+      saveLocalAssets(list);
+    }
+  },
+
+  // 9. Like Asset
   async likeAsset(assetId: string, currentLikes: number = 0): Promise<number> {
     const supabase = getSupabaseClient();
     const newCount = (currentLikes || 0) + 1;
@@ -427,7 +724,160 @@ export const supabaseService = {
     return newCount;
   },
 
-  // 6. Fetch Folders
+  // 10. Bookmarks / Saved Resources System
+  async fetchBookmarks(userId: string): Promise<string[]> {
+    if (!userId) return [];
+    const supabase = getSupabaseClient();
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('bookmarks')
+          .select('asset_id')
+          .eq('user_id', userId);
+
+        if (error) {
+          console.warn('Supabase fetchBookmarks error:', error);
+        } else if (data) {
+          return data.map((r: any) => r.asset_id);
+        }
+      } catch (e) {
+        console.warn('Supabase fetchBookmarks exception:', e);
+      }
+    }
+
+    // Local fallback
+    try {
+      const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKMARKS}_${userId}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async toggleBookmark(userId: string, assetId: string): Promise<{ isBookmarked: boolean }> {
+    if (!userId) return { isBookmarked: false };
+    const supabase = getSupabaseClient();
+
+    let isCurrentlySaved = false;
+    let localList: string[] = [];
+
+    try {
+      const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKMARKS}_${userId}`);
+      localList = raw ? JSON.parse(raw) : [];
+      isCurrentlySaved = localList.includes(assetId);
+    } catch (e) {
+      console.warn('Local bookmark read error:', e);
+    }
+
+    if (supabase) {
+      try {
+        if (isCurrentlySaved) {
+          await supabase.from('bookmarks').delete().eq('user_id', userId).eq('asset_id', assetId);
+        } else {
+          await supabase.from('bookmarks').insert({
+            id: `bm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            user_id: userId,
+            asset_id: assetId,
+            created_at: new Date().toISOString()
+          });
+        }
+      } catch (e) {
+        console.warn('Supabase bookmark toggle error:', e);
+      }
+    }
+
+    const nextSaved = !isCurrentlySaved;
+    const nextList = nextSaved
+      ? [...localList, assetId]
+      : localList.filter(id => id !== assetId);
+
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_BOOKMARKS}_${userId}`, JSON.stringify(nextList));
+    } catch (e) {
+      console.warn('Local bookmark write error:', e);
+    }
+
+    return { isBookmarked: nextSaved };
+  },
+
+  // 11. Content Reporting System
+  async submitReport(report: {
+    assetId: string;
+    reporterId?: string;
+    reporterName?: string;
+    reason: string;
+    details?: string;
+  }): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    const newReport: ContentReport = {
+      id: `report_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      assetId: report.assetId,
+      reporterId: report.reporterId,
+      reporterName: report.reporterName,
+      reason: report.reason as any,
+      details: report.details || '',
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    if (supabase) {
+      try {
+        const { error } = await supabase.from('reports').insert({
+          id: newReport.id,
+          asset_id: newReport.assetId,
+          reporter_id: newReport.reporterId,
+          reporter_name: newReport.reporterName,
+          reason: newReport.reason,
+          details: newReport.details,
+          status: newReport.status,
+          created_at: newReport.createdAt
+        });
+
+        if (error) {
+          console.warn('Supabase report submit error:', error);
+        } else {
+          return true;
+        }
+      } catch (e) {
+        console.warn('Supabase report exception:', e);
+      }
+    }
+
+    // Local fallback
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_REPORTS);
+      const list: ContentReport[] = raw ? JSON.parse(raw) : [];
+      list.push(newReport);
+      localStorage.setItem(LOCAL_STORAGE_REPORTS, JSON.stringify(list));
+      return true;
+    } catch {
+      return true;
+    }
+  },
+
+  // 12. Recently Viewed History (Local Cache)
+  getRecentlyViewed(): string[] {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_RECENT_VIEWED);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  addRecentlyViewed(assetId: string): void {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_RECENT_VIEWED);
+      const list: string[] = raw ? JSON.parse(raw) : [];
+      const updated = [assetId, ...list.filter(id => id !== assetId)].slice(0, 15);
+      localStorage.setItem(LOCAL_STORAGE_RECENT_VIEWED, JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Error saving recently viewed:', e);
+    }
+  },
+
+  // 13. Folders CRUD
   async fetchFolders(userId: string): Promise<{ data: Folder[]; error: string | null }> {
     if (!userId) return { data: [], error: null };
     const supabase = getSupabaseClient();
@@ -455,7 +905,6 @@ export const supabaseService = {
     return { data: list, error: null };
   },
 
-  // 7. Create Folder
   async createFolder(
     folder: { name: string; icon?: string; color?: string; userId: string }
   ): Promise<{ data: Folder | null; error: string | null }> {
@@ -506,7 +955,6 @@ export const supabaseService = {
     return { data: newFolder, error: null };
   },
 
-  // 8. Update Folder
   async updateFolder(
     id: string,
     userId: string,
@@ -556,7 +1004,6 @@ export const supabaseService = {
     return { data: null, error: 'Folder not found' };
   },
 
-  // 9. Delete Folder
   async deleteFolder(id: string, userId: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
 
@@ -580,7 +1027,7 @@ export const supabaseService = {
     return { success: true, error: null };
   },
 
-  // 10. Fetch or Upsert Profile directly in Supabase
+  // 14. Profiles
   async getProfile(userId: string): Promise<Partial<User> | null> {
     const supabase = getSupabaseClient();
     if (!supabase || !userId) return null;
@@ -635,5 +1082,23 @@ export const supabaseService = {
       console.warn('Profile upsert exception:', e);
       return false;
     }
+  },
+
+  // 15. Export & Backup Vault Data
+  exportVaultData(user: User, userAssets: Asset[], userFolders: Folder[], bookmarks: string[]): string {
+    const backup = {
+      version: '2.0',
+      exportedAt: new Date().toISOString(),
+      user: {
+        id: user.id,
+        displayName: user.displayName,
+        bio: user.bio,
+        avatarUrl: user.avatarUrl
+      },
+      folders: userFolders,
+      assets: userAssets,
+      bookmarkedAssetIds: bookmarks
+    };
+    return JSON.stringify(backup, null, 2);
   }
 };

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Asset, AssetCategory, AssetIcon, Folder } from '../types';
-import { CATEGORIES, KAOMOJI_COLLECTIONS, POPULAR_EMOJIS } from '../lib/constants';
+import { Asset, AssetCategory, AssetIcon, Folder, AssetVisibility, AssetStatus } from '../types';
+import { CATEGORIES, KAOMOJI_COLLECTIONS, POPULAR_EMOJIS, STATUS_PRESETS, VISIBILITY_PRESETS } from '../lib/constants';
 import { 
   X, 
   Upload, 
@@ -8,7 +8,6 @@ import {
   Lock, 
   Globe, 
   Code, 
-  Image as ImageIcon, 
   Smile, 
   FileText, 
   Check,
@@ -17,7 +16,10 @@ import {
   Trash,
   Folder as FolderIcon,
   Plus,
-  Images
+  Images,
+  Link2,
+  FileEdit,
+  Activity
 } from 'lucide-react';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +30,7 @@ interface AssetEditorModalProps {
   onSave: (assetData: Partial<Asset>) => Promise<boolean>;
   initialData?: Asset | null;
   folders?: Folder[];
+  availableAssets?: Asset[];
   currentGuestAssetCount?: number;
   onOpenGuestLimitModal?: () => void;
   onOpenAIModalWithContext?: (type: string, context: string) => void;
@@ -39,6 +42,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   onSave,
   initialData,
   folders = [],
+  availableAssets = [],
   currentGuestAssetCount = 0,
   onOpenGuestLimitModal,
   onOpenAIModalWithContext
@@ -50,9 +54,16 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   const [category, setCategory] = useState<AssetCategory>(initialData?.category || 'character');
   const [content, setContent] = useState(initialData?.content || '');
   const [uiCodeSnippet, setUiCodeSnippet] = useState(initialData?.uiCodeSnippet || '');
-  const [isPublic, setIsPublic] = useState(initialData?.isPublic !== undefined ? initialData.isPublic : true);
+  
+  // Visibility & Status Workflow
+  const [visibility, setVisibility] = useState<AssetVisibility>(
+    initialData?.visibility || (initialData?.isPublic === false ? 'private' : 'public')
+  );
+  const [status, setStatus] = useState<AssetStatus>(initialData?.status || 'finished');
+
   const [tagsInput, setTagsInput] = useState(initialData?.tags?.join(', ') || '');
   const [folderId, setFolderId] = useState<string | null>(initialData?.folderId || null);
+  const [linkedAssetIds, setLinkedAssetIds] = useState<string[]>(initialData?.linkedAssetIds || []);
   
   // Icon State
   const [iconType, setIconType] = useState<'emoji' | 'kaomoji' | 'image'>(initialData?.icon?.type || 'emoji');
@@ -82,11 +93,13 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setCategory(initialData.category);
       setContent(initialData.content);
       setUiCodeSnippet(initialData.uiCodeSnippet || '');
-      setIsPublic(initialData.isPublic);
+      setVisibility(initialData.visibility || (initialData.isPublic ? 'public' : 'private'));
+      setStatus(initialData.status || 'finished');
       setTagsInput(initialData.tags?.join(', ') || '');
       setIconType(initialData.icon?.type || 'emoji');
       setIconValue(initialData.icon?.value || '🌸');
       setFolderId(initialData.folderId || null);
+      setLinkedAssetIds(initialData.linkedAssetIds || []);
       
       const imgs = initialData.previewImages && initialData.previewImages.length > 0
         ? initialData.previewImages
@@ -97,11 +110,13 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setCategory('character');
       setContent('');
       setUiCodeSnippet('');
-      setIsPublic(true);
+      setVisibility('public');
+      setStatus('finished');
       setTagsInput('');
       setIconType('emoji');
       setIconValue('🌸');
       setFolderId(null);
+      setLinkedAssetIds([]);
       setPreviewImages([]);
     }
     setErrorMsg('');
@@ -138,7 +153,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
     setPreviewImages(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  // Handle local image/GIF upload for Custom Icon
+  // Handle local image upload for Custom Icon
   const handleIconImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -154,6 +169,13 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setIconValue(reader.result as string);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Toggle linked resource
+  const toggleLinkedAsset = (assetId: string) => {
+    setLinkedAssetIds(prev => 
+      prev.includes(assetId) ? prev.filter(id => id !== assetId) : [...prev, assetId]
+    );
   };
 
   // Quick Preset Templates for Writers & Bot Creators
@@ -248,7 +270,10 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
         previewImage: previewImages[0] || '',
         previewImages: previewImages,
         folderId: folderId || null,
-        isPublic,
+        isPublic: visibility === 'public',
+        visibility,
+        status,
+        linkedAssetIds,
         tags,
         authorName: currentUser?.displayName || 'Anonymous Creator',
         authorAvatar: currentUser?.avatarUrl || ''
@@ -279,7 +304,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
               {initialData ? '✏️' : '✨'}
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800 dark:text-white">
+              <h2 className="text-base sm:text-lg font-bold text-slate-800 dark:text-white">
                 {initialData ? 'แก้ไขผลงานในคลัง' : 'สร้างผลงาน / แอสเซทใหม่'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -300,258 +325,94 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
           
           {errorMsg && (
-            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center gap-2.5 text-xs text-rose-700 dark:text-rose-300 font-medium">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-2xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
-          {/* Visibility Toggle Switch (Public vs Private) */}
-          <div className="p-4 rounded-2xl border border-purple-100 dark:border-purple-900/50 bg-gradient-to-r from-purple-50/40 to-pink-50/40 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                {isPublic ? (
-                  <span className="flex items-center gap-1 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100/70 dark:bg-indigo-950/70 px-2.5 py-0.5 rounded-full">
-                    <Globe className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>สาธารณะ (Public Feed)</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-100/70 dark:bg-rose-950/70 px-2.5 py-0.5 rounded-full">
-                    <Lock className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                    <span>ส่วนตัว (Private - ซ่อนจากผู้อื่น)</span>
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {isPublic
-                  ? 'แสดงในฟีดหน้าแรก ให้ทุกคนได้อ่านและค้นพบผลงาน'
-                  : 'มองเห็นได้เฉพาะคุณใน "คลังของฉัน" เท่านั้น (ความลับ/ไอเดียร่าง)'}
-              </p>
-            </div>
-
-            {/* Switch Control */}
-            <button
-              type="button"
-              onClick={() => setIsPublic(!isPublic)}
-              className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                isPublic ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-700'
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                  isPublic ? 'translate-x-7' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Quick Preset Buttons */}
-          <div className="space-y-1.5">
-            <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-              ✦ แม่แบบเริ่มต้นด่วน (Quick Presets):
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => applyTemplate('bot_char')}
-                className="px-3 py-1.5 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs font-semibold rounded-xl border border-purple-200 dark:border-purple-800 transition-colors flex items-center gap-1.5"
-              >
-                <span>🤖</span>
-                <span>บอทตัวละคร Roleplay</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => applyTemplate('system_prompt')}
-                className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-xs font-semibold rounded-xl border border-amber-200 dark:border-amber-800 transition-colors flex items-center gap-1.5"
-              >
-                <span>⚡</span>
-                <span>System Directive Prompt</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => applyTemplate('ui_bubble')}
-                className="px-3 py-1.5 bg-pink-50 dark:bg-pink-950/60 hover:bg-pink-100 dark:hover:bg-pink-900/60 text-pink-700 dark:text-pink-300 text-xs font-semibold rounded-xl border border-pink-200 dark:border-pink-800 transition-colors flex items-center gap-1.5"
-              >
-                <span>🌸</span>
-                <span>UI Bubble HTML/CSS</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Title & Category Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Visibility & Status Bar (Gen Z Minimalist Badge Group) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 p-3.5 bg-purple-50/40 dark:bg-slate-800/40 rounded-2xl border border-purple-100 dark:border-slate-800">
             
-            {/* Title Input */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                ชื่อผลงาน / หัวข้อแอสเซท <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="เช่น: คุโระ ชินจิ (แวมไพร์มาเฟีย) หรือ Custom Kawaii UI"
-                required
-                className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800 focus:bg-white dark:focus:bg-slate-850"
-              />
-            </div>
-
-            {/* Category Dropdown */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                หมวดหมู่หลัก (Category)
-              </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as AssetCategory)}
-                className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800"
-              >
-                {Object.entries(CATEGORIES).map(([key, cat]) => (
-                  <option key={key} value={key} className="dark:bg-slate-800">
-                    {cat.emoji} {cat.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-          </div>
-
-          {/* Custom Folder Assignment (Optional) */}
-          {folders.length > 0 && (
+            {/* 1. Visibility Selection */}
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <FolderIcon className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                <span>โฟลเดอร์จัดเก็บในคลัง (Custom Folder)</span>
+                <Globe className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>ระดับการมองเห็น (Visibility)</span>
               </label>
-              <select
-                value={folderId || ''}
-                onChange={(e) => setFolderId(e.target.value || null)}
-                className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800"
-              >
-                <option value="">(ไม่ระบุโฟลเดอร์ / เก็บที่หน้ารวม)</option>
-                {folders.map(f => (
-                  <option key={f.id} value={f.id} className="dark:bg-slate-800">
-                    {f.icon || '📁'} {f.name}
-                  </option>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(['public', 'private', 'draft'] as AssetVisibility[]).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVisibility(v)}
+                    className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all flex flex-col items-center gap-1 ${
+                      visibility === v
+                        ? 'border-purple-600 bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 shadow-xs'
+                        : 'border-transparent bg-slate-100/70 dark:bg-slate-800/50 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <span className="text-sm">
+                      {v === 'public' ? '🌐' : v === 'private' ? '🔒' : '📝'}
+                    </span>
+                    <span className="text-[11px]">
+                      {v === 'public' ? 'สาธารณะ' : v === 'private' ? 'ส่วนตัว' : 'แบบร่าง'}
+                    </span>
+                  </button>
                 ))}
-              </select>
-            </div>
-          )}
-
-          {/* Custom Icon Chooser (Emoji, Kaomoji, Upload) */}
-          <div className="space-y-2 p-4 bg-purple-50/50 dark:bg-purple-950/30 rounded-2xl border border-purple-100 dark:border-purple-900/50">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <span>🎨 ไอคอนประจำผลงาน (Custom Icon)</span>
-              </label>
-              
-              {/* Type Switcher */}
-              <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-0.5 rounded-xl border border-purple-100 dark:border-slate-700 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setIconType('emoji')}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                    iconType === 'emoji' ? 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200' : 'text-slate-500'
-                  }`}
-                >
-                  Emoji
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIconType('kaomoji')}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                    iconType === 'kaomoji' ? 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200' : 'text-slate-500'
-                  }`}
-                >
-                  Kaomoji
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIconType('image')}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                    iconType === 'image' ? 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200' : 'text-slate-500'
-                  }`}
-                >
-                  อัปโหลดรูป
-                </button>
               </div>
             </div>
 
-            {/* Icon Picker Body */}
-            <div className="pt-2">
-              {iconType === 'emoji' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl p-2 bg-white dark:bg-slate-800 rounded-xl border border-purple-200 dark:border-purple-800">
-                      {iconValue || '🌸'}
-                    </span>
-                    <input
-                      type="text"
-                      value={iconValue}
-                      onChange={(e) => setIconValue(e.target.value)}
-                      placeholder="พิมพ์หรือวาง Emoji"
-                      className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-xl text-xs"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {POPULAR_EMOJIS.map((em, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setIconValue(em)}
-                        className="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900 text-base flex items-center justify-center border border-purple-100 dark:border-slate-700 transition-transform active:scale-95"
-                      >
-                        {em}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+            {/* 2. Status Workflow Selection */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>สถานะงาน (Workflow Status)</span>
+              </label>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1">
+                {(['idea', 'draft', 'in_progress', 'finished', 'archived'] as AssetStatus[]).map((s) => {
+                  const meta = STATUS_PRESETS[s];
+                  const isSelected = status === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatus(s)}
+                      className={`py-1.5 px-1 rounded-xl text-[11px] font-bold border transition-all flex flex-col items-center gap-0.5 ${
+                        isSelected
+                          ? `${meta.bg} ${meta.text} ${meta.border} shadow-xs scale-102`
+                          : 'border-transparent bg-slate-100/70 dark:bg-slate-800/50 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                      title={meta.name}
+                    >
+                      <span className="text-xs">{meta.emoji}</span>
+                      <span className="truncate max-w-[55px]">{meta.nameEn}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-              {iconType === 'kaomoji' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1.5 bg-white dark:bg-slate-800 rounded-xl border border-purple-200 dark:border-purple-800 font-mono text-sm text-purple-800 dark:text-purple-200 font-bold">
-                      {iconValue || '(づ｡◕‿‿◕｡)づ'}
-                    </span>
-                    <input
-                      type="text"
-                      value={iconValue}
-                      onChange={(e) => setIconValue(e.target.value)}
-                      placeholder="พิมพ์ Kaomoji ตามต้องการ"
-                      className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-400"
-                    />
-                  </div>
-                  <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
-                    {KAOMOJI_COLLECTIONS.map((groupObj, gIdx) => (
-                      <div key={gIdx} className="space-y-1">
-                        <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
-                          {groupObj.group}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {groupObj.items.map((kaoStr, kIdx) => (
-                            <button
-                              key={kIdx}
-                              type="button"
-                              onClick={() => setIconValue(kaoStr)}
-                              className={`px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900 text-xs font-mono text-purple-800 dark:text-purple-200 border transition-all active:scale-95 ${
-                                iconValue === kaoStr
-                                  ? 'border-purple-500 ring-2 ring-purple-300 dark:ring-purple-700'
-                                  : 'border-purple-100 dark:border-slate-700'
-                              }`}
-                            >
-                              {kaoStr}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+          </div>
 
-              {iconType === 'image' && (
-                <div className="flex items-center gap-3">
+          {/* Title & Icon Header */}
+          <div className="flex gap-3 items-start">
+            
+            {/* Custom Icon Box */}
+            <div className="space-y-1 shrink-0">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                ไอคอน
+              </label>
+              <div className="relative group">
+                <div className="w-14 h-14 rounded-2xl bg-purple-50 dark:bg-slate-800 border-2 border-purple-200 dark:border-purple-800 flex items-center justify-center text-2xl overflow-hidden shadow-inner">
+                  {iconType === 'image' ? (
+                    <img src={iconValue} alt="Icon" className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{iconValue}</span>
+                  )}
+                </div>
+
+                <div className="absolute -bottom-1 -right-1 flex gap-1">
                   <input
                     type="file"
                     ref={iconImageInputRef}
@@ -559,44 +420,142 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
                     accept="image/*"
                     className="hidden"
                   />
-                  {iconValue && iconValue.startsWith('data:') ? (
-                    <img
-                      src={iconValue}
-                      alt="Icon preview"
-                      className="w-12 h-12 rounded-xl object-cover ring-2 ring-purple-300 dark:ring-purple-700"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-xl bg-purple-100 dark:bg-purple-900 flex items-center justify-center text-purple-600 dark:text-purple-300">
-                      <ImageIcon className="w-6 h-6" />
-                    </div>
-                  )}
-
                   <button
                     type="button"
                     onClick={() => iconImageInputRef.current?.click()}
-                    className="px-3.5 py-2 bg-white dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-xl text-xs font-semibold border border-purple-200 dark:border-slate-700 flex items-center gap-1.5 shadow-xs"
+                    title="อัปโหลดรูปภาพไอคอน"
+                    className="p-1 bg-purple-600 text-white rounded-full shadow-md hover:bg-purple-700 transition-colors"
                   >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>เลือกรูปภาพ / GIF จากเครื่อง</span>
+                    <Upload className="w-3 h-3" />
                   </button>
                 </div>
-              )}
+              </div>
+            </div>
+
+            {/* Title Input */}
+            <div className="flex-1 space-y-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                ชื่อผลงาน / ชื่อตัวละคร / หัวข้อ <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="เช่น: 🌸 พลอยใส (Ploysai) — บอทเพื่อนสนิทสายฮีลใจ"
+                className="w-full px-3.5 py-3 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800 focus:bg-white dark:focus:bg-slate-850 transition-all"
+                required
+              />
+
+              {/* Icon Presets Quick Selection */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar">
+                <span className="text-[10px] font-bold text-slate-400">อีโมจิด่วน:</span>
+                {POPULAR_EMOJIS.slice(0, 10).map((emoji, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setIconType('emoji');
+                      setIconValue(emoji);
+                    }}
+                    className="w-6 h-6 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-950 text-xs transition-transform hover:scale-125"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Main Content (Notes, Prompt, Character Lore) */}
+          {/* Category & Folder Organization */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            
+            {/* Category Select */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                หมวดหมู่หลัก (Category)
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as AssetCategory)}
+                className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800"
+              >
+                {Object.values(CATEGORIES).map(cat => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.emoji} {cat.name} ({cat.nameEn})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Folder Select */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                <FolderIcon className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>โฟลเดอร์จัดเก็บในคลัง (Folder)</span>
+              </label>
+              <select
+                value={folderId || ''}
+                onChange={(e) => setFolderId(e.target.value || null)}
+                className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-800"
+              >
+                <option value="">📁 ไม่ระบุโฟลเดอร์ (หน้าแรกคลัง)</option>
+                {folders.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.icon || '📁'} {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+          </div>
+
+          {/* Quick Writing Templates */}
+          <div className="p-3 bg-purple-50/50 dark:bg-purple-950/30 rounded-2xl border border-purple-100 dark:border-purple-900/40 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>เทมเพลตเริ่มต้นด่วน (Starter Presets)</span>
+              </span>
+              <span className="text-[10px] text-slate-400">กดเพื่อแทรกโครงสร้าง</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyTemplate('bot_char')}
+                className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-800 rounded-xl text-xs text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
+              >
+                🎭 ตัวละครแชทบอท & First Message
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTemplate('system_prompt')}
+                className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-800 rounded-xl text-xs text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
+              >
+                📝 System Prompts Directives
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTemplate('ui_bubble')}
+                className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-800 rounded-xl text-xs text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
+              >
+                💻 กล่องแชทพาสเทล CSS
+              </button>
+            </div>
+          </div>
+
+          {/* Main Content (Markdown/Prompt/Script) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                <span>เนื้อหาหลัก / โน้ต / Character Definition / Prompt</span>
+                <span>เนื้อหาหลัก / สคริปต์ / Prompt (รองรับ Markdown)</span>
               </label>
 
               {onOpenAIModalWithContext && (
                 <button
                   type="button"
-                  onClick={() => onOpenAIModalWithContext(category, content)}
-                  className="text-xs font-semibold text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 flex items-center gap-1"
+                  onClick={() => onOpenAIModalWithContext('refine', content)}
+                  className="text-xs font-semibold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                   <span>ใช้ AI ช่วยเกลาเนื้อหา</span>
@@ -653,6 +612,42 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* Linked Resources Selector */}
+          {availableAssets.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>ผลงานที่เชื่อมโยงกัน (Linked Related Resources)</span>
+              </label>
+              <p className="text-[11px] text-slate-400">
+                เลือกเชื่อมโยงตัวละครเข้ากับ Lore ประจำโลก หรือชุดคำสั่ง System Prompt อื่นๆ ในคลัง
+              </p>
+              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-800">
+                {availableAssets
+                  .filter(a => a.id !== initialData?.id)
+                  .map(a => {
+                    const isLinked = linkedAssetIds.includes(a.id);
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => toggleLinkedAsset(a.id)}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-medium border transition-all flex items-center gap-1.5 ${
+                          isLinked
+                            ? 'border-purple-500 bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-200'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-purple-300'
+                        }`}
+                      >
+                        <span>{a.icon?.value || '📄'}</span>
+                        <span className="truncate max-w-[140px]">{a.title}</span>
+                        {isLinked && <Check className="w-3 h-3 text-purple-600 dark:text-purple-400" />}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
 
           {/* Multiple Preview Images (Gallery) Upload from Device */}
           <div className="space-y-2">
