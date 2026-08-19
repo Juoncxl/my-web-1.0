@@ -104,20 +104,30 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
           {folders.map(f => {
             const isSelected = selectedFolderId === f.id;
             const colorMeta = FOLDER_COLOR_PRESETS.find(c => c.id === f.color) || FOLDER_COLOR_PRESETS[0];
+            const folderIsImage = f.icon && (f.icon.startsWith('data:image') || f.icon.startsWith('http'));
 
             return (
               <button
                 key={f.id}
                 type="button"
                 onClick={() => setSelectedFolderId(f.id)}
-                className={`w-full p-3 rounded-2xl border flex items-center justify-between transition-all ${
+                className={`w-full p-3 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${
                   isSelected
                     ? `${colorMeta.bg} border-purple-500 dark:border-purple-500 shadow-xs ring-2 ring-purple-400/40`
                     : 'bg-white dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="text-lg">{f.icon || '📁'}</span>
+                  {folderIsImage ? (
+                    <img
+                      src={f.icon}
+                      alt={f.name}
+                      className="w-6 h-6 rounded-lg object-cover shadow-xs shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="text-lg shrink-0">{f.icon || '📁'}</span>
+                  )}
                   <div className="text-left min-w-0">
                     <p className={`text-xs font-bold truncate ${colorMeta.text}`}>
                       {f.name}

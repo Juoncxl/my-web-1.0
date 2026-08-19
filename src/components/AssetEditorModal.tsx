@@ -27,7 +27,7 @@ import { useAuth } from '../context/AuthContext';
 interface AssetEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (assetData: Partial<Asset>) => Promise<boolean>;
+  onSave: (assetData: Partial<Asset>) => Promise<{ success: boolean; error?: string } | boolean>;
   initialData?: Asset | null;
   folders?: Folder[];
   availableAssets?: Asset[];
@@ -35,6 +35,17 @@ interface AssetEditorModalProps {
   onOpenGuestLimitModal?: () => void;
   onOpenAIModalWithContext?: (type: string, context: string) => void;
 }
+
+export const QUICK_APP_TAGS = [
+  'Doki chat',
+  'Khui ai',
+  'Rubii ai',
+  'Puean ai',
+  'Lovey Dovey',
+  'By me chocolate',
+  'Joylada',
+  'Silly tavern'
+];
 
 export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   isOpen,
@@ -130,7 +141,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
     const clean = tagInputValue.trim().replace(/^#/, '');
     if (!clean) return;
     if (tags.length >= 10) {
-      setErrorMsg('สามารถเพิ่มแท็กได้สูงสุด 10 แท็ก');
+      setErrorMsg('สามารถเพิ่มแท็กได้สูงสุด 10 แท็ก (กรุณาลบแท็กเดิมออกก่อนเพิ่มแท็กใหม่)');
       return;
     }
     if (!tags.includes(clean)) {
@@ -147,6 +158,21 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       handleAddTag();
+    }
+  };
+
+  // Quick App Tags Multi-select toggle
+  const handleToggleAppTag = (appTag: string) => {
+    const clean = appTag.trim();
+    if (tags.includes(clean)) {
+      setTags(tags.filter(t => t !== clean));
+    } else {
+      if (tags.length >= 10) {
+        setErrorMsg('สามารถเพิ่มแท็กได้สูงสุด 10 แท็ก (กรุณาลบแท็กเดิมออกก่อนเพิ่มแท็กใหม่)');
+        return;
+      }
+      setErrorMsg('');
+      setTags([...tags, clean]);
     }
   };
 
@@ -304,14 +330,17 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
         authorAvatar: currentUser?.avatarUrl || ''
       };
 
-      const ok = await onSave(payload);
-      if (ok) {
+      const res = await onSave(payload);
+      const isSuccess = typeof res === 'boolean' ? res : res?.success;
+      const errMsg = typeof res === 'object' && res?.error ? res.error : 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง';
+
+      if (isSuccess) {
         onClose();
       } else {
-        setErrorMsg('เกิดข้อผิดพลาดในการบันทึก กรุณาลองใหม่อีกครั้ง');
+        setErrorMsg(errMsg);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'บันทึกไม่สำเร็จ');
+      setErrorMsg(err?.message || 'บันทึกไม่สำเร็จ');
     } finally {
       setIsSubmitting(false);
     }
@@ -350,9 +379,29 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
           
           {errorMsg && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-2xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="p-4 bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-300 dark:border-rose-800 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start justify-between gap-3 shadow-md animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-bold text-rose-900 dark:text-rose-100 text-xs">
+                    ⚠️ แจ้งเตือนข้อผิดพลาด (Database / Save Alert)
+                  </h4>
+                  <p className="text-[11.5px] leading-relaxed break-words font-mono text-rose-700 dark:text-rose-300">
+                    {errorMsg}
+                  </p>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                    💡 ข้อความและไฟล์ทั้งหมดที่คุณกรอกยังถูกเก็บไว้ในหน้านี้อย่างปลอดภัย คุณสามารถแก้ไขข้อมูลแล้วกดบันทึกใหม่ได้ทันที
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setErrorMsg('')}
+                className="p-1 text-rose-400 hover:text-rose-700 dark:hover:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-lg transition-colors shrink-0"
+                title="ปิดการแจ้งเตือน"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
 
@@ -526,7 +575,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
                 <option value="">📁 ไม่ระบุโฟลเดอร์ (หน้าแรกคลัง)</option>
                 {folders.map(f => (
                   <option key={f.id} value={f.id}>
-                    {f.icon || '📁'} {f.name}
+                    {f.icon?.startsWith('http') || f.icon?.startsWith('data:image') ? '📁' : (f.icon || '📁')} {f.name}
                   </option>
                 ))}
               </select>
@@ -749,7 +798,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
           </div>
 
           {/* Interactive Tag Manager */}
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 แท็กค้นหา (พิมพ์แล้วกด + เพื่อเพิ่มแท็ก - สูงสุด 10 แท็ก)
@@ -757,6 +806,37 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
               <span className="text-[11px] font-mono text-purple-600 dark:text-purple-400 font-bold">
                 {tags.length}/10
               </span>
+            </div>
+
+            {/* Quick App Tags Multi-Select Preset Bar */}
+            <div className="p-3 bg-purple-50/60 dark:bg-purple-950/40 rounded-2xl border border-purple-100 dark:border-purple-900/50 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-pink-500" />
+                  <span>⚡ แอพที่รองรับ (Quick App Tags - กดเพื่อเลือกหลายแอพ):</span>
+                </span>
+                <span className="text-[10px] text-slate-400">เลือกได้หลายรายการ</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_APP_TAGS.map((appTag) => {
+                  const isSelected = tags.includes(appTag);
+                  return (
+                    <button
+                      key={appTag}
+                      type="button"
+                      onClick={() => handleToggleAppTag(appTag)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 cursor-pointer select-none active:scale-95 ${
+                        isSelected
+                          ? 'bg-gradient-to-r from-purple-600 to-pink-500 text-white border-transparent shadow-xs font-bold ring-2 ring-purple-300 dark:ring-purple-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-purple-100 dark:border-slate-700 hover:border-purple-300 hover:bg-purple-50 dark:hover:bg-slate-750'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3 h-3 text-white" />}
+                      <span>{appTag}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Tag Input Field with "+" Button */}
@@ -784,22 +864,29 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
             {/* Added Tag Chips / Badges */}
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {tags.map((tag, idx) => (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 dark:bg-purple-950/70 border border-purple-200 dark:border-purple-800/80 rounded-full text-xs font-semibold text-purple-700 dark:text-purple-300 shadow-xs animate-in fade-in zoom-in-95 duration-150"
-                  >
-                    <span>#{tag}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveTag(idx)}
-                      className="w-4 h-4 rounded-full bg-purple-200/60 dark:bg-purple-800/60 hover:bg-rose-500 hover:text-white text-purple-700 dark:text-purple-200 flex items-center justify-center transition-colors cursor-pointer"
-                      title="ลบแท็กนี้"
+                {tags.map((tag, idx) => {
+                  const isAppTag = QUICK_APP_TAGS.includes(tag);
+                  return (
+                    <span
+                      key={idx}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in-95 duration-150 border ${
+                        isAppTag
+                          ? 'bg-purple-100 dark:bg-purple-900/60 border-purple-300 dark:border-purple-700 text-purple-800 dark:text-purple-200'
+                          : 'bg-purple-50 dark:bg-purple-950/70 border-purple-200 dark:border-purple-800/80 text-purple-700 dark:text-purple-300'
+                      }`}
                     >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
-                  </span>
-                ))}
+                      <span>#{tag}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTag(idx)}
+                        className="w-4 h-4 rounded-full bg-purple-200/60 dark:bg-purple-800/60 hover:bg-rose-500 hover:text-white text-purple-700 dark:text-purple-200 flex items-center justify-center transition-colors cursor-pointer"
+                        title="ลบแท็กนี้"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             )}
           </div>

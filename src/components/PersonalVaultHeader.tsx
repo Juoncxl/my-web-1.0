@@ -286,18 +286,28 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
               {folders.map(f => {
                 const isSelected = selectedFolderId === f.id;
                 const colorMeta = FOLDER_COLOR_PRESETS.find(c => c.id === f.color) || FOLDER_COLOR_PRESETS[0];
+                const folderIsImage = f.icon && (f.icon.startsWith('data:image') || f.icon.startsWith('http'));
 
                 return (
                   <button
                     key={f.id}
                     onClick={() => onSelectFolder(f.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 border ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 border cursor-pointer ${
                       isSelected
                         ? 'bg-purple-600 text-white border-purple-600 font-bold shadow-xs'
                         : `${colorMeta.bg} ${colorMeta.text} ${colorMeta.border} hover:opacity-90`
                     }`}
                   >
-                    <span>{f.icon || '📁'}</span>
+                    {folderIsImage ? (
+                      <img
+                        src={f.icon}
+                        alt={f.name}
+                        className="w-4 h-4 rounded-md object-cover inline-block shrink-0 shadow-xs"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <span>{f.icon || '📁'}</span>
+                    )}
                     <span>{f.name}</span>
                     <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
                       isSelected ? 'bg-purple-700 text-white' : 'bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-200'

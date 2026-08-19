@@ -88,16 +88,16 @@ function mapAssetToDb(asset: Partial<Asset>) {
   const dbPayload: any = {};
   if (asset.id) dbPayload.id = asset.id;
   if (asset.userId) dbPayload.user_id = asset.userId;
-  if (asset.authorName) dbPayload.author_name = asset.authorName;
-  if (asset.authorAvatar !== undefined) dbPayload.author_avatar = asset.authorAvatar;
+  if (asset.authorName !== undefined) dbPayload.author_name = asset.authorName;
+  if (asset.authorAvatar !== undefined) dbPayload.author_avatar = asset.authorAvatar || '';
   if (asset.title !== undefined) dbPayload.title = asset.title;
-  if (asset.icon) dbPayload.icon = asset.icon;
-  if (asset.category) dbPayload.category = asset.category;
+  if (asset.icon !== undefined) dbPayload.icon = asset.icon;
+  if (asset.category !== undefined) dbPayload.category = asset.category;
   if (asset.content !== undefined) dbPayload.content = asset.content;
-  if (asset.uiCodeSnippet !== undefined) dbPayload.ui_code_snippet = asset.uiCodeSnippet;
-  if (asset.previewImage !== undefined) dbPayload.preview_image = asset.previewImage;
-  if (asset.previewImages !== undefined) dbPayload.preview_images = asset.previewImages;
-  if (asset.folderId !== undefined) dbPayload.folder_id = asset.folderId;
+  if (asset.uiCodeSnippet !== undefined) dbPayload.ui_code_snippet = asset.uiCodeSnippet || '';
+  if (asset.previewImage !== undefined) dbPayload.preview_image = asset.previewImage || '';
+  if (asset.previewImages !== undefined) dbPayload.preview_images = asset.previewImages || [];
+  if (asset.folderId !== undefined) dbPayload.folder_id = asset.folderId || null;
   
   if (asset.visibility !== undefined) {
     dbPayload.visibility = asset.visibility;
@@ -108,14 +108,14 @@ function mapAssetToDb(asset: Partial<Asset>) {
   }
 
   if (asset.status !== undefined) dbPayload.status = asset.status;
-  if (asset.tags !== undefined) dbPayload.tags = asset.tags;
-  if (asset.likesCount !== undefined) dbPayload.likes_count = asset.likesCount;
-  if (asset.forkCount !== undefined) dbPayload.fork_count = asset.forkCount;
-  if (asset.forkedFromId !== undefined) dbPayload.forked_from_id = asset.forkedFromId;
-  if (asset.forkedFromAuthor !== undefined) dbPayload.forked_from_author = asset.forkedFromAuthor;
-  if (asset.linkedAssetIds !== undefined) dbPayload.linked_asset_ids = asset.linkedAssetIds;
-  if (asset.versions !== undefined) dbPayload.versions = asset.versions;
-  if (asset.deletedAt !== undefined) dbPayload.deleted_at = asset.deletedAt;
+  if (asset.tags !== undefined) dbPayload.tags = asset.tags || [];
+  if (asset.likesCount !== undefined) dbPayload.likes_count = asset.likesCount ?? 0;
+  if (asset.forkCount !== undefined) dbPayload.fork_count = asset.forkCount ?? 0;
+  if (asset.forkedFromId !== undefined) dbPayload.forked_from_id = asset.forkedFromId || null;
+  if (asset.forkedFromAuthor !== undefined) dbPayload.forked_from_author = asset.forkedFromAuthor || null;
+  if (asset.linkedAssetIds !== undefined) dbPayload.linked_asset_ids = asset.linkedAssetIds || [];
+  if (asset.versions !== undefined) dbPayload.versions = asset.versions || [];
+  if (asset.deletedAt !== undefined) dbPayload.deleted_at = asset.deletedAt || null;
 
   dbPayload.updated_at = new Date().toISOString();
   return dbPayload;
@@ -282,16 +282,28 @@ export const supabaseService = {
           .single();
 
         if (error) {
-          console.warn('Supabase createAsset error:', error);
+          console.error('Supabase createAsset error:', error);
+          return { 
+            data: null, 
+            error: `Supabase Error (${error.code || 'DB'}): ${error.message}${error.details ? ` - ${error.details}` : ''}${error.hint ? ` (${error.hint})` : ''}` 
+          };
         } else if (data) {
-          return { data: mapDbToAsset(data), error: null };
+          const created = mapDbToAsset(data);
+          const list = getLocalAssets();
+          list.unshift(created);
+          saveLocalAssets(list);
+          return { data: created, error: null };
         }
       } catch (err: any) {
-        console.warn('Supabase insert error, saving locally:', err);
+        console.error('Supabase insert exception:', err);
+        return { 
+          data: null, 
+          error: `Supabase Connection Exception: ${err?.message || 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้'}` 
+        };
       }
     }
 
-    // Local fallback
+    // Local fallback for offline/guest mode without configured supabase
     const list = getLocalAssets();
     list.unshift(newAsset);
     saveLocalAssets(list);
@@ -339,12 +351,27 @@ export const supabaseService = {
           .single();
 
         if (error) {
-          console.warn('Supabase updateAsset error:', error);
+          console.error('Supabase updateAsset error:', error);
+          return { 
+            data: null, 
+            error: `Supabase Error (${error.code || 'DB'}): ${error.message}${error.details ? ` - ${error.details}` : ''}${error.hint ? ` (${error.hint})` : ''}` 
+          };
         } else if (data) {
-          return { data: mapDbToAsset(data), error: null };
+          const updated = mapDbToAsset(data);
+          const list = getLocalAssets();
+          const idx = list.findIndex(a => a.id === id);
+          if (idx !== -1) {
+            list[idx] = updated;
+            saveLocalAssets(list);
+          }
+          return { data: updated, error: null };
         }
       } catch (err: any) {
-        console.warn('Supabase update error:', err);
+        console.error('Supabase update exception:', err);
+        return { 
+          data: null, 
+          error: `Supabase Connection Exception: ${err?.message || 'ไม่สามารถบันทึกการแก้ไขได้'}` 
+        };
       }
     }
 
@@ -359,7 +386,7 @@ export const supabaseService = {
       return { data: list[idx], error: null };
     }
 
-    return { data: null, error: 'Asset not found' };
+    return { data: null, error: 'ไม่พบผลงานที่ต้องการแก้ไขในระบบ (Asset not found)' };
   },
 
   // 4. Soft Delete Asset (Moves to Trash)

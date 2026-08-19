@@ -176,26 +176,32 @@ function MainApp() {
   };
 
   // Handle Save (Create or Update)
-  const handleSaveAsset = async (assetData: Partial<Asset>): Promise<boolean> => {
-    if (!currentUser) return false;
+  const handleSaveAsset = async (assetData: Partial<Asset>): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
 
     // Check guest limit before saving if creating new
     if (!editingAsset && currentUser.isAnonymous && guestAssetCount >= 2) {
       setIsGuestLimitOpen(true);
-      return false;
+      return { 
+        success: false, 
+        error: 'บัญชีผู้เยี่ยมชม (Guest) สามารถสร้างผลงานได้สูงสุด 2 รายการ กรุณาสมัครหรือเข้าสู่ระบบเพื่อสร้างผลงานได้ไม่จำกัด' 
+      };
     }
 
     try {
       if (editingAsset) {
         // Update existing directly in Supabase
         const res = await supabaseService.updateAsset(editingAsset.id, assetData);
+        if (res.error) {
+          return { success: false, error: res.error };
+        }
         if (res.data) {
           setAssets(prev => prev.map(a => (a.id === editingAsset.id ? res.data! : a)));
           if (viewingAsset?.id === editingAsset.id) {
             setViewingAsset(res.data);
           }
           setEditingAsset(null);
-          return true;
+          return { success: true };
         }
       } else {
         // Create new directly in Supabase
@@ -217,16 +223,20 @@ function MainApp() {
           tags: assetData.tags || []
         });
 
+        if (res.error) {
+          return { success: false, error: res.error };
+        }
         if (res.data) {
           setAssets(prev => [res.data!, ...prev]);
           setIsCreateOpen(false);
-          return true;
+          return { success: true };
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Save asset error:', err);
+      return { success: false, error: err?.message || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุในการบันทึกผลงาน' };
     }
-    return false;
+    return { success: false, error: 'ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อและลองใหม่อีกครั้ง' };
   };
 
   // Feature 9: Soft Delete / Move to Trash
