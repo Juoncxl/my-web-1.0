@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Upload, Check, User, Camera, Sparkles } from 'lucide-react';
+import { X, Upload, Check, User, Camera, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface ProfileEditModalProps {
@@ -23,6 +23,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   const [bio, setBio] = useState(currentUser?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,15 +51,20 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
+    setErrorMsg('');
     try {
-      await updateProfile({
+      const result = await updateProfile({
         displayName: displayName.trim() || 'Creator',
         bio: bio.trim(),
         avatarUrl
       });
-      onClose();
-    } catch (err) {
-      console.error(err);
+      if (result.success) {
+        onClose();
+      } else {
+        setErrorMsg(result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ');
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'บันทึกโปรไฟล์ไม่สำเร็จ');
     } finally {
       setIsSaving(false);
     }
@@ -168,6 +174,13 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
           </div>
 
           {/* Footer */}
+          {errorMsg && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="pt-3 border-t border-purple-50 dark:border-slate-800 flex items-center justify-end gap-2">
             <button
               type="button"

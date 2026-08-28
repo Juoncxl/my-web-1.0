@@ -94,18 +94,12 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
                   <h1 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-white">
                     {currentUser?.displayName || 'Creator'}
                   </h1>
-                  {currentUser?.isGuest ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-pink-100 dark:bg-pink-950/80 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-800">
-                      โหมด Guest (จำกัด 2 ชิ้น)
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                      ✦ Certified Creator
-                    </span>
-                  )}
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                    ✦ Certified Creator
+                  </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
-                  {currentUser?.email ? currentUser.email : 'Local Guest Account'} • เข้าร่วมเมื่อ {currentUser?.createdAt ? formatShortDate(currentUser.createdAt) : 'เมื่อเร็วๆ นี้'}
+                  {currentUser?.email || 'บัญชี OAuth'} • เข้าร่วมเมื่อ {currentUser?.createdAt ? formatShortDate(currentUser.createdAt) : 'เมื่อเร็วๆ นี้'}
                 </p>
               </div>
 

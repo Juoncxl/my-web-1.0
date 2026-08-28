@@ -961,7 +961,7 @@ export const supabaseService = {
 
   async upsertProfile(user: User): Promise<boolean> {
     const supabase = getSupabaseClient();
-    if (!supabase || user.isGuest) return false;
+    if (!supabase) return false;
 
     try {
       const { error } = await supabase.from('profiles').upsert({

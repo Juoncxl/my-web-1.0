@@ -16,7 +16,6 @@ import { ProfileEditModal } from './components/ProfileEditModal';
 import { PersonalVaultHeader, VaultTabType } from './components/PersonalVaultHeader';
 import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
-import { GuestLimitModal } from './components/GuestLimitModal';
 import { ReportModal } from './components/ReportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { 
@@ -43,7 +42,6 @@ const RECENTLY_VIEWED_STORAGE_KEY = 'creator_vault_recently_viewed';
 function MainApp() {
   const { 
     currentUser, 
-    isLoading: authLoading,
     isAuthOpen,
     setIsAuthOpen,
     openAuthModal,
@@ -87,7 +85,6 @@ function MainApp() {
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
   const [isMoveToFolderOpen, setIsMoveToFolderOpen] = useState(false);
   const [movingAsset, setMovingAsset] = useState<Asset | null>(null);
-  const [isGuestLimitOpen, setIsGuestLimitOpen] = useState(false);
   const [aiContext, setAiContext] = useState<{ type: string; context: string } | null>(null);
 
   // Fetch Assets via direct Supabase BaaS
@@ -144,6 +141,12 @@ function MainApp() {
     fetchBookmarks();
   }, [currentUser?.id]);
 
+  useEffect(() => {
+    if (!currentUser && activeView === 'vault') {
+      setActiveView('feed');
+    }
+  }, [activeView, currentUser]);
+
   // Track recently viewed items
   const handleOpenAssetView = (asset: Asset) => {
     setViewingAsset(asset);
@@ -159,16 +162,19 @@ function MainApp() {
     });
   };
 
-  // Current Guest Asset Count
-  const guestAssetCount = useMemo(() => {
-    if (!currentUser?.isAnonymous) return 0;
-    return assets.filter(a => a.userId === currentUser.id && !a.deletedAt).length;
-  }, [assets, currentUser]);
+  const handleViewChange = (view: 'feed' | 'vault') => {
+    if (view === 'vault' && !currentUser) {
+      openAuthModal('login');
+      return;
+    }
+    setActiveView(view);
+    setSelectedTag(null);
+  };
 
-  // Check if user can create asset or should see Guest Limit modal
+  // Persisted actions require a real Supabase account session.
   const handleOpenCreateModal = () => {
-    if (currentUser?.isAnonymous && guestAssetCount >= 2) {
-      setIsGuestLimitOpen(true);
+    if (!currentUser) {
+      openAuthModal('signup');
       return;
     }
     setEditingAsset(null);
@@ -178,15 +184,6 @@ function MainApp() {
   // Handle Save (Create or Update)
   const handleSaveAsset = async (assetData: Partial<Asset>): Promise<{ success: boolean; error?: string }> => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
-
-    // Check guest limit before saving if creating new
-    if (!editingAsset && currentUser.isAnonymous && guestAssetCount >= 2) {
-      setIsGuestLimitOpen(true);
-      return { 
-        success: false, 
-        error: 'บัญชีผู้เยี่ยมชม (Guest) สามารถสร้างผลงานได้สูงสุด 2 รายการ กรุณาสมัครหรือเข้าสู่ระบบเพื่อสร้างผลงานได้ไม่จำกัด' 
-      };
-    }
 
     try {
       if (editingAsset) {
@@ -320,12 +317,6 @@ function MainApp() {
       return;
     }
 
-    // Check guest limit
-    if (currentUser.isAnonymous && guestAssetCount >= 2) {
-      setIsGuestLimitOpen(true);
-      return;
-    }
-
     try {
       const res = await supabaseService.forkAsset(
         sourceAsset,
@@ -422,6 +413,10 @@ function MainApp() {
 
   // Handle Like
   const handleLikeAsset = async (assetId: string) => {
+    if (!currentUser) {
+      openAuthModal('login');
+      return;
+    }
     try {
       const currentAsset = assets.find(a => a.id === assetId);
       const newCount = await supabaseService.likeAsset(assetId, currentAsset?.likesCount || 0);
@@ -432,6 +427,14 @@ function MainApp() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleOpenReport = (asset: Asset) => {
+    if (!currentUser) {
+      openAuthModal('login');
+      return;
+    }
+    setReportingAsset(asset);
   };
 
   // Filtered Assets Computation
@@ -568,10 +571,7 @@ function MainApp() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         activeView={activeView}
-        onViewChange={(view) => {
-          setActiveView(view);
-          setSelectedTag(null);
-        }}
+        onViewChange={handleViewChange}
         onOpenCreateModal={handleOpenCreateModal}
         onOpenAIModal={() => {
           setAiContext(null);
@@ -675,7 +675,7 @@ function MainApp() {
                 onLike={handleLikeAsset}
                 onBookmark={handleToggleBookmark}
                 onFork={handleForkAsset}
-                onReport={setReportingAsset}
+                onReport={handleOpenReport}
                 onRestore={handleRestoreAsset}
                 onPermanentDelete={handlePermanentDeleteAsset}
                 onSelectCategory={setSelectedCategory}
@@ -772,7 +772,7 @@ function MainApp() {
         onRestore={handleRestoreAsset}
         onBookmark={handleToggleBookmark}
         onFork={handleForkAsset}
-        onReport={setReportingAsset}
+        onReport={handleOpenReport}
         onSelectLinkedAsset={(linkedId) => {
           const target = assets.find(a => a.id === linkedId);
           if (target) handleOpenAssetView(target);
@@ -793,8 +793,6 @@ function MainApp() {
         initialData={editingAsset}
         folders={folders}
         availableAssets={assets.filter(a => a.userId === currentUser?.id && !a.deletedAt)}
-        currentGuestAssetCount={guestAssetCount}
-        onOpenGuestLimitModal={() => setIsGuestLimitOpen(true)}
         onOpenAIModalWithContext={(type, ctx) => {
           setAiContext({ type, context: ctx });
           setIsAIOpen(true);
@@ -828,15 +826,6 @@ function MainApp() {
         onOpenFolderManager={() => {
           setIsMoveToFolderOpen(false);
           setIsFolderManagerOpen(true);
-        }}
-      />
-
-      <GuestLimitModal
-        isOpen={isGuestLimitOpen}
-        onClose={() => setIsGuestLimitOpen(false)}
-        onOpenAuth={() => {
-          setIsGuestLimitOpen(false);
-          setIsAuthOpen(true);
         }}
       />
 

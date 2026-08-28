@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenProfileModal,
   onOpenSettingsModal
 }) => {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, isAuthenticated, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -58,8 +58,8 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   const userAvatar = currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
-  const displayName = currentUser?.displayName || (currentUser?.isGuest ? 'นักเขียนนิรนาม 🌸 (Guest)' : 'Creator');
-  const userEmail = currentUser?.email || (currentUser?.isGuest ? 'โหมดทดลองใช้งาน (Guest)' : '');
+  const displayName = currentUser?.displayName || 'ผู้เยี่ยมชม';
+  const userEmail = currentUser?.email || 'อ่านฟีดสาธารณะได้ — เข้าสู่ระบบเพื่อบันทึกข้อมูล';
 
   return (
     <header className="sticky top-0 z-30 bg-[#FAF8F5]/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-purple-100/70 dark:border-purple-950/70 transition-colors duration-200">
@@ -130,7 +130,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>ฟีดสาธารณะ</span>
               </button>
               <button
-                onClick={() => onViewChange('vault')}
+                onClick={() => isAuthenticated ? onViewChange('vault') : onOpenAuthModal()}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                   activeView === 'vault'
                     ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs'
@@ -215,7 +215,8 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="space-y-0.5">
                     <button
                       onClick={() => {
-                        onViewChange('vault');
+                        if (isAuthenticated) onViewChange('vault');
+                        else onOpenAuthModal();
                         setDropdownOpen(false);
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
@@ -235,33 +236,37 @@ export const Header: React.FC<HeaderProps> = ({
                       <span>ฟีดสาธารณะ (Public Feed)</span>
                     </button>
 
-                    <button
-                      onClick={() => {
-                        if (onOpenSettingsModal) onOpenSettingsModal();
-                        else onOpenProfileModal();
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
-                    >
-                      <Settings className="w-4 h-4 text-purple-500" />
-                      <span>ตั้งค่าบัญชี & รหัสผ่าน (Settings)</span>
-                    </button>
+                    {isAuthenticated && (
+                      <>
+                        <button
+                          onClick={() => {
+                            if (onOpenSettingsModal) onOpenSettingsModal();
+                            else onOpenProfileModal();
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
+                        >
+                          <Settings className="w-4 h-4 text-purple-500" />
+                          <span>ตั้งค่าบัญชี & รหัสผ่าน (Settings)</span>
+                        </button>
 
-                    <button
-                      onClick={() => {
-                        onOpenProfileModal();
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
-                    >
-                      <UserIcon className="w-4 h-4 text-slate-400" />
-                      <span>แก้ไขโปรไฟล์ (Edit Profile)</span>
-                    </button>
+                        <button
+                          onClick={() => {
+                            onOpenProfileModal();
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
+                        >
+                          <UserIcon className="w-4 h-4 text-slate-400" />
+                          <span>แก้ไขโปรไฟล์ (Edit Profile)</span>
+                        </button>
+                      </>
+                    )}
                   </div>
 
                   {/* Auth Actions */}
                   <div className="border-t border-purple-50 dark:border-purple-950 my-1 pt-1 space-y-0.5">
-                    {currentUser?.isGuest || !currentUser ? (
+                    {!isAuthenticated ? (
                       <>
                         <button
                           onClick={() => {

@@ -101,10 +101,8 @@ export interface User {
   displayName: string;
   bio?: string;
   avatarUrl?: string;
-  isGuest: boolean;
-  isAnonymous?: boolean;
   createdAt: string;
-  provider?: 'email' | 'google' | 'guest';
+  provider?: 'email' | 'google';
 }
 
 export interface AuthResponse {
@@ -113,18 +111,19 @@ export interface AuthResponse {
   isNewUser?: boolean;
   error?: string;
   message?: string;
+  requiresEmailConfirmation?: boolean;
 }
 
 export interface AuthContextType {
   currentUser: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isGuest: boolean;
   signUpWithEmail: (email: string, pass: string) => Promise<AuthResponse>;
   loginWithEmail: (email: string, pass: string, name?: string) => Promise<AuthResponse>;
   loginWithGoogle: () => Promise<AuthResponse>;
-  loginAsGuest: (customName?: string) => Promise<boolean>;
-  logout: () => void;
-  updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<boolean>;
+  logout: () => Promise<void>;
+  updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<{ success: boolean; error?: string }>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   isOnboardingOpen: boolean;
   setIsOnboardingOpen: (open: boolean) => void;

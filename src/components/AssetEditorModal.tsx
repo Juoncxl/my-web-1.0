@@ -31,8 +31,6 @@ interface AssetEditorModalProps {
   initialData?: Asset | null;
   folders?: Folder[];
   availableAssets?: Asset[];
-  currentGuestAssetCount?: number;
-  onOpenGuestLimitModal?: () => void;
   onOpenAIModalWithContext?: (type: string, context: string) => void;
 }
 
@@ -54,8 +52,6 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   initialData,
   folders = [],
   availableAssets = [],
-  currentGuestAssetCount = 0,
-  onOpenGuestLimitModal,
   onOpenAIModalWithContext
 }) => {
   const { currentUser } = useAuth();
@@ -286,15 +282,6 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Check Guest limit (Anti-spam)
-    if (!initialData && currentUser?.isAnonymous && currentGuestAssetCount >= 2) {
-      if (onOpenGuestLimitModal) {
-        onClose();
-        onOpenGuestLimitModal();
-        return;
-      }
-    }
 
     if (!title.trim()) {
       setErrorMsg('กรุณากรอกชื่อเรื่องของผลงาน');

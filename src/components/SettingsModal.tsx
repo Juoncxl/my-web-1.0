@@ -72,15 +72,15 @@ export const SettingsModal: React.FC = () => {
     setIsSavingProfile(true);
     setProfileMsg(null);
     try {
-      const ok = await updateProfile({
+      const result = await updateProfile({
         displayName: displayName.trim() || 'Creator 🌸',
         bio: bio.trim(),
         avatarUrl
       });
-      if (ok) {
+      if (result.success) {
         setProfileMsg({ type: 'success', text: 'บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว' });
       } else {
-        setProfileMsg({ type: 'error', text: 'บันทึกโปรไฟล์ไม่สำเร็จ' });
+        setProfileMsg({ type: 'error', text: result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ' });
       }
     } catch (err: any) {
       setProfileMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการบันทึก' });
@@ -321,7 +321,7 @@ export const SettingsModal: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={currentUser?.email || `Guest Session (${currentUser?.id})`}
+                  value={currentUser?.email || 'บัญชี OAuth'}
                   disabled
                   className="w-full px-3.5 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400 cursor-not-allowed"
                 />
@@ -368,10 +368,10 @@ export const SettingsModal: React.FC = () => {
                 </div>
               )}
 
-              {currentUser?.isGuest ? (
+              {currentUser?.provider !== 'email' ? (
                 <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-2xl text-xs text-amber-800 dark:text-amber-300 space-y-2">
-                  <p className="font-bold">⚠️ คุณกำลังอยู่ในโหมด Guest</p>
-                  <p>กรุณาสมัครสมาชิกหรือเข้าสู่ระบบด้วยอีเมลเพื่อใช้งานฟังก์ชันความปลอดภัยและการเปลี่ยนรหัสผ่าน</p>
+                  <p className="font-bold">บัญชีนี้เข้าสู่ระบบผ่านผู้ให้บริการภายนอก</p>
+                  <p>กรุณาจัดการรหัสผ่านผ่านผู้ให้บริการบัญชีของคุณ</p>
                 </div>
               ) : (
                 <>

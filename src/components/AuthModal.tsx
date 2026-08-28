@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Mail, Lock, Sparkles, LogIn, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Mail, Lock, LogIn, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { formatFriendlyErrorMessage } from '../lib/apiHelper';
 
@@ -12,15 +12,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const { 
     loginWithEmail, 
     signUpWithEmail, 
-    loginAsGuest, 
     authDefaultTab 
   } = useAuth();
 
-  const [mode, setMode] = useState<'login' | 'signup' | 'guest'>('login');
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [guestName, setGuestName] = useState('นักเขียนนิรนาม 🌸');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -78,23 +76,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     try {
       const res = await signUpWithEmail(email, password);
       if (res && res.success) {
-        onClose();
+        if (res.requiresEmailConfirmation) {
+          setSuccessMsg(res.message || 'สร้างบัญชีแล้ว กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ');
+          setMode('login');
+          setPassword('');
+          setConfirmPassword('');
+        } else {
+          onClose();
+        }
       } else {
         setError(formatFriendlyErrorMessage(res?.error || 'การลงทะเบียนไม่สำเร็จ'));
       }
-    } catch (err: any) {
-      setError(formatFriendlyErrorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGuestSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      await loginAsGuest(guestName.trim() || 'นักเขียนนิรนาม 🌸 (Guest)');
-      onClose();
     } catch (err: any) {
       setError(formatFriendlyErrorMessage(err));
     } finally {
@@ -115,10 +107,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
-                {mode === 'login' ? 'เข้าสู่ระบบ Creator Vault' : mode === 'signup' ? 'สมัครสมาชิกผู้สร้าง' : 'โหมดทดลองใช้งาน (Guest)'}
+                {mode === 'login' ? 'เข้าสู่ระบบ Creator Vault' : 'สมัครสมาชิกผู้สร้าง'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {mode === 'login' ? 'เชื่อมต่อและซิงค์ผลงานของคุณบนทุกอุปกรณ์' : mode === 'signup' ? 'บันทึก Character, Lore & Code ลง Supabase ถาวร' : 'ทดลองสร้างผลงานได้ 2 ชิ้นโดยไม่ต้องสมัคร'}
+                {mode === 'login' ? 'เชื่อมต่อและซิงค์ผลงานของคุณบนทุกอุปกรณ์' : 'บันทึก Character, Lore & Code ลง Supabase ถาวร'}
               </p>
             </div>
           </div>
@@ -132,7 +124,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Mode Switcher Tabs */}
-        <div className="px-6 pt-4 grid grid-cols-3 gap-1.5 bg-slate-50/60 dark:bg-slate-900/60 p-2 m-4 mb-0 rounded-2xl border border-slate-100 dark:border-slate-800">
+        <div className="px-6 pt-4 grid grid-cols-2 gap-1.5 bg-slate-50/60 dark:bg-slate-900/60 p-2 m-4 mb-0 rounded-2xl border border-slate-100 dark:border-slate-800">
           <button
             type="button"
             onClick={() => { setMode('login'); setError(''); }}
@@ -159,18 +151,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             <span>สมัครสมาชิก</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => { setMode('guest'); setError(''); }}
-            className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              mode === 'guest'
-                ? 'bg-pink-500 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Guest</span>
-          </button>
         </div>
 
         {/* Form Body */}
@@ -326,37 +306,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   </button>
                 </p>
               </div>
-            </form>
-          )}
-
-          {/* Mode 3: Guest */}
-          {mode === 'guest' && (
-            <form onSubmit={handleGuestSubmit} className="space-y-4">
-              <div className="p-4 bg-pink-50/80 dark:bg-pink-950/40 rounded-2xl border border-pink-100 dark:border-pink-900/60 text-xs text-pink-900 dark:text-pink-200 leading-relaxed">
-                🌸 <strong>โหมด Guest (Anonymous)</strong> ช่วยให้คุณสามารถทดลองสร้าง Character Card, บันทึก Prompt และทดลองใช้ AI Assistant ได้ทันที (จำกัดผลงาน 2 ชิ้นในเซสชันชั่วคราว)
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  ตั้งชื่อชั่วคราวสำหรับผลงาน
-                </label>
-                <input
-                  type="text"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  placeholder="เช่น: นักเขียนนิรนาม 🌸"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 focus:bg-white dark:focus:bg-slate-800 text-slate-800 dark:text-slate-100"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-pink-200 dark:shadow-pink-950/50 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>เริ่มใช้งานในโหมด Guest ทันที</span>
-              </button>
             </form>
           )}
 
