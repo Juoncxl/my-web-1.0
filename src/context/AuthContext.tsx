@@ -4,6 +4,7 @@ import { AuthContextType, AuthResponse, User } from '../types';
 import { formatFriendlyErrorMessage } from '../lib/apiHelper';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { supabaseService } from '../lib/supabaseService';
+import { isGuestUser } from '../lib/accessPolicy';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -301,8 +302,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         currentUser,
         isLoading,
-        isAuthenticated: Boolean(currentUser),
-        isGuest: !currentUser,
+        isAuthenticated: !isGuestUser(currentUser),
+        isGuest: isGuestUser(currentUser),
         signUpWithEmail,
         loginWithEmail,
         loginWithGoogle,

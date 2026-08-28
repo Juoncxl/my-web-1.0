@@ -3,6 +3,13 @@ import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Asset, AssetCategory, AssetStatus, Folder } from './types';
 import { supabaseService } from './lib/supabaseService';
+import {
+  canCreateOwnedAsset,
+  canForkAsset,
+  isOwnedActiveAsset,
+  isPublicFeedAsset,
+  isTrashAssetForUser
+} from './lib/accessPolicy';
 import { Header } from './components/Header';
 import { CategoryNav } from './components/CategoryNav';
 import { AssetCard } from './components/AssetCard';
@@ -224,7 +231,7 @@ function MainApp() {
 
   // Persisted actions require a real Supabase account session.
   const handleOpenCreateModal = () => {
-    if (!currentUser) {
+    if (!canCreateOwnedAsset(currentUser)) {
       openAuthModal('signup');
       return;
     }
@@ -382,6 +389,10 @@ function MainApp() {
   const handleForkAsset = async (sourceAsset: Asset) => {
     if (!currentUser) {
       openAuthModal('login');
+      return;
+    }
+    if (!canForkAsset(currentUser, sourceAsset)) {
+      setOperationError('ผลงานนี้เป็นส่วนตัว ถูกลบ หรือไม่สามารถสร้างสำเนาได้');
       return;
     }
 
@@ -552,13 +563,11 @@ function MainApp() {
       // 1. View & Vault Tab Filter:
       if (activeView === 'feed') {
         // Feed only shows non-deleted public assets
-        if (asset.deletedAt) return false;
-        if (!asset.isPublic && asset.visibility !== 'public') return false;
+        if (!isPublicFeedAsset(asset)) return false;
       } else if (activeView === 'vault') {
         
         if (activeVaultTab === 'my_assets') {
-          if (asset.userId !== currentUser?.id) return false;
-          if (asset.deletedAt) return false;
+          if (!isOwnedActiveAsset(asset, currentUser?.id)) return false;
 
           // Folder filter
           if (selectedFolderId === 'unassigned') {
@@ -588,8 +597,7 @@ function MainApp() {
 
         } else if (activeVaultTab === 'trash') {
           // Trash tab: ONLY deleted assets owned by user
-          if (asset.userId !== currentUser?.id) return false;
-          if (!asset.deletedAt) return false;
+          if (!isTrashAssetForUser(asset, currentUser?.id)) return false;
         }
       }
 
@@ -637,12 +645,12 @@ function MainApp() {
     const counts: Record<string, number> = { all: 0 };
     
     const baseAssets = assets.filter(asset => {
-      if (activeView === 'feed') return !asset.deletedAt && (asset.isPublic || asset.visibility === 'public');
+      if (activeView === 'feed') return isPublicFeedAsset(asset);
       if (activeView === 'vault') {
-        if (activeVaultTab === 'my_assets') return asset.userId === currentUser?.id && !asset.deletedAt;
+        if (activeVaultTab === 'my_assets') return isOwnedActiveAsset(asset, currentUser?.id);
         if (activeVaultTab === 'bookmarks') return bookmarkedAssetIds.includes(asset.id) && !asset.deletedAt;
         if (activeVaultTab === 'recent') return recentlyViewedIds.includes(asset.id) && !asset.deletedAt;
-        if (activeVaultTab === 'trash') return asset.userId === currentUser?.id && !!asset.deletedAt;
+        if (activeVaultTab === 'trash') return isTrashAssetForUser(asset, currentUser?.id);
       }
       return true;
     });

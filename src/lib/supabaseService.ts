@@ -1,6 +1,7 @@
 import { Asset, Folder, User, AssetVisibility, AssetStatus, AssetVersion } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { formatFriendlyErrorMessage } from './apiHelper';
+import { isLegacyGuestUserId } from './accessPolicy';
 
 // Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
@@ -105,10 +106,6 @@ function getLegacyImportState(userId: string): LegacyImportState {
 
 function saveLegacyImportState(userId: string, state: LegacyImportState): void {
   localStorage.setItem(`${LEGACY_IMPORT_STORAGE_PREFIX}${userId}`, JSON.stringify(state));
-}
-
-function isLegacyGuestOwner(userId: unknown): userId is string {
-  return typeof userId === 'string' && userId.startsWith('guest_');
 }
 
 // Convert Supabase DB snake_case record to Client Asset
@@ -982,10 +979,10 @@ export const supabaseService = {
     if (!userId) return { assets: 0, folders: 0 };
     const state = getLegacyImportState(userId);
     const assets = getLocalAssets().filter(asset =>
-      isLegacyGuestOwner(asset.userId) && !state.assetIds.includes(asset.id)
+      isLegacyGuestUserId(asset.userId) && !state.assetIds.includes(asset.id)
     );
     const folders = getAllLocalFolders().filter(folder =>
-      isLegacyGuestOwner(folder.userId) && !state.folderIdMap[folder.id]
+      isLegacyGuestUserId(folder.userId) && !state.folderIdMap[folder.id]
     );
     return { assets: assets.length, folders: folders.length };
   },
@@ -1012,8 +1009,8 @@ export const supabaseService = {
     }
 
     const state = getLegacyImportState(auth.userId);
-    const legacyFolders = getAllLocalFolders().filter(folder => isLegacyGuestOwner(folder.userId));
-    const legacyAssets = getLocalAssets().filter(asset => isLegacyGuestOwner(asset.userId));
+    const legacyFolders = getAllLocalFolders().filter(folder => isLegacyGuestUserId(folder.userId));
+    const legacyAssets = getLocalAssets().filter(asset => isLegacyGuestUserId(asset.userId));
     let importedFolders = 0;
     let importedAssets = 0;
     const errors: string[] = [];
