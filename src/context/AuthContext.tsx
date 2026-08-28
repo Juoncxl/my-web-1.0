@@ -253,10 +253,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const saved = await supabaseService.upsertProfile(updatedUser);
-    if (!saved) {
+    if (!saved.success) {
       return {
         success: false,
-        error: 'บันทึกโปรไฟล์บนคลาวด์ไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกเปลี่ยน'
+        error: saved.error || 'บันทึกโปรไฟล์บนคลาวด์ไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกเปลี่ยน'
       };
     }
 

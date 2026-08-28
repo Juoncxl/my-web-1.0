@@ -1,5 +1,6 @@
 import { Asset, Folder, User, AssetVisibility, AssetStatus, ContentReport, AssetVersion } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+import { formatFriendlyErrorMessage } from './apiHelper';
 
 // Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
@@ -7,6 +8,52 @@ const LOCAL_STORAGE_FOLDERS = 'creator_vault_local_folders';
 const LOCAL_STORAGE_BOOKMARKS = 'creator_vault_bookmarks';
 const LOCAL_STORAGE_RECENT_VIEWED = 'creator_vault_recent_viewed';
 const LOCAL_STORAGE_REPORTS = 'creator_vault_reports';
+const LEGACY_IMPORT_STORAGE_PREFIX = 'creator_vault_legacy_import_';
+
+type CloudAuth = { userId: string; error: null } | { userId: null; error: string };
+
+function logServiceError(context: string, error: unknown) {
+  if ((import.meta as any).env?.DEV) {
+    console.error(`[supabaseService:${context}]`, error);
+  }
+}
+
+function toServiceError(error: any, fallback: string): string {
+  logServiceError(fallback, error);
+  const code = String(error?.code || '');
+  const message = String(error?.message || error || '');
+
+  if (code === '42501' || code === 'PGRST301' || /row-level security|permission denied/i.test(message)) {
+    return 'คุณไม่มีสิทธิ์ดำเนินการกับข้อมูลนี้ หรือ session หมดอายุแล้ว';
+  }
+  if (code === '23505') return 'ข้อมูลนี้มีอยู่แล้วในระบบ';
+  if (/failed to fetch|network|connection/i.test(message)) {
+    return 'เชื่อมต่อระบบคลาวด์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
+  }
+
+  const friendly = formatFriendlyErrorMessage(error);
+  return friendly === message && message ? fallback : friendly || fallback;
+}
+
+async function requireCloudUser(expectedUserId?: string): Promise<CloudAuth> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { userId: null, error: 'ระบบคลาวด์ยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลเว็บไซต์' };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session?.user) {
+      return { userId: null, error: 'กรุณาเข้าสู่ระบบอีกครั้งก่อนบันทึกข้อมูล' };
+    }
+    if (expectedUserId && data.session.user.id !== expectedUserId) {
+      return { userId: null, error: 'บัญชีปัจจุบันไม่ตรงกับเจ้าของข้อมูล' };
+    }
+    return { userId: data.session.user.id, error: null };
+  } catch (error) {
+    return { userId: null, error: toServiceError(error, 'ตรวจสอบ session ไม่สำเร็จ') };
+  }
+}
 
 // Helper to get local fallback assets (Empty by default, no mock data)
 function getLocalAssets(): Asset[] {
@@ -27,25 +74,51 @@ function saveLocalAssets(assets: Asset[]) {
   }
 }
 
-function getLocalFolders(userId: string): Folder[] {
+function getAllLocalFolders(): Folder[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_FOLDERS);
-    if (raw) {
-      const all: Folder[] = JSON.parse(raw);
-      return all.filter(f => f.userId === userId);
-    }
+    if (raw) return JSON.parse(raw);
   } catch (e) {
     console.warn('Local folders read error:', e);
   }
   return [];
 }
 
-function saveLocalFolders(folders: Folder[]) {
+function parseStoredJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== 'string') return (value as T) ?? fallback;
   try {
-    localStorage.setItem(LOCAL_STORAGE_FOLDERS, JSON.stringify(folders));
-  } catch (e) {
-    console.warn('Local folders write error:', e);
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
   }
+}
+
+type LegacyImportState = {
+  assetIds: string[];
+  folderIdMap: Record<string, string>;
+};
+
+function getLegacyImportState(userId: string): LegacyImportState {
+  try {
+    const raw = localStorage.getItem(`${LEGACY_IMPORT_STORAGE_PREFIX}${userId}`);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      assetIds: Array.isArray(parsed?.assetIds) ? parsed.assetIds : [],
+      folderIdMap: parsed?.folderIdMap && typeof parsed.folderIdMap === 'object'
+        ? parsed.folderIdMap
+        : {}
+    };
+  } catch {
+    return { assetIds: [], folderIdMap: {} };
+  }
+}
+
+function saveLegacyImportState(userId: string, state: LegacyImportState): void {
+  localStorage.setItem(`${LEGACY_IMPORT_STORAGE_PREFIX}${userId}`, JSON.stringify(state));
+}
+
+function isLegacyGuestOwner(userId: unknown): userId is string {
+  return typeof userId === 'string' && userId.startsWith('guest_');
 }
 
 // Convert Supabase DB snake_case record to Client Asset
@@ -60,7 +133,9 @@ function mapDbToAsset(row: any): Asset {
     authorName: row.author_name || row.authorName || 'Creator',
     authorAvatar: row.author_avatar || row.authorAvatar,
     title: row.title || '',
-    icon: typeof row.icon === 'string' ? JSON.parse(row.icon) : row.icon || { type: 'emoji', value: '✨' },
+    icon: typeof row.icon === 'string'
+      ? parseStoredJson(row.icon, { type: 'emoji', value: row.icon || '✨' })
+      : row.icon || { type: 'emoji', value: '✨' },
     category: row.category,
     content: row.content || '',
     uiCodeSnippet: row.ui_code_snippet || row.uiCodeSnippet || '',
@@ -79,7 +154,7 @@ function mapDbToAsset(row: any): Asset {
     forkedFromId: row.forked_from_id || row.forkedFromId || null,
     forkedFromAuthor: row.forked_from_author || row.forkedFromAuthor || null,
     linkedAssetIds: row.linked_asset_ids || row.linkedAssetIds || [],
-    versions: typeof row.versions === 'string' ? JSON.parse(row.versions) : (row.versions || [])
+    versions: parseStoredJson(row.versions, [])
   };
 }
 
@@ -147,90 +222,72 @@ export const supabaseService = {
     onlyDeleted?: boolean;
   }): Promise<{ data: Asset[]; error: string | null }> {
     const supabase = getSupabaseClient();
+    if (!supabase) {
+      return { data: [], error: 'ระบบคลาวด์ยังไม่พร้อมใช้งาน จึงไม่สามารถโหลดคลังผลงานได้' };
+    }
 
-    if (supabase) {
-      try {
-        let query = supabase.from('assets').select('*');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUserId = sessionData.session?.user.id;
+      let query = supabase.from('assets').select('*');
 
-        if (options?.onlyDeleted) {
-          query = query.not('deleted_at', 'is', null);
-        } else if (!options?.includeDeleted) {
+      if (options?.onlyDeleted) {
+        if (!sessionUserId || (options.userId && options.userId !== sessionUserId)) {
+          return { data: [], error: 'กรุณาเข้าสู่ระบบเพื่อดูถังขยะของคุณ' };
+        }
+        query = query.eq('user_id', sessionUserId).not('deleted_at', 'is', null);
+      } else if (options?.userId) {
+        query = query.eq('user_id', options.userId);
+        if (sessionUserId !== options.userId) {
+          query = query
+            .eq('visibility', 'public')
+            .eq('is_public', true)
+            .is('deleted_at', null);
+        } else if (!options.includeDeleted) {
           query = query.is('deleted_at', null);
         }
-
-        if (options?.category && options.category !== 'all') {
-          query = query.eq('category', options.category);
-        }
-
-        if (options?.userId) {
-          // Specific user profile or personal vault
-          query = query.eq('user_id', options.userId);
-          if (options.folderId !== undefined) {
-            if (options.folderId === null) {
-              query = query.is('folder_id', null);
-            } else {
-              query = query.eq('folder_id', options.folderId);
-            }
-          }
-        } else {
-          // Public community exploration: show public assets OR user's own items
-          if (options?.currentUserId) {
-            query = query.or(`visibility.eq.public,is_public.eq.true,user_id.eq.${options.currentUserId}`);
-          } else {
-            query = query.or('visibility.eq.public,is_public.eq.true');
-          }
-        }
-
-        query = query.order('created_at', { ascending: false });
-
-        const { data, error } = await query;
-
-        if (error) {
-          console.warn('Supabase fetchAssets error:', error);
-        } else if (data) {
-          const assets = data.map(mapDbToAsset);
-          return { data: assets, error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase query error, fallback to local:', err);
-      }
-    }
-
-    // Local fallback for guest or when Supabase is offline
-    let list = getLocalAssets();
-
-    if (options?.onlyDeleted) {
-      list = list.filter(a => !!a.deletedAt);
-    } else if (!options?.includeDeleted) {
-      list = list.filter(a => !a.deletedAt);
-    }
-
-    if (options?.category && options.category !== 'all') {
-      list = list.filter(a => a.category === options.category);
-    }
-    if (options?.userId) {
-      list = list.filter(a => a.userId === options.userId);
-      if (options.folderId !== undefined) {
-        list = list.filter(a => a.folderId === options.folderId);
-      }
-    } else {
-      if (options?.currentUserId) {
-        list = list.filter(a => a.visibility === 'public' || a.isPublic || a.userId === options.currentUserId);
+      } else if (sessionUserId) {
+        const ownerClause = options?.includeDeleted
+          ? `user_id.eq.${sessionUserId}`
+          : `and(user_id.eq.${sessionUserId},deleted_at.is.null)`;
+        query = query.or(
+          `and(visibility.eq.public,is_public.eq.true,deleted_at.is.null),${ownerClause}`
+        );
       } else {
-        list = list.filter(a => a.visibility === 'public' || a.isPublic);
+        query = query
+          .eq('visibility', 'public')
+          .eq('is_public', true)
+          .is('deleted_at', null);
       }
-    }
 
-    if (options?.search?.trim()) {
-      const q = options.search.toLowerCase().trim();
-      list = list.filter(a =>
-        a.title.toLowerCase().includes(q) ||
-        a.content.toLowerCase().includes(q) ||
-        a.tags?.some(t => t.toLowerCase().includes(q))
-      );
-    }
+      if (options?.category && options.category !== 'all') {
+        query = query.eq('category', options.category);
+      }
+      if (options?.userId && options.folderId !== undefined) {
+        query = options.folderId === null
+          ? query.is('folder_id', null)
+          : query.eq('folder_id', options.folderId);
+      }
 
-    return { data: list, error: null };
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (error) {
+        return { data: [], error: toServiceError(error, 'โหลดคลังผลงานไม่สำเร็จ') };
+      }
+
+      let list = (data || []).map(mapDbToAsset);
+      if (options?.search?.trim()) {
+        const search = options.search.toLowerCase().trim();
+        list = list.filter(asset =>
+          asset.title.toLowerCase().includes(search) ||
+          asset.content.toLowerCase().includes(search) ||
+          asset.tags?.some(tag => tag.toLowerCase().includes(search))
+        );
+      }
+
+      return { data: list, error: null };
+    } catch (error) {
+      return { data: [], error: toServiceError(error, 'โหลดคลังผลงานไม่สำเร็จ') };
+    }
   },
 
   // 2. Create Asset
@@ -238,6 +295,10 @@ export const supabaseService = {
     assetData: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<{ data: Asset | null; error: string | null }> {
     const supabase = getSupabaseClient();
+    const auth = await requireCloudUser(assetData.userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
     const newId = `asset_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
@@ -254,6 +315,7 @@ export const supabaseService = {
     const newAsset: Asset = {
       ...assetData,
       id: newId,
+      userId: auth.userId,
       visibility,
       isPublic: visibility === 'public',
       status,
@@ -269,45 +331,39 @@ export const supabaseService = {
       previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : [])
     };
 
-    if (supabase) {
-      try {
-        const dbPayload = mapAssetToDb(newAsset);
-        dbPayload.id = newId;
-        dbPayload.created_at = now;
-
-        const { data, error } = await supabase
-          .from('assets')
-          .insert(dbPayload)
-          .select()
-          .single();
-
-        if (error) {
-          console.error('Supabase createAsset error:', error);
-          return { 
-            data: null, 
-            error: `Supabase Error (${error.code || 'DB'}): ${error.message}${error.details ? ` - ${error.details}` : ''}${error.hint ? ` (${error.hint})` : ''}` 
-          };
-        } else if (data) {
-          const created = mapDbToAsset(data);
-          const list = getLocalAssets();
-          list.unshift(created);
-          saveLocalAssets(list);
-          return { data: created, error: null };
+    try {
+      if (newAsset.folderId) {
+        const { data: folder, error: folderError } = await supabase
+          .from('folders')
+          .select('id')
+          .eq('id', newAsset.folderId)
+          .eq('user_id', auth.userId)
+          .maybeSingle();
+        if (folderError || !folder) {
+          return { data: null, error: 'โฟลเดอร์ปลายทางไม่อยู่ในบัญชีของคุณ' };
         }
-      } catch (err: any) {
-        console.error('Supabase insert exception:', err);
-        return { 
-          data: null, 
-          error: `Supabase Connection Exception: ${err?.message || 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้'}` 
-        };
       }
-    }
 
-    // Local fallback for offline/guest mode without configured supabase
-    const list = getLocalAssets();
-    list.unshift(newAsset);
-    saveLocalAssets(list);
-    return { data: newAsset, error: null };
+      const dbPayload = mapAssetToDb(newAsset);
+      dbPayload.id = newId;
+      dbPayload.user_id = auth.userId;
+      dbPayload.created_at = now;
+      dbPayload.likes_count = 0;
+      dbPayload.fork_count = 0;
+
+      const { data, error } = await supabase
+        .from('assets')
+        .insert(dbPayload)
+        .select()
+        .single();
+
+      if (error || !data) {
+        return { data: null, error: toServiceError(error, 'บันทึกผลงานบนคลาวด์ไม่สำเร็จ') };
+      }
+      return { data: mapDbToAsset(data), error: null };
+    } catch (error) {
+      return { data: null, error: toServiceError(error, 'บันทึกผลงานบนคลาวด์ไม่สำเร็จ') };
+    }
   },
 
   // 3. Update Asset
@@ -316,193 +372,185 @@ export const supabaseService = {
     updates: Partial<Asset>
   ): Promise<{ data: Asset | null; error: string | null }> {
     const supabase = getSupabaseClient();
+    const auth = await requireCloudUser();
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
     const now = new Date().toISOString();
 
-    // Prepare version tracking
-    const list = getLocalAssets();
-    const existing = list.find(a => a.id === id);
-
-    let updatedVersions = updates.versions || existing?.versions || [];
-    if (updates.title || updates.content || updates.uiCodeSnippet) {
-      const nextVerNum = (updatedVersions[updatedVersions.length - 1]?.version || 1) + 1;
-      const newVersion: AssetVersion = {
-        version: nextVerNum,
-        updatedAt: now,
-        title: updates.title || existing?.title || 'Updated Asset',
-        summary: updates.status ? `อัปเดตสถานะเป็น ${updates.status}` : 'บันทึกการแก้ไขเนื้อหา'
-      };
-      updatedVersions = [...updatedVersions, newVersion];
-    }
-
-    const payloadWithVersions = {
-      ...updates,
-      versions: updatedVersions,
-      updatedAt: now
-    };
-
-    if (supabase) {
-      try {
-        const dbPayload = mapAssetToDb(payloadWithVersions);
-        const { data, error } = await supabase
-          .from('assets')
-          .update(dbPayload)
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (error) {
-          console.error('Supabase updateAsset error:', error);
-          return { 
-            data: null, 
-            error: `Supabase Error (${error.code || 'DB'}): ${error.message}${error.details ? ` - ${error.details}` : ''}${error.hint ? ` (${error.hint})` : ''}` 
-          };
-        } else if (data) {
-          const updated = mapDbToAsset(data);
-          const list = getLocalAssets();
-          const idx = list.findIndex(a => a.id === id);
-          if (idx !== -1) {
-            list[idx] = updated;
-            saveLocalAssets(list);
-          }
-          return { data: updated, error: null };
-        }
-      } catch (err: any) {
-        console.error('Supabase update exception:', err);
-        return { 
-          data: null, 
-          error: `Supabase Connection Exception: ${err?.message || 'ไม่สามารถบันทึกการแก้ไขได้'}` 
-        };
+    try {
+      const { data: existingRow, error: fetchError } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .maybeSingle();
+      if (fetchError) {
+        return { data: null, error: toServiceError(fetchError, 'ตรวจสอบผลงานไม่สำเร็จ') };
       }
-    }
+      if (!existingRow) {
+        return { data: null, error: 'ไม่พบผลงานของคุณที่ต้องการแก้ไข' };
+      }
 
-    // Local fallback
-    const idx = list.findIndex(a => a.id === id);
-    if (idx !== -1) {
-      list[idx] = {
-        ...list[idx],
-        ...payloadWithVersions
-      };
-      saveLocalAssets(list);
-      return { data: list[idx], error: null };
-    }
+      if (updates.folderId) {
+        const { data: folder, error: folderError } = await supabase
+          .from('folders')
+          .select('id')
+          .eq('id', updates.folderId)
+          .eq('user_id', auth.userId)
+          .maybeSingle();
+        if (folderError || !folder) {
+          return { data: null, error: 'โฟลเดอร์ปลายทางไม่อยู่ในบัญชีของคุณ' };
+        }
+      }
 
-    return { data: null, error: 'ไม่พบผลงานที่ต้องการแก้ไขในระบบ (Asset not found)' };
+      const existing = mapDbToAsset(existingRow);
+      const safeUpdates: Partial<Asset> = {};
+      const mutableKeys: Array<keyof Asset> = [
+        'authorName', 'authorAvatar', 'title', 'icon', 'category', 'content',
+        'uiCodeSnippet', 'previewImage', 'previewImages', 'folderId', 'isPublic',
+        'visibility', 'status', 'tags', 'linkedAssetIds'
+      ];
+      mutableKeys.forEach(key => {
+        if (updates[key] !== undefined) (safeUpdates as any)[key] = updates[key];
+      });
+
+      let updatedVersions = existing.versions || [];
+      if (updates.title !== undefined || updates.content !== undefined || updates.uiCodeSnippet !== undefined) {
+        const nextVersion = (updatedVersions.at(-1)?.version || 0) + 1;
+        updatedVersions = [
+          ...updatedVersions,
+          {
+            version: nextVersion,
+            updatedAt: now,
+            title: updates.title || existing.title,
+            summary: updates.status ? `อัปเดตสถานะเป็น ${updates.status}` : 'บันทึกการแก้ไขเนื้อหา'
+          }
+        ];
+      }
+
+      const dbPayload = mapAssetToDb({
+        ...safeUpdates,
+        versions: updatedVersions,
+        updatedAt: now
+      });
+      delete dbPayload.user_id;
+      delete dbPayload.likes_count;
+      delete dbPayload.fork_count;
+      delete dbPayload.forked_from_id;
+      delete dbPayload.forked_from_author;
+
+      const { data, error } = await supabase
+        .from('assets')
+        .update(dbPayload)
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .select()
+        .maybeSingle();
+      if (error) return { data: null, error: toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') };
+      if (!data) return { data: null, error: 'ไม่พบผลงานของคุณที่ต้องการแก้ไข' };
+
+      return { data: mapDbToAsset(data), error: null };
+    } catch (error) {
+      return { data: null, error: toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') };
+    }
   },
 
   // 4. Soft Delete Asset (Moves to Trash)
   async softDeleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
+    const auth = await requireCloudUser();
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
     const now = new Date().toISOString();
 
-    if (supabase) {
-      try {
-        const { error } = await supabase
-          .from('assets')
-          .update({ deleted_at: now })
-          .eq('id', id);
-
-        if (error) {
-          console.warn('Supabase softDelete error:', error);
-        } else {
-          return { success: true, error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase soft delete error:', err);
-      }
-    }
-
-    // Local fallback
-    const list = getLocalAssets();
-    const idx = list.findIndex(a => a.id === id);
-    if (idx !== -1) {
-      list[idx].deletedAt = now;
-      saveLocalAssets(list);
+    try {
+      const { data, error } = await supabase
+        .from('assets')
+        .update({ deleted_at: now })
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .is('deleted_at', null)
+        .select('id')
+        .maybeSingle();
+      if (error) return { success: false, error: toServiceError(error, 'ย้ายผลงานไปถังขยะไม่สำเร็จ') };
+      if (!data) return { success: false, error: 'ไม่พบผลงานของคุณ หรือผลงานอยู่ในถังขยะแล้ว' };
       return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'ย้ายผลงานไปถังขยะไม่สำเร็จ') };
     }
-    return { success: false, error: 'Asset not found' };
   },
 
   // 5. Restore Asset (From Trash)
   async restoreAsset(id: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    if (supabase) {
-      try {
-        const { error } = await supabase
-          .from('assets')
-          .update({ deleted_at: null })
-          .eq('id', id);
-
-        if (error) {
-          console.warn('Supabase restoreAsset error:', error);
-        } else {
-          return { success: true, error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase restore error:', err);
-      }
+    const auth = await requireCloudUser();
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
-    const list = getLocalAssets();
-    const idx = list.findIndex(a => a.id === id);
-    if (idx !== -1) {
-      list[idx].deletedAt = null;
-      saveLocalAssets(list);
+    try {
+      const { data, error } = await supabase
+        .from('assets')
+        .update({ deleted_at: null })
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .not('deleted_at', 'is', null)
+        .select('id')
+        .maybeSingle();
+      if (error) return { success: false, error: toServiceError(error, 'กู้คืนผลงานไม่สำเร็จ') };
+      if (!data) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
       return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'กู้คืนผลงานไม่สำเร็จ') };
     }
-    return { success: false, error: 'Asset not found' };
   },
 
   // 6. Hard Delete Asset (Permanent Deletion)
   async permanentDeleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('assets').delete().eq('id', id);
-        if (error) {
-          console.warn('Supabase permanentDelete error:', error);
-        } else {
-          return { success: true, error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase delete error:', err);
-      }
+    const auth = await requireCloudUser();
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
-    let list = getLocalAssets();
-    list = list.filter(a => a.id !== id);
-    saveLocalAssets(list);
-    return { success: true, error: null };
+    try {
+      const { data, error } = await supabase
+        .from('assets')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .not('deleted_at', 'is', null)
+        .select('id')
+        .maybeSingle();
+      if (error) return { success: false, error: toServiceError(error, 'ลบผลงานถาวรไม่สำเร็จ') };
+      if (!data) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
+      return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'ลบผลงานถาวรไม่สำเร็จ') };
+    }
   },
 
   // 7. Empty Trash
   async emptyTrash(userId: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    if (supabase && userId) {
-      try {
-        const { error } = await supabase
-          .from('assets')
-          .delete()
-          .eq('user_id', userId)
-          .not('deleted_at', 'is', null);
-
-        if (error) {
-          console.warn('Supabase emptyTrash error:', error);
-        }
-      } catch (e) {
-        console.warn('Supabase emptyTrash exception:', e);
-      }
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
-    let list = getLocalAssets();
-    list = list.filter(a => !(a.userId === userId && a.deletedAt));
-    saveLocalAssets(list);
-    return { success: true, error: null };
+    try {
+      const { error } = await supabase
+        .from('assets')
+        .delete()
+        .eq('user_id', auth.userId)
+        .not('deleted_at', 'is', null);
+      if (error) return { success: false, error: toServiceError(error, 'ล้างถังขยะไม่สำเร็จ') };
+      return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'ล้างถังขยะไม่สำเร็จ') };
+    }
   },
 
   // 8. Fork / Duplicate Asset
@@ -779,80 +827,58 @@ export const supabaseService = {
 
   // 13. Folders CRUD
   async fetchFolders(userId: string): Promise<{ data: Folder[]; error: string | null }> {
-    if (!userId) return { data: [], error: null };
     const supabase = getSupabaseClient();
-
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('folders')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: true });
-
-        if (error) {
-          console.warn('Supabase fetchFolders error:', error);
-        } else if (data) {
-          return { data: data.map(mapDbToFolder), error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase folders error:', err);
-      }
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: [], error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
-    const list = getLocalFolders(userId);
-    return { data: list, error: null };
+    try {
+      const { data, error } = await supabase
+        .from('folders')
+        .select('*')
+        .eq('user_id', auth.userId)
+        .order('created_at', { ascending: true });
+      if (error) return { data: [], error: toServiceError(error, 'โหลดโฟลเดอร์ไม่สำเร็จ') };
+      return { data: (data || []).map(mapDbToFolder), error: null };
+    } catch (error) {
+      return { data: [], error: toServiceError(error, 'โหลดโฟลเดอร์ไม่สำเร็จ') };
+    }
   },
 
   async createFolder(
     folder: { name: string; icon?: string; color?: string; userId: string }
   ): Promise<{ data: Folder | null; error: string | null }> {
     const supabase = getSupabaseClient();
+    const auth = await requireCloudUser(folder.userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
+    if (!folder.name.trim()) return { data: null, error: 'กรุณาตั้งชื่อโฟลเดอร์' };
     const newId = `folder_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const now = new Date().toISOString();
 
-    const newFolder: Folder = {
-      id: newId,
-      userId: folder.userId,
-      name: folder.name.trim(),
-      icon: folder.icon || '📁',
-      color: folder.color || 'purple',
-      createdAt: now,
-      updatedAt: now
-    };
-
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('folders')
-          .insert({
-            id: newId,
-            user_id: folder.userId,
-            name: folder.name.trim(),
-            icon: folder.icon || '📁',
-            color: folder.color || 'purple',
-            created_at: now,
-            updated_at: now
-          })
-          .select()
-          .single();
-
-        if (error) {
-          console.warn('Supabase createFolder error:', error);
-        } else if (data) {
-          return { data: mapDbToFolder(data), error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase insert folder error:', err);
+    try {
+      const { data, error } = await supabase
+        .from('folders')
+        .insert({
+          id: newId,
+          user_id: auth.userId,
+          name: folder.name.trim(),
+          icon: folder.icon || '📁',
+          color: folder.color || 'purple',
+          created_at: now,
+          updated_at: now
+        })
+        .select()
+        .single();
+      if (error || !data) {
+        return { data: null, error: toServiceError(error, 'สร้างโฟลเดอร์ไม่สำเร็จ') };
       }
+      return { data: mapDbToFolder(data), error: null };
+    } catch (error) {
+      return { data: null, error: toServiceError(error, 'สร้างโฟลเดอร์ไม่สำเร็จ') };
     }
-
-    // Local fallback
-    const all = getLocalFolders(folder.userId);
-    all.push(newFolder);
-    saveLocalFolders(all);
-    return { data: newFolder, error: null };
   },
 
   async updateFolder(
@@ -861,70 +887,56 @@ export const supabaseService = {
     updates: { name?: string; icon?: string; color?: string }
   ): Promise<{ data: Folder | null; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('folders')
-          .update({
-            ...(updates.name ? { name: updates.name.trim() } : {}),
-            ...(updates.icon ? { icon: updates.icon } : {}),
-            ...(updates.color ? { color: updates.color } : {}),
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (error) {
-          console.warn('Supabase updateFolder error:', error);
-        } else if (data) {
-          return { data: mapDbToFolder(data), error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase update folder error:', err);
-      }
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
+    if (updates.name !== undefined && !updates.name.trim()) {
+      return { data: null, error: 'ชื่อโฟลเดอร์ต้องไม่เป็นค่าว่าง' };
     }
 
-    // Local fallback
-    const all = getLocalFolders(userId);
-    const idx = all.findIndex(f => f.id === id);
-    if (idx !== -1) {
-      all[idx] = {
-        ...all[idx],
-        ...(updates.name ? { name: updates.name.trim() } : {}),
-        ...(updates.icon ? { icon: updates.icon } : {}),
-        ...(updates.color ? { color: updates.color } : {}),
-        updatedAt: new Date().toISOString()
-      };
-      saveLocalFolders(all);
-      return { data: all[idx], error: null };
+    try {
+      const { data, error } = await supabase
+        .from('folders')
+        .update({
+          ...(updates.name !== undefined ? { name: updates.name.trim() } : {}),
+          ...(updates.icon !== undefined ? { icon: updates.icon } : {}),
+          ...(updates.color !== undefined ? { color: updates.color } : {}),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .select()
+        .maybeSingle();
+      if (error) return { data: null, error: toServiceError(error, 'แก้ไขโฟลเดอร์ไม่สำเร็จ') };
+      if (!data) return { data: null, error: 'ไม่พบโฟลเดอร์ของคุณที่ต้องการแก้ไข' };
+      return { data: mapDbToFolder(data), error: null };
+    } catch (error) {
+      return { data: null, error: toServiceError(error, 'แก้ไขโฟลเดอร์ไม่สำเร็จ') };
     }
-
-    return { data: null, error: 'Folder not found' };
   },
 
   async deleteFolder(id: string, userId: string): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('folders').delete().eq('id', id);
-        if (error) {
-          console.warn('Supabase deleteFolder error:', error);
-        } else {
-          return { success: true, error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase delete folder error:', err);
-      }
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
-    let all = getLocalFolders(userId);
-    all = all.filter(f => f.id !== id);
-    saveLocalFolders(all);
-    return { success: true, error: null };
+    try {
+      const { data, error } = await supabase
+        .from('folders')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', auth.userId)
+        .select('id')
+        .maybeSingle();
+      if (error) return { success: false, error: toServiceError(error, 'ลบโฟลเดอร์ไม่สำเร็จ') };
+      if (!data) return { success: false, error: 'ไม่พบโฟลเดอร์ของคุณที่ต้องการลบ' };
+      return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'ลบโฟลเดอร์ไม่สำเร็จ') };
+    }
   },
 
   // 14. Profiles
@@ -959,13 +971,16 @@ export const supabaseService = {
     return null;
   },
 
-  async upsertProfile(user: User): Promise<boolean> {
+  async upsertProfile(user: User): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-    if (!supabase) return false;
+    const auth = await requireCloudUser(user.id);
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
 
     try {
       const { error } = await supabase.from('profiles').upsert({
-        id: user.id,
+        id: auth.userId,
         display_name: user.displayName,
         bio: user.bio,
         avatar_url: user.avatarUrl,
@@ -974,14 +989,128 @@ export const supabaseService = {
       });
 
       if (error) {
-        console.warn('Supabase upsertProfile error:', error);
-        return false;
+        return { success: false, error: toServiceError(error, 'บันทึกโปรไฟล์ไม่สำเร็จ') };
       }
-      return true;
-    } catch (e) {
-      console.warn('Profile upsert exception:', e);
-      return false;
+      return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'บันทึกโปรไฟล์ไม่สำเร็จ') };
     }
+  },
+
+  // Legacy browser Guest data is preserved and can be explicitly imported after login.
+  getLegacyGuestDataSummary(userId: string): { assets: number; folders: number } {
+    if (!userId) return { assets: 0, folders: 0 };
+    const state = getLegacyImportState(userId);
+    const assets = getLocalAssets().filter(asset =>
+      isLegacyGuestOwner(asset.userId) && !state.assetIds.includes(asset.id)
+    );
+    const folders = getAllLocalFolders().filter(folder =>
+      isLegacyGuestOwner(folder.userId) && !state.folderIdMap[folder.id]
+    );
+    return { assets: assets.length, folders: folders.length };
+  },
+
+  async importLegacyGuestData(user: User): Promise<{
+    success: boolean;
+    importedAssets: number;
+    importedFolders: number;
+    remainingAssets: number;
+    remainingFolders: number;
+    error: string | null;
+  }> {
+    const auth = await requireCloudUser(user.id);
+    if (auth.error || !auth.userId) {
+      const summary = this.getLegacyGuestDataSummary(user.id);
+      return {
+        success: false,
+        importedAssets: 0,
+        importedFolders: 0,
+        remainingAssets: summary.assets,
+        remainingFolders: summary.folders,
+        error: auth.error || 'กรุณาเข้าสู่ระบบก่อนนำเข้าข้อมูลเก่า'
+      };
+    }
+
+    const state = getLegacyImportState(auth.userId);
+    const legacyFolders = getAllLocalFolders().filter(folder => isLegacyGuestOwner(folder.userId));
+    const legacyAssets = getLocalAssets().filter(asset => isLegacyGuestOwner(asset.userId));
+    let importedFolders = 0;
+    let importedAssets = 0;
+    const errors: string[] = [];
+
+    for (const folder of legacyFolders) {
+      if (state.folderIdMap[folder.id]) continue;
+      const result = await this.createFolder({
+        userId: auth.userId,
+        name: folder.name || 'โฟลเดอร์ที่กู้คืน',
+        icon: folder.icon,
+        color: folder.color
+      });
+      if (result.data) {
+        state.folderIdMap[folder.id] = result.data.id;
+        importedFolders += 1;
+        try {
+          saveLegacyImportState(auth.userId, state);
+        } catch (error) {
+          errors.push(toServiceError(error, 'บันทึกสถานะการนำเข้าโฟลเดอร์ไม่สำเร็จ'));
+          break;
+        }
+      } else {
+        errors.push(result.error || `นำเข้าโฟลเดอร์ “${folder.name}” ไม่สำเร็จ`);
+      }
+    }
+
+    for (const asset of legacyAssets) {
+      if (state.assetIds.includes(asset.id)) continue;
+      const result = await this.createAsset({
+        userId: auth.userId,
+        authorName: user.displayName,
+        authorAvatar: user.avatarUrl,
+        title: asset.title || 'ผลงานที่กู้คืน',
+        icon: asset.icon || { type: 'emoji', value: '✨' },
+        category: asset.category || 'character',
+        content: asset.content || '',
+        uiCodeSnippet: asset.uiCodeSnippet || '',
+        previewImage: asset.previewImage,
+        previewImages: asset.previewImages || [],
+        folderId: asset.folderId ? state.folderIdMap[asset.folderId] || null : null,
+        isPublic: false,
+        visibility: 'draft',
+        status: asset.status || 'draft',
+        tags: asset.tags || [],
+        deletedAt: null,
+        likesCount: 0,
+        forkCount: 0,
+        forkedFromId: asset.forkedFromId || null,
+        forkedFromAuthor: asset.forkedFromAuthor || null,
+        linkedAssetIds: [],
+        versions: []
+      });
+      if (result.data) {
+        state.assetIds.push(asset.id);
+        importedAssets += 1;
+        try {
+          saveLegacyImportState(auth.userId, state);
+        } catch (error) {
+          errors.push(toServiceError(error, 'บันทึกสถานะการนำเข้าผลงานไม่สำเร็จ'));
+          break;
+        }
+      } else {
+        errors.push(result.error || `นำเข้าผลงาน “${asset.title}” ไม่สำเร็จ`);
+      }
+    }
+
+    const remaining = this.getLegacyGuestDataSummary(auth.userId);
+    return {
+      success: errors.length === 0 && remaining.assets === 0 && remaining.folders === 0,
+      importedAssets,
+      importedFolders,
+      remainingAssets: remaining.assets,
+      remainingFolders: remaining.folders,
+      error: errors.length > 0
+        ? `นำเข้าได้บางส่วน: ${errors[0]}${errors.length > 1 ? ` (และอีก ${errors.length - 1} รายการ)` : ''}`
+        : null
+    };
   },
 
   // 15. Export & Backup Vault Data

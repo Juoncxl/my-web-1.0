@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   X, 
   User, 
@@ -49,8 +49,16 @@ export const SettingsModal: React.FC = () => {
 
   // Backup State
   const [isExporting, setIsExporting] = useState(false);
+  const [isImportingLegacy, setIsImportingLegacy] = useState(false);
+  const [legacySummary, setLegacySummary] = useState({ assets: 0, folders: 0 });
   const [backupMsg, setBackupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isSettingsOpen && currentUser?.id) {
+      setLegacySummary(supabaseService.getLegacyGuestDataSummary(currentUser.id));
+    }
+  }, [currentUser?.id, isSettingsOpen]);
 
   if (!isSettingsOpen) return null;
 
@@ -131,8 +139,13 @@ export const SettingsModal: React.FC = () => {
     setBackupMsg(null);
 
     try {
-      const assetsRes = await supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true });
-      const foldersRes = await supabaseService.fetchFolders(currentUser.id);
+      const [assetsRes, foldersRes] = await Promise.all([
+        supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true }),
+        supabaseService.fetchFolders(currentUser.id)
+      ]);
+      if (assetsRes.error || foldersRes.error) {
+        throw new Error(assetsRes.error || foldersRes.error || 'โหลดข้อมูลสำหรับสำรองไม่สำเร็จ');
+      }
       
       // Strictly export only current logged-in user's assets and folders
       const userAssets = (assetsRes.data || []).filter(a => a.userId === currentUser.id);
@@ -170,6 +183,34 @@ export const SettingsModal: React.FC = () => {
       setBackupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการสำรองข้อมูล' });
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleImportLegacyGuestData = async () => {
+    if (!currentUser) return;
+    setIsImportingLegacy(true);
+    setBackupMsg(null);
+    try {
+      const result = await supabaseService.importLegacyGuestData(currentUser);
+      setLegacySummary({ assets: result.remainingAssets, folders: result.remainingFolders });
+      if (result.importedAssets > 0 || result.importedFolders > 0) {
+        window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
+      }
+      if (result.success) {
+        setBackupMsg({
+          type: 'success',
+          text: `นำเข้าข้อมูลเก่าสำเร็จ: ${result.importedAssets} ผลงาน และ ${result.importedFolders} โฟลเดอร์ (ผลงานถูกตั้งเป็นฉบับร่างส่วนตัว)`
+        });
+      } else {
+        setBackupMsg({
+          type: 'error',
+          text: result.error || `นำเข้าได้บางส่วน ยังเหลือ ${result.remainingAssets} ผลงาน และ ${result.remainingFolders} โฟลเดอร์`
+        });
+      }
+    } catch (error: any) {
+      setBackupMsg({ type: 'error', text: error?.message || 'นำเข้าข้อมูล Guest เก่าไม่สำเร็จ' });
+    } finally {
+      setIsImportingLegacy(false);
     }
   };
 
@@ -467,8 +508,29 @@ export const SettingsModal: React.FC = () => {
                 </button>
               </div>
 
+              {(legacySummary.assets > 0 || legacySummary.folders > 0) && (
+                <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
+                    <Upload className="w-4 h-4" />
+                    <span>พบข้อมูล Guest เก่าในเบราว์เซอร์นี้</span>
+                  </div>
+                  <p className="text-[11.5px] leading-relaxed text-amber-800 dark:text-amber-300">
+                    พบ {legacySummary.assets} ผลงาน และ {legacySummary.folders} โฟลเดอร์ คุณเลือกนำเข้าเข้าบัญชีนี้ได้ โดยผลงานจะเริ่มเป็นฉบับร่างส่วนตัว และข้อมูลต้นฉบับในเครื่องจะไม่ถูกลบ
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleImportLegacyGuestData}
+                    disabled={isImportingLegacy}
+                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>{isImportingLegacy ? 'กำลังนำเข้า...' : 'นำเข้าข้อมูล Guest เก่า'}</span>
+                  </button>
+                </div>
+              )}
+
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
-                💡 <strong>เคล็ดลับ:</strong> คุณสามารถนำไฟล์ JSON นี้ไปเปิดดูหรือนำเข้าได้ทุกเมื่อ ปลอดภัย 100%
+                💡 <strong>เคล็ดลับ:</strong> เก็บไฟล์ JSON ไว้ในพื้นที่ส่วนตัว เพราะอาจมีเนื้อหาและข้อมูลบัญชีของคุณ
               </div>
             </div>
           )}

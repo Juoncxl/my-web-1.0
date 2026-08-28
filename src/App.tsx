@@ -33,7 +33,9 @@ import {
   Bookmark as BookmarkIcon,
   Clock,
   Trash2,
-  Layers
+  Layers,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -74,6 +76,7 @@ function MainApp() {
     }
   });
   const [isLoadingAssets, setIsLoadingAssets] = useState(true);
+  const [operationError, setOperationError] = useState<string | null>(null);
 
   // Modals State
   const [viewingAsset, setViewingAsset] = useState<Asset | null>(null);
@@ -95,11 +98,16 @@ function MainApp() {
         currentUserId: currentUser?.id,
         includeDeleted: true // we filter deleted items in specific tabs
       });
-      if (res.data) {
+      if (res.error) {
+        setAssets([]);
+        setOperationError(res.error);
+      } else {
         setAssets(res.data);
       }
     } catch (e) {
       console.error('Error loading assets:', e);
+      setAssets([]);
+      setOperationError('โหลดคลังผลงานไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsLoadingAssets(false);
     }
@@ -113,11 +121,16 @@ function MainApp() {
     }
     try {
       const res = await supabaseService.fetchFolders(currentUser.id);
-      if (res.data) {
+      if (res.error) {
+        setFolders([]);
+        setOperationError(res.error);
+      } else {
         setFolders(res.data);
       }
     } catch (e) {
       console.error('Error loading folders:', e);
+      setFolders([]);
+      setOperationError('โหลดโฟลเดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     }
   };
 
@@ -139,6 +152,15 @@ function MainApp() {
     fetchAssets();
     fetchFolders();
     fetchBookmarks();
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    const refreshCloudData = () => {
+      void fetchAssets();
+      void fetchFolders();
+    };
+    window.addEventListener('creator-vault-cloud-data-changed', refreshCloudData);
+    return () => window.removeEventListener('creator-vault-cloud-data-changed', refreshCloudData);
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -242,11 +264,15 @@ function MainApp() {
     try {
       const res = await supabaseService.softDeleteAsset(assetId);
       if (res.success) {
+        setOperationError(null);
         setAssets(prev => prev.map(a => a.id === assetId ? { ...a, deletedAt: new Date().toISOString() } : a));
         setViewingAsset(null);
+      } else {
+        setOperationError(res.error || 'ย้ายผลงานไปถังขยะไม่สำเร็จ');
       }
     } catch (err) {
       console.error('Soft delete error:', err);
+      setOperationError('ย้ายผลงานไปถังขยะไม่สำเร็จ');
     }
   };
 
@@ -256,10 +282,14 @@ function MainApp() {
     try {
       const res = await supabaseService.restoreAsset(assetId);
       if (res.success) {
+        setOperationError(null);
         setAssets(prev => prev.map(a => a.id === assetId ? { ...a, deletedAt: null } : a));
+      } else {
+        setOperationError(res.error || 'กู้คืนผลงานไม่สำเร็จ');
       }
     } catch (err) {
       console.error('Restore error:', err);
+      setOperationError('กู้คืนผลงานไม่สำเร็จ');
     }
   };
 
@@ -269,11 +299,15 @@ function MainApp() {
     try {
       const res = await supabaseService.permanentDeleteAsset(assetId);
       if (res.success) {
+        setOperationError(null);
         setAssets(prev => prev.filter(a => a.id !== assetId));
         setViewingAsset(null);
+      } else {
+        setOperationError(res.error || 'ลบผลงานถาวรไม่สำเร็จ');
       }
     } catch (err) {
       console.error('Delete asset error:', err);
+      setOperationError('ลบผลงานถาวรไม่สำเร็จ');
     }
   };
 
@@ -347,14 +381,17 @@ function MainApp() {
     try {
       const res = await supabaseService.updateAsset(assetId, { folderId });
       if (res.data) {
+        setOperationError(null);
         setAssets(prev => prev.map(a => (a.id === assetId ? res.data! : a)));
         if (viewingAsset?.id === assetId) {
           setViewingAsset(res.data);
         }
         return true;
       }
+      setOperationError(res.error || 'ย้ายผลงานเข้าโฟลเดอร์ไม่สำเร็จ');
     } catch (err) {
       console.error('Move to folder error:', err);
+      setOperationError('ย้ายผลงานเข้าโฟลเดอร์ไม่สำเร็จ');
     }
     return false;
   };
@@ -370,11 +407,14 @@ function MainApp() {
         color
       });
       if (res.data) {
+        setOperationError(null);
         setFolders(prev => [...prev, res.data!]);
         return true;
       }
+      setOperationError(res.error || 'สร้างโฟลเดอร์ไม่สำเร็จ');
     } catch (e) {
       console.error('Create folder error:', e);
+      setOperationError('สร้างโฟลเดอร์ไม่สำเร็จ');
     }
     return false;
   };
@@ -384,11 +424,14 @@ function MainApp() {
     try {
       const res = await supabaseService.updateFolder(id, currentUser.id, { name, icon, color });
       if (res.data) {
+        setOperationError(null);
         setFolders(prev => prev.map(f => (f.id === id ? res.data! : f)));
         return true;
       }
+      setOperationError(res.error || 'แก้ไขโฟลเดอร์ไม่สำเร็จ');
     } catch (e) {
       console.error('Update folder error:', e);
+      setOperationError('แก้ไขโฟลเดอร์ไม่สำเร็จ');
     }
     return false;
   };
@@ -398,6 +441,7 @@ function MainApp() {
     try {
       const res = await supabaseService.deleteFolder(id, currentUser.id);
       if (res.success) {
+        setOperationError(null);
         setFolders(prev => prev.filter(f => f.id !== id));
         setAssets(prev => prev.map(a => (a.folderId === id ? { ...a, folderId: null } : a)));
         if (selectedFolderId === id) {
@@ -405,8 +449,10 @@ function MainApp() {
         }
         return true;
       }
+      setOperationError(res.error || 'ลบโฟลเดอร์ไม่สำเร็จ');
     } catch (e) {
       console.error('Delete folder error:', e);
+      setOperationError('ลบโฟลเดอร์ไม่สำเร็จ');
     }
     return false;
   };
@@ -585,6 +631,15 @@ function MainApp() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {operationError && (
+          <div className="mb-4 p-3 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2" role="alert">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="flex-1">{operationError}</span>
+            <button type="button" onClick={() => setOperationError(null)} aria-label="ปิดข้อความแจ้งเตือน" className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         
         {/* If in Vault view, render Personal Dashboard Banner */}
         {activeView === 'vault' && (
