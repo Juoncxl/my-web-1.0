@@ -35,6 +35,7 @@ interface AssetCardProps {
   folderIcon?: string;
   isOwner?: boolean;
   isBookmarked?: boolean;
+  isLiked?: boolean;
   isTrashMode?: boolean;
 }
 
@@ -54,11 +55,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   folderIcon,
   isOwner = false,
   isBookmarked = false,
+  isLiked = false,
   isTrashMode = false
 }) => {
   const [copied, setCopied] = useState(false);
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(asset.likesCount || 0);
 
   const categoryMeta = CATEGORIES[asset.category] || CATEGORIES.character;
   const statusMeta = STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished;
@@ -89,9 +89,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
 
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (liked) return;
-    setLiked(true);
-    setLikeCount(prev => prev + 1);
     if (onLike) onLike(asset.id);
   };
 
@@ -442,15 +439,15 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                 {/* Like Button */}
                 <button
                   onClick={handleLike}
-                  title="กดถูกใจ"
+                  title={isLiked ? 'ยกเลิกถูกใจ' : 'กดถูกใจ'}
                   className={`flex items-center gap-1 px-2 py-1 rounded-xl border transition-all text-[11px] ${
-                    liked
+                    isLiked
                       ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border-rose-200 dark:border-rose-800 font-semibold'
                       : 'bg-slate-50 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-500 dark:text-slate-400 hover:text-rose-500 border-slate-100 dark:border-slate-700'
                   }`}
                 >
-                  <Heart className={`w-3 h-3 ${liked ? 'fill-rose-500 text-rose-500' : ''}`} />
-                  <span>{likeCount}</span>
+                  <Heart className={`w-3 h-3 ${isLiked ? 'fill-rose-500 text-rose-500' : ''}`} />
+                  <span>{asset.likesCount || 0}</span>
                 </button>
               </>
             )}

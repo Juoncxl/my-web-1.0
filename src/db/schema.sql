@@ -225,17 +225,16 @@ DECLARE
 BEGIN
     target_asset_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.asset_id ELSE NEW.asset_id END;
 
-    UPDATE public.assets
-    SET likes_count = legacy_likes_count + (
-        SELECT COUNT(*)::INTEGER
-        FROM public.asset_likes
-        WHERE asset_id = target_asset_id
-    )
-    WHERE id = target_asset_id;
-
     IF TG_OP = 'DELETE' THEN
+        UPDATE public.assets
+        SET likes_count = GREATEST(legacy_likes_count, likes_count - 1)
+        WHERE id = target_asset_id;
         RETURN OLD;
     END IF;
+
+    UPDATE public.assets
+    SET likes_count = likes_count + 1
+    WHERE id = target_asset_id;
 
     RETURN NEW;
 END $$;

@@ -67,6 +67,7 @@ function MainApp() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [bookmarkedAssetIds, setBookmarkedAssetIds] = useState<string[]>([]);
+  const [likedAssetIds, setLikedAssetIds] = useState<string[]>([]);
   const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
@@ -141,10 +142,37 @@ function MainApp() {
       return;
     }
     try {
-      const ids = await supabaseService.fetchBookmarks(currentUser.id);
-      setBookmarkedAssetIds(ids);
+      const res = await supabaseService.fetchBookmarks(currentUser.id);
+      if (res.error) {
+        setBookmarkedAssetIds([]);
+        setOperationError(res.error);
+      } else {
+        setBookmarkedAssetIds(res.data);
+      }
     } catch (e) {
       console.error('Error loading bookmarks:', e);
+      setBookmarkedAssetIds([]);
+      setOperationError('โหลดบุ๊กมาร์กไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    }
+  };
+
+  const fetchLikes = async () => {
+    if (!currentUser?.id) {
+      setLikedAssetIds([]);
+      return;
+    }
+    try {
+      const res = await supabaseService.fetchLikedAssetIds(currentUser.id);
+      if (res.error) {
+        setLikedAssetIds([]);
+        setOperationError(res.error);
+      } else {
+        setLikedAssetIds(res.data);
+      }
+    } catch (e) {
+      console.error('Error loading likes:', e);
+      setLikedAssetIds([]);
+      setOperationError('โหลดรายการถูกใจไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     }
   };
 
@@ -152,6 +180,7 @@ function MainApp() {
     fetchAssets();
     fetchFolders();
     fetchBookmarks();
+    fetchLikes();
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -319,28 +348,33 @@ function MainApp() {
     }
     const isCurrentlyBookmarked = bookmarkedAssetIds.includes(assetId);
     
-    // Optimistic UI update
-    setBookmarkedAssetIds(prev => 
-      isCurrentlyBookmarked ? prev.filter(id => id !== assetId) : [...prev, assetId]
-    );
-
-    if (!isCurrentlyBookmarked) {
-      confetti({
-        particleCount: 20,
-        spread: 40,
-        origin: { y: 0.8 },
-        colors: ['#F59E0B', '#EC4899', '#8B5CF6']
-      });
-    }
-
     try {
-      await supabaseService.toggleBookmark(currentUser.id, assetId);
+      const result = await supabaseService.setBookmark(
+        currentUser.id,
+        assetId,
+        !isCurrentlyBookmarked
+      );
+      if (!result.success) {
+        setOperationError(result.error || 'อัปเดตบุ๊กมาร์กไม่สำเร็จ');
+        return;
+      }
+
+      setOperationError(null);
+      setBookmarkedAssetIds(prev => result.isBookmarked
+        ? Array.from(new Set([...prev, assetId]))
+        : prev.filter(id => id !== assetId)
+      );
+      if (result.isBookmarked && !isCurrentlyBookmarked) {
+        confetti({
+          particleCount: 20,
+          spread: 40,
+          origin: { y: 0.8 },
+          colors: ['#F59E0B', '#EC4899', '#8B5CF6']
+        });
+      }
     } catch (err) {
       console.error('Bookmark error:', err);
-      // Revert on error
-      setBookmarkedAssetIds(prev => 
-        isCurrentlyBookmarked ? [...prev, assetId] : prev.filter(id => id !== assetId)
-      );
+      setOperationError('อัปเดตบุ๊กมาร์กไม่สำเร็จ');
     }
   };
 
@@ -360,7 +394,18 @@ function MainApp() {
       );
 
       if (res.data) {
-        setAssets(prev => [res.data!, ...prev]);
+        setOperationError(null);
+        setAssets(prev => {
+          const withUpdatedSource = prev.map(asset =>
+            asset.id === sourceAsset.id && res.sourceForkCount !== null
+              ? { ...asset, forkCount: res.sourceForkCount }
+              : asset
+          );
+          return [res.data!, ...withUpdatedSource];
+        });
+        if (viewingAsset?.id === sourceAsset.id && res.sourceForkCount !== null) {
+          setViewingAsset(prev => prev ? { ...prev, forkCount: res.sourceForkCount! } : null);
+        }
         setActiveView('vault');
         setActiveVaultTab('my_assets');
         
@@ -369,9 +414,12 @@ function MainApp() {
           spread: 55,
           origin: { y: 0.6 }
         });
+      } else {
+        setOperationError(res.error || 'สร้างสำเนาผลงานไม่สำเร็จ');
       }
     } catch (err) {
       console.error('Fork asset error:', err);
+      setOperationError('สร้างสำเนาผลงานไม่สำเร็จ');
     }
   };
 
@@ -463,15 +511,30 @@ function MainApp() {
       openAuthModal('login');
       return;
     }
+    const wasLiked = likedAssetIds.includes(assetId);
     try {
-      const currentAsset = assets.find(a => a.id === assetId);
-      const newCount = await supabaseService.likeAsset(assetId, currentAsset?.likesCount || 0);
-      setAssets(prev => prev.map(a => (a.id === assetId ? { ...a, likesCount: newCount } : a)));
-      if (viewingAsset?.id === assetId) {
-        setViewingAsset(prev => prev ? { ...prev, likesCount: newCount } : null);
+      const result = await supabaseService.setAssetLike(currentUser.id, assetId, !wasLiked);
+      if (!result.success) {
+        setOperationError(result.error || 'อัปเดตสถานะถูกใจไม่สำเร็จ');
+        return;
+      }
+
+      setOperationError(null);
+      setLikedAssetIds(prev => result.isLiked
+        ? Array.from(new Set([...prev, assetId]))
+        : prev.filter(id => id !== assetId)
+      );
+      if (result.likesCount !== null) {
+        setAssets(prev => prev.map(a =>
+          a.id === assetId ? { ...a, likesCount: result.likesCount! } : a
+        ));
+        if (viewingAsset?.id === assetId) {
+          setViewingAsset(prev => prev ? { ...prev, likesCount: result.likesCount! } : null);
+        }
       }
     } catch (e) {
-      console.error(e);
+      console.error('Like error:', e);
+      setOperationError('อัปเดตสถานะถูกใจไม่สำเร็จ');
     }
   };
 
@@ -741,6 +804,7 @@ function MainApp() {
                 }}
                 isOwner={asset.userId === currentUser?.id}
                 isBookmarked={bookmarkedAssetIds.includes(asset.id)}
+                isLiked={likedAssetIds.includes(asset.id)}
                 isTrashMode={activeVaultTab === 'trash'}
               />
             ))}

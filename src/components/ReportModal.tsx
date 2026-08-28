@@ -17,30 +17,46 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, asset
   const [details, setDetails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!isOpen || !asset) return null;
 
+  const closeAndReset = () => {
+    setSubmitError(null);
+    setIsSubmitted(false);
+    setDetails('');
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      setSubmitError('กรุณาเข้าสู่ระบบก่อนส่งรายงาน');
+      return;
+    }
     setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
-      await supabaseService.submitReport({
+      const result = await supabaseService.submitReport({
         assetId: asset.id,
-        reporterId: currentUser?.id,
-        reporterName: currentUser?.displayName || 'Anonymous User',
+        reporterId: currentUser.id,
+        reporterName: currentUser.displayName,
         reason: selectedReason,
         details: details.trim()
       });
+      if (!result.success) {
+        setSubmitError(result.error || 'ส่งรายงานไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        return;
+      }
 
       setIsSubmitted(true);
       setTimeout(() => {
-        setIsSubmitted(false);
-        setDetails('');
-        onClose();
+        closeAndReset();
       }, 1600);
     } catch (err) {
       console.error('Report error:', err);
+      setSubmitError('ส่งรายงานไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSubmitting(false);
     }
@@ -67,7 +83,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, asset
           </div>
 
           <button
-            onClick={onClose}
+            onClick={closeAndReset}
             className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
           >
             <X className="w-4 h-4" />
@@ -84,7 +100,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, asset
               ส่งรายงานเรียบร้อยแล้ว
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs">
-              ขอบคุณที่ช่วยดูแลความปลอดภัยของชุมชน Creator Vault เราจะตรวจสอบเนื้อหานี้อย่างละเอียด
+              รายงานถูกจัดเก็บอย่างเป็นส่วนตัวแล้ว และผู้ใช้งานทั่วไปไม่สามารถเปิดอ่านข้อมูลรายงานได้
             </p>
           </div>
         ) : (
@@ -92,9 +108,16 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, asset
             <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/60 rounded-2xl flex items-start gap-2.5 text-rose-800 dark:text-rose-300">
               <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
               <p className="leading-relaxed text-[11px]">
-                การรายงานจะถูกส่งตรงไปยังทีมผู้ดูแลเพื่อตรวจสอบความปลอดภัยและลิขสิทธิ์
+                รายงานจะถูกจัดเก็บแบบส่วนตัวสำหรับระบบผู้ดูแลที่จะเชื่อมต่อในภายหลัง ข้อมูลผู้รายงานจะไม่แสดงต่อสาธารณะ
               </p>
             </div>
+
+            {submitError && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-2xl flex items-start gap-2 text-amber-800 dark:text-amber-300" role="alert">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{submitError}</span>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="block font-bold text-slate-700 dark:text-slate-300">
@@ -140,7 +163,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, asset
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={closeAndReset}
                 className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 ยกเลิก

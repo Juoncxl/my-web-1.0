@@ -1,13 +1,11 @@
-import { Asset, Folder, User, AssetVisibility, AssetStatus, ContentReport, AssetVersion } from '../types';
+import { Asset, Folder, User, AssetVisibility, AssetStatus, AssetVersion } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { formatFriendlyErrorMessage } from './apiHelper';
 
 // Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
 const LOCAL_STORAGE_FOLDERS = 'creator_vault_local_folders';
-const LOCAL_STORAGE_BOOKMARKS = 'creator_vault_bookmarks';
 const LOCAL_STORAGE_RECENT_VIEWED = 'creator_vault_recent_viewed';
-const LOCAL_STORAGE_REPORTS = 'creator_vault_reports';
 const LEGACY_IMPORT_STORAGE_PREFIX = 'creator_vault_legacy_import_';
 
 type CloudAuth = { userId: string; error: null } | { userId: null; error: string };
@@ -64,14 +62,6 @@ function getLocalAssets(): Asset[] {
     console.warn('Local assets read error:', e);
   }
   return [];
-}
-
-function saveLocalAssets(assets: Asset[]) {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_ASSETS, JSON.stringify(assets));
-  } catch (e) {
-    console.warn('Local assets write error:', e);
-  }
 }
 
 function getAllLocalFolders(): Folder[] {
@@ -559,194 +549,207 @@ export const supabaseService = {
     newUserId: string,
     newAuthorName: string,
     newAuthorAvatar?: string
-  ): Promise<{ data: Asset | null; error: string | null }> {
+  ): Promise<{ data: Asset | null; sourceForkCount: number | null; error: string | null }> {
     const supabase = getSupabaseClient();
+    const auth = await requireCloudUser(newUserId);
+    if (!supabase || auth.error || !auth.userId) {
+      return {
+        data: null,
+        sourceForkCount: null,
+        error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน'
+      };
+    }
     const newId = `asset_fork_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
 
-    const forkedAsset: Asset = {
-      ...originalAsset,
-      id: newId,
-      userId: newUserId,
-      authorName: newAuthorName,
-      authorAvatar: newAuthorAvatar,
-      title: `[สำเนา] ${originalAsset.title}`,
-      visibility: 'draft',
-      isPublic: false,
-      status: 'draft',
-      folderId: null,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      likesCount: 0,
-      forkCount: 0,
-      forkedFromId: originalAsset.id,
-      forkedFromAuthor: originalAsset.authorName,
-      versions: [
-        {
-          version: 1,
-          updatedAt: now,
-          title: `[สำเนา] ${originalAsset.title}`,
-          summary: `โคลนมาจากผลงานของ ${originalAsset.authorName}`
-        }
-      ]
-    };
-
-    // Increment original asset fork count
-    await this.incrementForkCount(originalAsset.id, originalAsset.forkCount || 0);
-
-    if (supabase) {
-      try {
-        const dbPayload = mapAssetToDb(forkedAsset);
-        dbPayload.id = newId;
-        dbPayload.created_at = now;
-
-        const { data, error } = await supabase
-          .from('assets')
-          .insert(dbPayload)
-          .select()
-          .single();
-
-        if (error) {
-          console.warn('Supabase forkAsset insert error:', error);
-        } else if (data) {
-          return { data: mapDbToAsset(data), error: null };
-        }
-      } catch (err: any) {
-        console.warn('Supabase fork error:', err);
+    try {
+      const { data, error } = await supabase
+        .rpc('fork_asset', {
+          p_source_asset_id: originalAsset.id,
+          p_new_asset_id: newId,
+          p_author_name: newAuthorName,
+          p_author_avatar: newAuthorAvatar || null
+        })
+        .single();
+      if (error || !data) {
+        return {
+          data: null,
+          sourceForkCount: null,
+          error: toServiceError(error, 'สร้างสำเนาผลงานไม่สำเร็จ')
+        };
       }
-    }
 
-    // Local fallback
-    const list = getLocalAssets();
-    list.unshift(forkedAsset);
-    saveLocalAssets(list);
-    return { data: forkedAsset, error: null };
-  },
+      const { data: source, error: sourceError } = await supabase
+        .from('assets')
+        .select('fork_count')
+        .eq('id', originalAsset.id)
+        .maybeSingle();
+      if (sourceError) logServiceError('fetch source fork count', sourceError);
 
-  async incrementForkCount(assetId: string, currentCount: number = 0): Promise<void> {
-    const supabase = getSupabaseClient();
-    const newCount = (currentCount || 0) + 1;
-
-    if (supabase) {
-      try {
-        await supabase
-          .from('assets')
-          .update({ fork_count: newCount })
-          .eq('id', assetId);
-      } catch (e) {
-        console.warn('Increment fork count error:', e);
-      }
-    }
-
-    const list = getLocalAssets();
-    const item = list.find(a => a.id === assetId);
-    if (item) {
-      item.forkCount = newCount;
-      saveLocalAssets(list);
+      return {
+        data: mapDbToAsset(data),
+        sourceForkCount: source?.fork_count ?? null,
+        error: null
+      };
+    } catch (error) {
+      return {
+        data: null,
+        sourceForkCount: null,
+        error: toServiceError(error, 'สร้างสำเนาผลงานไม่สำเร็จ')
+      };
     }
   },
 
   // 9. Like Asset
-  async likeAsset(assetId: string, currentLikes: number = 0): Promise<number> {
+  async fetchLikedAssetIds(userId: string): Promise<{ data: string[]; error: string | null }> {
     const supabase = getSupabaseClient();
-    const newCount = (currentLikes || 0) + 1;
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: [], error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+    }
 
-    if (supabase) {
-      try {
-        await supabase
-          .from('assets')
-          .update({ likes_count: newCount })
-          .eq('id', assetId);
-      } catch (e) {
-        console.warn('Supabase like error:', e);
+    try {
+      const { data, error } = await supabase
+        .from('asset_likes')
+        .select('asset_id')
+        .eq('user_id', auth.userId);
+      if (error) return { data: [], error: toServiceError(error, 'โหลดรายการถูกใจไม่สำเร็จ') };
+      return { data: (data || []).map((row: any) => row.asset_id), error: null };
+    } catch (error) {
+      return { data: [], error: toServiceError(error, 'โหลดรายการถูกใจไม่สำเร็จ') };
+    }
+  },
+
+  async setAssetLike(
+    userId: string,
+    assetId: string,
+    shouldLike: boolean
+  ): Promise<{ success: boolean; isLiked: boolean; likesCount: number | null; error: string | null }> {
+    const supabase = getSupabaseClient();
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return {
+        success: false,
+        isLiked: !shouldLike,
+        likesCount: null,
+        error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน'
+      };
+    }
+
+    try {
+      if (shouldLike) {
+        const { error } = await supabase
+          .from('asset_likes')
+          .upsert(
+            { user_id: auth.userId, asset_id: assetId },
+            { onConflict: 'user_id,asset_id', ignoreDuplicates: true }
+          );
+        if (error) {
+          return { success: false, isLiked: false, likesCount: null, error: toServiceError(error, 'กดถูกใจไม่สำเร็จ') };
+        }
+      } else {
+        const { error } = await supabase
+          .from('asset_likes')
+          .delete()
+          .eq('user_id', auth.userId)
+          .eq('asset_id', assetId);
+        if (error) {
+          return { success: false, isLiked: true, likesCount: null, error: toServiceError(error, 'ยกเลิกถูกใจไม่สำเร็จ') };
+        }
       }
-    }
 
-    const list = getLocalAssets();
-    const item = list.find(a => a.id === assetId);
-    if (item) {
-      item.likesCount = newCount;
-      saveLocalAssets(list);
+      const { data: assetRow, error: countError } = await supabase
+        .from('assets')
+        .select('likes_count')
+        .eq('id', assetId)
+        .maybeSingle();
+      if (countError) logServiceError('fetch like count after mutation', countError);
+
+      return {
+        success: true,
+        isLiked: shouldLike,
+        likesCount: assetRow?.likes_count ?? null,
+        error: null
+      };
+    } catch (error) {
+      return {
+        success: false,
+        isLiked: !shouldLike,
+        likesCount: null,
+        error: toServiceError(error, 'อัปเดตสถานะถูกใจไม่สำเร็จ')
+      };
     }
-    return newCount;
   },
 
   // 10. Bookmarks / Saved Resources System
-  async fetchBookmarks(userId: string): Promise<string[]> {
-    if (!userId) return [];
+  async fetchBookmarks(userId: string): Promise<{ data: string[]; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('bookmarks')
-          .select('asset_id')
-          .eq('user_id', userId);
-
-        if (error) {
-          console.warn('Supabase fetchBookmarks error:', error);
-        } else if (data) {
-          return data.map((r: any) => r.asset_id);
-        }
-      } catch (e) {
-        console.warn('Supabase fetchBookmarks exception:', e);
-      }
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { data: [], error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
     try {
-      const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKMARKS}_${userId}`);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
+      const { data, error } = await supabase
+        .from('bookmarks')
+        .select('asset_id')
+        .eq('user_id', auth.userId);
+      if (error) return { data: [], error: toServiceError(error, 'โหลดบุ๊กมาร์กไม่สำเร็จ') };
+      return { data: (data || []).map((row: any) => row.asset_id), error: null };
+    } catch (error) {
+      return { data: [], error: toServiceError(error, 'โหลดบุ๊กมาร์กไม่สำเร็จ') };
     }
   },
 
-  async toggleBookmark(userId: string, assetId: string): Promise<{ isBookmarked: boolean }> {
-    if (!userId) return { isBookmarked: false };
+  async setBookmark(
+    userId: string,
+    assetId: string,
+    shouldBookmark: boolean
+  ): Promise<{ success: boolean; isBookmarked: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-
-    let isCurrentlySaved = false;
-    let localList: string[] = [];
-
-    try {
-      const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKMARKS}_${userId}`);
-      localList = raw ? JSON.parse(raw) : [];
-      isCurrentlySaved = localList.includes(assetId);
-    } catch (e) {
-      console.warn('Local bookmark read error:', e);
+    const auth = await requireCloudUser(userId);
+    if (!supabase || auth.error || !auth.userId) {
+      return {
+        success: false,
+        isBookmarked: !shouldBookmark,
+        error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน'
+      };
     }
 
-    if (supabase) {
-      try {
-        if (isCurrentlySaved) {
-          await supabase.from('bookmarks').delete().eq('user_id', userId).eq('asset_id', assetId);
-        } else {
-          await supabase.from('bookmarks').insert({
-            id: `bm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            user_id: userId,
-            asset_id: assetId,
-            created_at: new Date().toISOString()
-          });
+    try {
+      if (shouldBookmark) {
+        const { error } = await supabase
+          .from('bookmarks')
+          .upsert(
+            {
+              id: `bm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              user_id: auth.userId,
+              asset_id: assetId,
+              created_at: new Date().toISOString()
+            },
+            { onConflict: 'user_id,asset_id', ignoreDuplicates: true }
+          );
+        if (error) {
+          return { success: false, isBookmarked: false, error: toServiceError(error, 'เพิ่มบุ๊กมาร์กไม่สำเร็จ') };
         }
-      } catch (e) {
-        console.warn('Supabase bookmark toggle error:', e);
+      } else {
+        const { error } = await supabase
+          .from('bookmarks')
+          .delete()
+          .eq('user_id', auth.userId)
+          .eq('asset_id', assetId);
+        if (error) {
+          return { success: false, isBookmarked: true, error: toServiceError(error, 'ยกเลิกบุ๊กมาร์กไม่สำเร็จ') };
+        }
       }
+
+      return { success: true, isBookmarked: shouldBookmark, error: null };
+    } catch (error) {
+      return {
+        success: false,
+        isBookmarked: !shouldBookmark,
+        error: toServiceError(error, 'อัปเดตบุ๊กมาร์กไม่สำเร็จ')
+      };
     }
-
-    const nextSaved = !isCurrentlySaved;
-    const nextList = nextSaved
-      ? [...localList, assetId]
-      : localList.filter(id => id !== assetId);
-
-    try {
-      localStorage.setItem(`${LOCAL_STORAGE_BOOKMARKS}_${userId}`, JSON.stringify(nextList));
-    } catch (e) {
-      console.warn('Local bookmark write error:', e);
-    }
-
-    return { isBookmarked: nextSaved };
   },
 
   // 11. Content Reporting System
@@ -756,51 +759,28 @@ export const supabaseService = {
     reporterName?: string;
     reason: string;
     details?: string;
-  }): Promise<boolean> {
+  }): Promise<{ success: boolean; error: string | null }> {
     const supabase = getSupabaseClient();
-    const newReport: ContentReport = {
-      id: `report_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      assetId: report.assetId,
-      reporterId: report.reporterId,
-      reporterName: report.reporterName,
-      reason: report.reason as any,
-      details: report.details || '',
-      status: 'pending',
-      createdAt: new Date().toISOString()
-    };
-
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('reports').insert({
-          id: newReport.id,
-          asset_id: newReport.assetId,
-          reporter_id: newReport.reporterId,
-          reporter_name: newReport.reporterName,
-          reason: newReport.reason,
-          details: newReport.details,
-          status: newReport.status,
-          created_at: newReport.createdAt
-        });
-
-        if (error) {
-          console.warn('Supabase report submit error:', error);
-        } else {
-          return true;
-        }
-      } catch (e) {
-        console.warn('Supabase report exception:', e);
-      }
+    const auth = await requireCloudUser(report.reporterId);
+    if (!supabase || auth.error || !auth.userId) {
+      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
     }
 
-    // Local fallback
     try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_REPORTS);
-      const list: ContentReport[] = raw ? JSON.parse(raw) : [];
-      list.push(newReport);
-      localStorage.setItem(LOCAL_STORAGE_REPORTS, JSON.stringify(list));
-      return true;
-    } catch {
-      return true;
+      const { error } = await supabase.from('reports').insert({
+        id: `report_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        asset_id: report.assetId,
+        reporter_id: auth.userId,
+        reporter_name: report.reporterName || 'Creator',
+        reason: report.reason,
+        details: report.details || '',
+        status: 'pending',
+        created_at: new Date().toISOString()
+      });
+      if (error) return { success: false, error: toServiceError(error, 'ส่งรายงานไม่สำเร็จ') };
+      return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: toServiceError(error, 'ส่งรายงานไม่สำเร็จ') };
     }
   },
 
