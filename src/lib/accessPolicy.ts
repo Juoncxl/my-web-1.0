@@ -1,4 +1,5 @@
 import type { Asset, User } from '../types';
+import { isPublicFeedVisibility } from './assetVisibility';
 
 export function hasAuthenticatedUser(user: User | null | undefined): user is User {
   return Boolean(user?.id);
@@ -20,11 +21,11 @@ export function canCreateOwnedAsset(user: User | null | undefined): boolean {
 
 export function canForkAsset(user: User | null | undefined, asset: Asset): boolean {
   if (!hasAuthenticatedUser(user) || asset.deletedAt) return false;
-  return asset.userId === user.id || (asset.visibility === 'public' && asset.isPublic === true);
+  return asset.userId === user.id || isPublicFeedVisibility(asset);
 }
 
 export function isPublicFeedAsset(asset: Asset): boolean {
-  return !asset.deletedAt && asset.visibility === 'public' && asset.isPublic === true;
+  return !asset.deletedAt && isPublicFeedVisibility(asset);
 }
 
 export function isOwnedActiveAsset(asset: Asset, userId: string | undefined): boolean {

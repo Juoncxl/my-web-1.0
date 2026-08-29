@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Asset, AssetCategory, AssetStatus } from './types';
-import { supabaseService } from './lib/supabaseService';
 import {
   canCreateOwnedAsset,
   canForkAsset
@@ -59,16 +58,30 @@ function MainApp() {
 
   const {
     assets,
-    setAssets,
     isLoadingAssets,
-    refreshAssets
-  } = useAssetData(currentUser?.id, reportOperationError);
-  const { folders, setFolders, refreshFolders } = useFolderData(currentUser?.id, reportOperationError);
+    refreshAssets,
+    createAsset,
+    updateAsset,
+    softDeleteAsset,
+    restoreAsset,
+    permanentDeleteAsset,
+    forkAsset,
+    moveAsset,
+    updateAssetLikeCount,
+    clearFolderAssignments
+  } = useAssetData(currentUser, reportOperationError);
+  const {
+    folders,
+    refreshFolders,
+    createFolder,
+    updateFolder,
+    deleteFolder
+  } = useFolderData(currentUser?.id, reportOperationError);
   const {
     bookmarkedAssetIds,
-    setBookmarkedAssetIds,
     likedAssetIds,
-    setLikedAssetIds
+    toggleBookmark,
+    toggleLike
   } = useEngagementData(currentUser?.id, reportOperationError);
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
 
@@ -130,13 +143,11 @@ function MainApp() {
 
     try {
       if (editingAsset) {
-        // Update existing directly in Supabase
-        const res = await supabaseService.updateAsset(editingAsset.id, assetData);
+        const res = await updateAsset(editingAsset.id, assetData);
         if (res.error) {
           return { success: false, error: res.error };
         }
         if (res.data) {
-          setAssets(prev => prev.map(a => (a.id === editingAsset.id ? res.data! : a)));
           if (viewingAsset?.id === editingAsset.id) {
             setViewingAsset(res.data);
           }
@@ -144,11 +155,7 @@ function MainApp() {
           return { success: true };
         }
       } else {
-        // Create new directly in Supabase
-        const res = await supabaseService.createAsset({
-          userId: currentUser.id,
-          authorName: currentUser.displayName,
-          authorAvatar: currentUser.avatarUrl,
+        const res = await createAsset({
           title: assetData.title || 'Untitled Asset',
           icon: assetData.icon || { type: 'emoji', value: '✨' },
           category: assetData.category || 'character',
@@ -167,14 +174,13 @@ function MainApp() {
           return { success: false, error: res.error };
         }
         if (res.data) {
-          setAssets(prev => [res.data!, ...prev]);
           setIsCreateOpen(false);
           return { success: true };
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Save asset error:', err);
-      return { success: false, error: err?.message || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุในการบันทึกผลงาน' };
+      return { success: false, error: err instanceof Error ? err.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุในการบันทึกผลงาน' };
     }
     return { success: false, error: 'ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อและลองใหม่อีกครั้ง' };
   };
@@ -183,10 +189,9 @@ function MainApp() {
   const handleSoftDeleteAsset = async (assetId: string) => {
     if (!currentUser) return;
     try {
-      const res = await supabaseService.softDeleteAsset(assetId);
+      const res = await softDeleteAsset(assetId);
       if (res.success) {
         setOperationError(null);
-        setAssets(prev => prev.map(a => a.id === assetId ? { ...a, deletedAt: new Date().toISOString() } : a));
         setViewingAsset(null);
       } else {
         setOperationError(res.error || 'ย้ายผลงานไปถังขยะไม่สำเร็จ');
@@ -201,10 +206,9 @@ function MainApp() {
   const handleRestoreAsset = async (assetId: string) => {
     if (!currentUser) return;
     try {
-      const res = await supabaseService.restoreAsset(assetId);
+      const res = await restoreAsset(assetId);
       if (res.success) {
         setOperationError(null);
-        setAssets(prev => prev.map(a => a.id === assetId ? { ...a, deletedAt: null } : a));
       } else {
         setOperationError(res.error || 'กู้คืนผลงานไม่สำเร็จ');
       }
@@ -218,10 +222,9 @@ function MainApp() {
   const handlePermanentDeleteAsset = async (assetId: string) => {
     if (!currentUser) return;
     try {
-      const res = await supabaseService.permanentDeleteAsset(assetId);
+      const res = await permanentDeleteAsset(assetId);
       if (res.success) {
         setOperationError(null);
-        setAssets(prev => prev.filter(a => a.id !== assetId));
         setViewingAsset(null);
       } else {
         setOperationError(res.error || 'ลบผลงานถาวรไม่สำเร็จ');
@@ -238,25 +241,16 @@ function MainApp() {
       openAuthModal('login');
       return;
     }
-    const isCurrentlyBookmarked = bookmarkedAssetIds.includes(assetId);
-    
     try {
-      const result = await supabaseService.setBookmark(
-        currentUser.id,
-        assetId,
-        !isCurrentlyBookmarked
-      );
+      const wasBookmarked = bookmarkedAssetIds.includes(assetId);
+      const result = await toggleBookmark(assetId);
       if (!result.success) {
         setOperationError(result.error || 'อัปเดตบุ๊กมาร์กไม่สำเร็จ');
         return;
       }
 
       setOperationError(null);
-      setBookmarkedAssetIds(prev => result.isBookmarked
-        ? Array.from(new Set([...prev, assetId]))
-        : prev.filter(id => id !== assetId)
-      );
-      if (result.isBookmarked && !isCurrentlyBookmarked) {
+      if (result.isBookmarked && !wasBookmarked) {
         confetti({
           particleCount: 20,
           spread: 40,
@@ -282,23 +276,10 @@ function MainApp() {
     }
 
     try {
-      const res = await supabaseService.forkAsset(
-        sourceAsset,
-        currentUser.id,
-        currentUser.displayName,
-        currentUser.avatarUrl
-      );
+      const res = await forkAsset(sourceAsset);
 
       if (res.data) {
         setOperationError(null);
-        setAssets(prev => {
-          const withUpdatedSource = prev.map(asset =>
-            asset.id === sourceAsset.id && res.sourceForkCount !== null
-              ? { ...asset, forkCount: res.sourceForkCount }
-              : asset
-          );
-          return [res.data!, ...withUpdatedSource];
-        });
         if (viewingAsset?.id === sourceAsset.id && res.sourceForkCount !== null) {
           setViewingAsset(prev => prev ? { ...prev, forkCount: res.sourceForkCount! } : null);
         }
@@ -323,10 +304,9 @@ function MainApp() {
   const handleMoveToFolder = async (assetId: string, folderId: string | null): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await supabaseService.updateAsset(assetId, { folderId });
+      const res = await moveAsset(assetId, folderId);
       if (res.data) {
         setOperationError(null);
-        setAssets(prev => prev.map(a => (a.id === assetId ? res.data! : a)));
         if (viewingAsset?.id === assetId) {
           setViewingAsset(res.data);
         }
@@ -344,15 +324,9 @@ function MainApp() {
   const handleCreateFolder = async (name: string, icon = '📁', color = 'purple'): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await supabaseService.createFolder({
-        userId: currentUser.id,
-        name,
-        icon,
-        color
-      });
+      const res = await createFolder(name, icon, color);
       if (res.data) {
         setOperationError(null);
-        setFolders(prev => [...prev, res.data!]);
         return true;
       }
       setOperationError(res.error || 'สร้างโฟลเดอร์ไม่สำเร็จ');
@@ -366,10 +340,9 @@ function MainApp() {
   const handleUpdateFolder = async (id: string, name: string, icon?: string, color?: string): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await supabaseService.updateFolder(id, currentUser.id, { name, icon, color });
+      const res = await updateFolder(id, name, icon, color);
       if (res.data) {
         setOperationError(null);
-        setFolders(prev => prev.map(f => (f.id === id ? res.data! : f)));
         return true;
       }
       setOperationError(res.error || 'แก้ไขโฟลเดอร์ไม่สำเร็จ');
@@ -383,11 +356,10 @@ function MainApp() {
   const handleDeleteFolder = async (id: string): Promise<boolean> => {
     if (!currentUser) return false;
     try {
-      const res = await supabaseService.deleteFolder(id, currentUser.id);
+      const res = await deleteFolder(id);
       if (res.success) {
         setOperationError(null);
-        setFolders(prev => prev.filter(f => f.id !== id));
-        setAssets(prev => prev.map(a => (a.folderId === id ? { ...a, folderId: null } : a)));
+        clearFolderAssignments(id);
         if (selectedFolderId === id) {
           setSelectedFolderId('all');
         }
@@ -407,23 +379,16 @@ function MainApp() {
       openAuthModal('login');
       return;
     }
-    const wasLiked = likedAssetIds.includes(assetId);
     try {
-      const result = await supabaseService.setAssetLike(currentUser.id, assetId, !wasLiked);
+      const result = await toggleLike(assetId);
       if (!result.success) {
         setOperationError(result.error || 'อัปเดตสถานะถูกใจไม่สำเร็จ');
         return;
       }
 
       setOperationError(null);
-      setLikedAssetIds(prev => result.isLiked
-        ? Array.from(new Set([...prev, assetId]))
-        : prev.filter(id => id !== assetId)
-      );
       if (result.likesCount !== null) {
-        setAssets(prev => prev.map(a =>
-          a.id === assetId ? { ...a, likesCount: result.likesCount! } : a
-        ));
+        updateAssetLikeCount(assetId, result.likesCount);
         if (viewingAsset?.id === assetId) {
           setViewingAsset(prev => prev ? { ...prev, likesCount: result.likesCount! } : null);
         }
@@ -442,8 +407,9 @@ function MainApp() {
     setReportingAsset(asset);
   };
 
-  const { filteredAssets, categoryCounts, vaultStats } = useAssetFilters({
+  const { filteredAssets, categoryCounts, vaultStats, folderAssetCounts } = useAssetFilters({
     assets,
+    folders,
     activeView,
     activeVaultTab,
     selectedCategory,
@@ -456,6 +422,10 @@ function MainApp() {
     recentlyViewedIds,
     currentUserId: currentUser?.id
   });
+  const foldersWithCounts = folders.map(folder => ({
+    ...folder,
+    assetsCount: folderAssetCounts[folder.id] || 0
+  }));
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-200">
@@ -495,7 +465,7 @@ function MainApp() {
               activeView,
               activeVaultTab,
               filteredAssets,
-              folders,
+              folders: foldersWithCounts,
               isLoadingAssets,
               searchQuery,
               selectedCategory,
@@ -536,7 +506,7 @@ function MainApp() {
               activeView,
               activeVaultTab,
               filteredAssets,
-              folders,
+              folders: foldersWithCounts,
               isLoadingAssets,
               searchQuery,
               selectedCategory,
@@ -570,7 +540,7 @@ function MainApp() {
             privateCount={vaultStats.privateCount}
             bookmarksCount={vaultStats.bookmarksCount}
             trashCount={vaultStats.trashCount}
-            folders={folders}
+            folders={foldersWithCounts}
             selectedFolderId={selectedFolderId}
             activeVaultTab={activeVaultTab}
             selectedStatusFilter={selectedStatusFilter}

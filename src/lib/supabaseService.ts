@@ -1,12 +1,12 @@
-import { Asset, Folder, User, AssetVisibility, AssetStatus, AssetVersion } from '../types';
+import { Asset, Folder, User, AssetStatus, AssetVersion } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { formatFriendlyErrorMessage } from './apiHelper';
 import { isLegacyGuestUserId } from './accessPolicy';
+import { normalizeAssetVisibility } from './assetVisibility';
 
 // Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
 const LOCAL_STORAGE_FOLDERS = 'creator_vault_local_folders';
-const LOCAL_STORAGE_RECENT_VIEWED = 'creator_vault_recent_viewed';
 const LEGACY_IMPORT_STORAGE_PREFIX = 'creator_vault_legacy_import_';
 
 type CloudAuth = { userId: string; error: null } | { userId: null; error: string };
@@ -110,8 +110,7 @@ function saveLegacyImportState(userId: string, state: LegacyImportState): void {
 
 // Convert Supabase DB snake_case record to Client Asset
 function mapDbToAsset(row: any): Asset {
-  const isPublicVal = row.is_public !== undefined ? row.is_public : (row.visibility === 'public');
-  const visibilityVal: AssetVisibility = row.visibility || (isPublicVal ? 'public' : 'private');
+  const { visibility: visibilityVal, isPublic } = normalizeAssetVisibility(row);
   const statusVal: AssetStatus = row.status || 'finished';
 
   return {
@@ -129,7 +128,7 @@ function mapDbToAsset(row: any): Asset {
     previewImage: row.preview_image || row.previewImage,
     previewImages: row.preview_images || (row.preview_image ? [row.preview_image] : []),
     folderId: row.folder_id || row.folderId || null,
-    isPublic: visibilityVal === 'public',
+    isPublic,
     visibility: visibilityVal,
     status: statusVal,
     tags: row.tags || [],
@@ -781,28 +780,7 @@ export const supabaseService = {
     }
   },
 
-  // 12. Recently Viewed History (Local Cache)
-  getRecentlyViewed(): string[] {
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_RECENT_VIEWED);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  },
-
-  addRecentlyViewed(assetId: string): void {
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_RECENT_VIEWED);
-      const list: string[] = raw ? JSON.parse(raw) : [];
-      const updated = [assetId, ...list.filter(id => id !== assetId)].slice(0, 15);
-      localStorage.setItem(LOCAL_STORAGE_RECENT_VIEWED, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('Error saving recently viewed:', e);
-    }
-  },
-
-  // 13. Folders CRUD
+  // 12. Folders CRUD
   async fetchFolders(userId: string): Promise<{ data: Folder[]; error: string | null }> {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
