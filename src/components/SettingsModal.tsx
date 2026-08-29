@@ -1,543 +1,109 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { 
-  X, 
-  User, 
-  Lock, 
-  Database, 
-  ShieldCheck, 
-  Check, 
-  AlertCircle, 
-  Camera, 
-  KeyRound, 
-  Sparkles, 
-  Download, 
-  Upload, 
-  FileJson, 
-  HardDrive
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { useAuth } from '../context/AuthContext';
 import { supabaseService } from '../lib/supabaseService';
-import confetti from 'canvas-confetti';
+import { SettingsBackupSection } from './settings/SettingsBackupSection';
+import { SettingsProfileSection } from './settings/SettingsProfileSection';
+import { SettingsSecuritySection } from './settings/SettingsSecuritySection';
+import { SettingsTabs } from './settings/SettingsTabs';
+import type { LegacySummary, SettingsMessage, SettingsTab } from './settings/SettingsTypes';
 
-const PRESET_AVATARS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'
-];
+const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
 
 export const SettingsModal: React.FC = () => {
   const { currentUser, isSettingsOpen, setIsSettingsOpen, updateProfile, changePassword } = useAuth();
-
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'backup'>('profile');
-
-  // Profile Form State
+  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [bio, setBio] = useState(currentUser?.bio || '');
-  const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || PRESET_AVATARS[0]);
-  const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
+  const [profileMsg, setProfileMsg] = useState<SettingsMessage | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-
-  // Password Form State
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [passwordMsg, setPasswordMsg] = useState<SettingsMessage | null>(null);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
-
-  // Backup State
   const [isExporting, setIsExporting] = useState(false);
   const [isImportingLegacy, setIsImportingLegacy] = useState(false);
-  const [legacySummary, setLegacySummary] = useState({ assets: 0, folders: 0 });
-  const [backupMsg, setBackupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const backupFileInputRef = useRef<HTMLInputElement>(null);
+  const [legacySummary, setLegacySummary] = useState<LegacySummary>({ assets: 0, folders: 0 });
+  const [backupMsg, setBackupMsg] = useState<SettingsMessage | null>(null);
 
   useEffect(() => {
-    if (isSettingsOpen && currentUser?.id) {
-      setLegacySummary(supabaseService.getLegacyGuestDataSummary(currentUser.id));
-    }
+    if (isSettingsOpen && currentUser?.id) setLegacySummary(supabaseService.getLegacyGuestDataSummary(currentUser.id));
   }, [currentUser?.id, isSettingsOpen]);
 
-  if (!isSettingsOpen) return null;
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setAvatarUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+  const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { if (typeof reader.result === 'string') setAvatarUrl(reader.result); };
+    reader.readAsDataURL(file);
   };
 
-  const handleProfileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingProfile(true);
-    setProfileMsg(null);
+  const handleProfileSubmit = async (event: React.FormEvent) => {
+    event.preventDefault(); setIsSavingProfile(true); setProfileMsg(null);
     try {
-      const result = await updateProfile({
-        displayName: displayName.trim() || 'Creator 🌸',
-        bio: bio.trim(),
-        avatarUrl
-      });
-      if (result.success) {
-        setProfileMsg({ type: 'success', text: 'บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว' });
-      } else {
-        setProfileMsg({ type: 'error', text: result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ' });
-      }
-    } catch (err: any) {
-      setProfileMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการบันทึก' });
-    } finally {
-      setIsSavingProfile(false);
-    }
+      const result = await updateProfile({ displayName: displayName.trim() || 'Creator 🌸', bio: bio.trim(), avatarUrl });
+      setProfileMsg(result.success ? { type: 'success', text: 'บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว' } : { type: 'error', text: result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ' });
+    } catch (error: unknown) { setProfileMsg({ type: 'error', text: errorMessage(error, 'เกิดข้อผิดพลาดในการบันทึก') }); }
+    finally { setIsSavingProfile(false); }
   };
 
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordMsg(null);
-
-    if (!newPassword || newPassword.length < 6) {
-      setPasswordMsg({ type: 'error', text: 'รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร' });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordMsg({ type: 'error', text: 'รหัสผ่านใหม่และการยืนยันไม่ตรงกัน' });
-      return;
-    }
-
+  const handlePasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault(); setPasswordMsg(null);
+    if (!newPassword || newPassword.length < 6) { setPasswordMsg({ type: 'error', text: 'รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร' }); return; }
+    if (newPassword !== confirmPassword) { setPasswordMsg({ type: 'error', text: 'รหัสผ่านใหม่และการยืนยันไม่ตรงกัน' }); return; }
     setIsSavingPassword(true);
     try {
-      const res = await changePassword(currentPassword, newPassword);
-      if (res.success) {
-        setPasswordMsg({ type: 'success', text: 'เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว' });
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        setPasswordMsg({ type: 'error', text: res.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ' });
-      }
-    } catch (err: any) {
-      setPasswordMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน' });
-    } finally {
-      setIsSavingPassword(false);
-    }
+      const result = await changePassword(currentPassword, newPassword);
+      if (result.success) { setPasswordMsg({ type: 'success', text: 'เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว' }); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }
+      else setPasswordMsg({ type: 'error', text: result.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ' });
+    } catch (error: unknown) { setPasswordMsg({ type: 'error', text: errorMessage(error, 'เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน') }); }
+    finally { setIsSavingPassword(false); }
   };
 
-  // Feature 7: Export & Backup Personal Vault (Strictly Current User)
   const handleExportFullVault = async () => {
-    if (!currentUser?.id) {
-      setBackupMsg({ type: 'error', text: 'กรุณาเข้าสู่ระบบเพื่อสำรองข้อมูลผลงานส่วนตัว' });
-      return;
-    }
-
-    setIsExporting(true);
-    setBackupMsg(null);
-
+    if (!currentUser?.id) { setBackupMsg({ type: 'error', text: 'กรุณาเข้าสู่ระบบเพื่อสำรองข้อมูลผลงานส่วนตัว' }); return; }
+    setIsExporting(true); setBackupMsg(null);
     try {
-      const [assetsRes, foldersRes] = await Promise.all([
-        supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true }),
-        supabaseService.fetchFolders(currentUser.id)
-      ]);
-      if (assetsRes.error || foldersRes.error) {
-        throw new Error(assetsRes.error || foldersRes.error || 'โหลดข้อมูลสำหรับสำรองไม่สำเร็จ');
-      }
-      
-      // Strictly export only current logged-in user's assets and folders
-      const userAssets = (assetsRes.data || []).filter(a => a.userId === currentUser.id);
-      const userFolders = (foldersRes.data || []).filter(f => f.userId === currentUser.id);
-
-      const backupData = {
-        app: 'Creator Vault',
-        version: '2.0.0',
-        exportedAt: new Date().toISOString(),
-        creator: {
-          id: currentUser.id,
-          name: currentUser.displayName,
-          email: currentUser.email
-        },
-        folders: userFolders,
-        assets: userAssets
-      };
-
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      const [assetsRes, foldersRes] = await Promise.all([supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true }), supabaseService.fetchFolders(currentUser.id)]);
+      if (assetsRes.error || foldersRes.error) throw new Error(assetsRes.error || foldersRes.error || 'โหลดข้อมูลสำหรับสำรองไม่สำเร็จ');
+      const userAssets = (assetsRes.data || []).filter((asset) => asset.userId === currentUser.id);
+      const userFolders = (foldersRes.data || []).filter((folder) => folder.userId === currentUser.id);
+      const backupData = { app: 'Creator Vault', version: '2.0.0', exportedAt: new Date().toISOString(), creator: { id: currentUser.id, name: currentUser.displayName, email: currentUser.email }, folders: userFolders, assets: userAssets };
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
       const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `creator_vault_backup_${currentUser.id.slice(0,8)}_${new Date().toISOString().slice(0,10)}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-
-      confetti({
-        particleCount: 30,
-        spread: 60,
-        origin: { y: 0.6 }
-      });
-
+      downloadAnchor.setAttribute('href', dataStr); downloadAnchor.setAttribute('download', `creator_vault_backup_${currentUser.id.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove();
+      confetti({ particleCount: 30, spread: 60, origin: { y: 0.6 } });
       setBackupMsg({ type: 'success', text: `สำรองข้อมูลสำเร็จ! ดาวน์โหลด ${userAssets.length} ผลงาน และ ${userFolders.length} โฟลเดอร์ของ ${currentUser.displayName || 'คุณ'} เรียบร้อยแล้ว` });
-    } catch (err: any) {
-      setBackupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการสำรองข้อมูล' });
-    } finally {
-      setIsExporting(false);
-    }
+    } catch (error: unknown) { setBackupMsg({ type: 'error', text: errorMessage(error, 'เกิดข้อผิดพลาดในการสำรองข้อมูล') }); }
+    finally { setIsExporting(false); }
   };
 
   const handleImportLegacyGuestData = async () => {
     if (!currentUser) return;
-    setIsImportingLegacy(true);
-    setBackupMsg(null);
+    setIsImportingLegacy(true); setBackupMsg(null);
     try {
       const result = await supabaseService.importLegacyGuestData(currentUser);
       setLegacySummary({ assets: result.remainingAssets, folders: result.remainingFolders });
-      if (result.importedAssets > 0 || result.importedFolders > 0) {
-        window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
-      }
-      if (result.success) {
-        setBackupMsg({
-          type: 'success',
-          text: `นำเข้าข้อมูลเก่าสำเร็จ: ${result.importedAssets} ผลงาน และ ${result.importedFolders} โฟลเดอร์ (ผลงานถูกตั้งเป็นฉบับร่างส่วนตัว)`
-        });
-      } else {
-        setBackupMsg({
-          type: 'error',
-          text: result.error || `นำเข้าได้บางส่วน ยังเหลือ ${result.remainingAssets} ผลงาน และ ${result.remainingFolders} โฟลเดอร์`
-        });
-      }
-    } catch (error: any) {
-      setBackupMsg({ type: 'error', text: error?.message || 'นำเข้าข้อมูล Guest เก่าไม่สำเร็จ' });
-    } finally {
-      setIsImportingLegacy(false);
-    }
+      if (result.importedAssets > 0 || result.importedFolders > 0) window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
+      setBackupMsg(result.success ? { type: 'success', text: `นำเข้าข้อมูลเก่าสำเร็จ: ${result.importedAssets} ผลงาน และ ${result.importedFolders} โฟลเดอร์ (ผลงานถูกตั้งเป็นฉบับร่างส่วนตัว)` } : { type: 'error', text: result.error || `นำเข้าได้บางส่วน ยังเหลือ ${result.remainingAssets} ผลงาน และ ${result.remainingFolders} โฟลเดอร์` });
+    } catch (error: unknown) { setBackupMsg({ type: 'error', text: errorMessage(error, 'นำเข้าข้อมูล Guest เก่าไม่สำเร็จ') }); }
+    finally { setIsImportingLegacy(false); }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-purple-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
-        
-        {/* Header */}
-        <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-purple-600 dark:bg-purple-700 text-white flex items-center justify-center text-lg shadow-md shadow-purple-500/20">
-              ⚙️
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
-                ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setIsSettingsOpen(false)}
-            className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Tab Navigation */}
-        <div className="flex border-b border-slate-100 dark:border-slate-800 px-6 bg-slate-50/50 dark:bg-slate-900/50 gap-2 pt-2 overflow-x-auto no-scrollbar">
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'profile'
-                ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>โปรไฟล์</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('security')}
-            className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'security'
-                ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>รหัสผ่าน</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('backup')}
-            className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'backup'
-                ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <HardDrive className="w-3.5 h-3.5" />
-            <span>สำรองข้อมูล (Backup)</span>
-          </button>
-        </div>
-
-        {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto">
-          
-          {/* Tab 1: Profile */}
-          {activeTab === 'profile' && (
-            <form onSubmit={handleProfileSubmit} className="p-6 space-y-4">
-              {profileMsg && (
-                <div
-                  className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
-                    profileMsg.type === 'success'
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
-                  }`}
-                >
-                  {profileMsg.type === 'success' ? <Check className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-                  <span>{profileMsg.text}</span>
-                </div>
-              )}
-
-              {/* Avatar Selection */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  รูปโปรไฟล์ผู้สร้าง (Avatar)
-                </label>
-                
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <img
-                      src={avatarUrl}
-                      alt="Avatar Preview"
-                      className="w-16 h-16 rounded-full object-cover ring-2 ring-purple-300 dark:ring-purple-700 shadow-md"
-                    />
-                  </div>
-
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      {PRESET_AVATARS.map((url, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => setAvatarUrl(url)}
-                          className={`w-8 h-8 rounded-full overflow-hidden border-2 transition-transform hover:scale-110 ${
-                            avatarUrl === url ? 'border-purple-600 ring-2 ring-purple-300' : 'border-transparent'
-                          }`}
-                        >
-                          <img src={url} alt="preset" className="w-full h-full object-cover" />
-                        </button>
-                      ))}
-                    </div>
-
-                    <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-purple-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-medium cursor-pointer transition-colors border border-slate-200 dark:border-slate-700">
-                      <Camera className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                      <span>อัปโหลดรูปจากเครื่อง</span>
-                      <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Display Name */}
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  ชื่อผู้แสดงผลงาน (Display Name) <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="เช่น: 🌸 พลอยใส นักสร้างบอท"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 text-slate-800 dark:text-slate-100"
-                  required
-                />
-              </div>
-
-              {/* Email (Readonly) */}
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  อีเมลที่เชื่อมต่อ (Email / Auth UID)
-                </label>
-                <input
-                  type="text"
-                  value={currentUser?.email || 'บัญชี OAuth'}
-                  disabled
-                  className="w-full px-3.5 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400 cursor-not-allowed"
-                />
-              </div>
-
-              {/* Bio */}
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  คำแนะนำตัว (Bio)
-                </label>
-                <textarea
-                  rows={2}
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  placeholder="แนะนำตัวสั้นๆ สไตล์งานเขียน หรือบอทที่คุณสร้าง..."
-                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 text-slate-800 dark:text-slate-100 resize-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSavingProfile}
-                className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <Check className="w-4 h-4" />
-                <span>{isSavingProfile ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลงโปรไฟล์'}</span>
-              </button>
-            </form>
-          )}
-
-          {/* Tab 2: Security & Password */}
-          {activeTab === 'security' && (
-            <form onSubmit={handlePasswordSubmit} className="p-6 space-y-4">
-              {passwordMsg && (
-                <div
-                  className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
-                    passwordMsg.type === 'success'
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
-                  }`}
-                >
-                  {passwordMsg.type === 'success' ? <Check className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-                  <span>{passwordMsg.text}</span>
-                </div>
-              )}
-
-              {currentUser?.provider !== 'email' ? (
-                <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-2xl text-xs text-amber-800 dark:text-amber-300 space-y-2">
-                  <p className="font-bold">บัญชีนี้เข้าสู่ระบบผ่านผู้ให้บริการภายนอก</p>
-                  <p>กรุณาจัดการรหัสผ่านผ่านผู้ให้บริการบัญชีของคุณ</p>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      รหัสผ่านปัจจุบัน (Current Password)
-                    </label>
-                    <input
-                      type="password"
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 text-slate-800 dark:text-slate-100"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      รหัสผ่านใหม่ (New Password) <span className="text-rose-500">* (อย่างน้อย 6 ตัวอักษร)</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 text-slate-800 dark:text-slate-100"
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      ยืนยันรหัสผ่านใหม่ (Confirm New Password) <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-purple-400 text-slate-800 dark:text-slate-100"
-                      required
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSavingPassword}
-                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <KeyRound className="w-4 h-4" />
-                    <span>{isSavingPassword ? 'กำลังเปลี่ยนรหัสผ่าน...' : 'อัปเดตรหัสผ่านใหม่'}</span>
-                  </button>
-                </>
-              )}
-            </form>
-          )}
-
-          {/* Tab 3: Backup & Export (Feature 7) */}
-          {activeTab === 'backup' && (
-            <div className="p-6 space-y-5 text-xs">
-              {backupMsg && (
-                <div
-                  className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
-                    backupMsg.type === 'success'
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
-                  }`}
-                >
-                  {backupMsg.type === 'success' ? <Check className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-                  <span>{backupMsg.text}</span>
-                </div>
-              )}
-
-              <div className="p-4 bg-purple-50/80 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900 rounded-2xl space-y-2">
-                <div className="flex items-center gap-2 text-purple-900 dark:text-purple-200 font-bold">
-                  <HardDrive className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                  <span>ส่งออกข้อมูลคลังผลงานส่วนตัวของฉัน (JSON Backup)</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-[11.5px]">
-                  ดาวน์โหลดไฟล์ JSON สำรองข้อมูลผลงานทั้งหมดของคุณ ทั้งโปรไฟล์บอท, สคริปต์ Prompts, โค้ดตกแต่ง UI, โฟลเดอร์, และเวอร์ชันประวัติ เพื่อเก็บไว้อย่างปลอดภัยบนเครื่องของคุณ
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={handleExportFullVault}
-                  disabled={isExporting}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-2xl font-bold shadow-md shadow-purple-200 dark:shadow-purple-950 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>{isExporting ? 'กำลังรวบรวมข้อมูล...' : 'ส่งออกข้อมูลคลังผลงานส่วนตัวของฉัน (JSON Backup)'}</span>
-                </button>
-              </div>
-
-              {(legacySummary.assets > 0 || legacySummary.folders > 0) && (
-                <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-2xl space-y-3">
-                  <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
-                    <Upload className="w-4 h-4" />
-                    <span>พบข้อมูล Guest เก่าในเบราว์เซอร์นี้</span>
-                  </div>
-                  <p className="text-[11.5px] leading-relaxed text-amber-800 dark:text-amber-300">
-                    พบ {legacySummary.assets} ผลงาน และ {legacySummary.folders} โฟลเดอร์ คุณเลือกนำเข้าเข้าบัญชีนี้ได้ โดยผลงานจะเริ่มเป็นฉบับร่างส่วนตัว และข้อมูลต้นฉบับในเครื่องจะไม่ถูกลบ
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleImportLegacyGuestData}
-                    disabled={isImportingLegacy}
-                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>{isImportingLegacy ? 'กำลังนำเข้า...' : 'นำเข้าข้อมูล Guest เก่า'}</span>
-                  </button>
-                </div>
-              )}
-
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
-                💡 <strong>เคล็ดลับ:</strong> เก็บไฟล์ JSON ไว้ในพื้นที่ส่วนตัว เพราะอาจมีเนื้อหาและข้อมูลบัญชีของคุณ
-              </div>
-            </div>
-          )}
-
-        </div>
-
+  if (!isSettingsOpen) return null;
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-purple-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
+      <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-2xl bg-purple-600 dark:bg-purple-700 text-white flex items-center justify-center text-lg shadow-md shadow-purple-500/20">⚙️</div><div><h2 className="text-base font-bold text-slate-800 dark:text-slate-100">ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)</h2><p className="text-xs text-slate-500 dark:text-slate-400">จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน</p></div></div><button onClick={() => setIsSettingsOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X className="w-4 h-4" /></button></div>
+      <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
+      <div className="flex-1 overflow-y-auto">
+        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarChange={setAvatarUrl} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
+        {activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
+        {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
       </div>
     </div>
-  );
+  </div>;
 };
