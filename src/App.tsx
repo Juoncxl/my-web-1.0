@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
-import { Asset, AssetCategory, AssetStatus } from './types';
+import type { Asset, AssetCategory, AssetStatus } from './types';
 import {
-  canCreateOwnedAsset,
-  canForkAsset
+  canCreateOwnedAsset
 } from './lib/accessPolicy';
 import { Header } from './components/Header';
 import { AssetViewModal } from './components/AssetViewModal';
@@ -26,6 +25,8 @@ import { useFolderData } from './hooks/useFolderData';
 import { useEngagementData } from './hooks/useEngagementData';
 import { useRecentlyViewed } from './hooks/useRecentlyViewed';
 import { useAssetFilters } from './hooks/useAssetFilters';
+import { useAssetModalState } from './hooks/useAssetModalState';
+import { useAssetActions } from './hooks/useAssetActions';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { VaultPage } from './pages/VaultPage';
 
@@ -85,16 +86,29 @@ function MainApp() {
   } = useEngagementData(currentUser?.id, reportOperationError);
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
 
-  // Modals State
-  const [viewingAsset, setViewingAsset] = useState<Asset | null>(null);
-  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
-  const [reportingAsset, setReportingAsset] = useState<Asset | null>(null);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const {
+    viewingAsset,
+    editingAssetId,
+    editingAsset,
+    isEditorOpen,
+    reportingAsset,
+    movingAsset,
+    openAssetView,
+    closeAssetView,
+    openCreateEditor,
+    openEditEditor,
+    closeEditor,
+    openReport,
+    closeReport,
+    openMoveToFolder,
+    closeMoveToFolder
+  } = useAssetModalState(assets);
+
+  // Simple UI-only state stays local to App; asset selections live in the
+  // focused asset modal hook above.
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
-  const [isMoveToFolderOpen, setIsMoveToFolderOpen] = useState(false);
-  const [movingAsset, setMovingAsset] = useState<Asset | null>(null);
   const [aiContext, setAiContext] = useState<{ type: string; context: string } | null>(null);
 
   useEffect(() => {
@@ -112,213 +126,86 @@ function MainApp() {
     }
   }, [activeView, currentUser]);
 
-  // Track recently viewed items
-  const handleOpenAssetView = (asset: Asset) => {
-    setViewingAsset(asset);
+  // Track recently viewed items while keeping the selected asset canonical.
+  const handleOpenAssetView = useCallback((asset: Asset) => {
+    openAssetView(asset.id);
     trackRecentlyViewed(asset.id);
-  };
+  }, [openAssetView, trackRecentlyViewed]);
 
-  const handleViewChange = (view: 'feed' | 'vault') => {
+  const handleViewChange = useCallback((view: 'feed' | 'vault') => {
     if (view === 'vault' && !currentUser) {
       openAuthModal('login');
       return;
     }
     setActiveView(view);
     setSelectedTag(null);
-  };
+  }, [currentUser, openAuthModal]);
 
   // Persisted actions require a real Supabase account session.
-  const handleOpenCreateModal = () => {
+  const handleOpenCreateModal = useCallback(() => {
     if (!canCreateOwnedAsset(currentUser)) {
       openAuthModal('signup');
       return;
     }
-    setEditingAsset(null);
-    setIsCreateOpen(true);
-  };
+    openCreateEditor();
+  }, [currentUser, openAuthModal, openCreateEditor]);
 
-  // Handle Save (Create or Update)
-  const handleSaveAsset = async (assetData: Partial<Asset>): Promise<{ success: boolean; error?: string }> => {
-    if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
+  const handleOpenAIModal = useCallback(() => {
+    setAiContext(null);
+    setIsAIOpen(true);
+  }, []);
 
-    try {
-      if (editingAsset) {
-        const res = await updateAsset(editingAsset.id, assetData);
-        if (res.error) {
-          return { success: false, error: res.error };
-        }
-        if (res.data) {
-          if (viewingAsset?.id === editingAsset.id) {
-            setViewingAsset(res.data);
-          }
-          setEditingAsset(null);
-          return { success: true };
-        }
-      } else {
-        const res = await createAsset({
-          title: assetData.title || 'Untitled Asset',
-          icon: assetData.icon || { type: 'emoji', value: '✨' },
-          category: assetData.category || 'character',
-          content: assetData.content || '',
-          uiCodeSnippet: assetData.uiCodeSnippet || '',
-          previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : []),
-          folderId: assetData.folderId || null,
-          isPublic: assetData.visibility === 'public' || (assetData.isPublic !== undefined ? assetData.isPublic : true),
-          visibility: assetData.visibility || 'public',
-          status: assetData.status || 'finished',
-          linkedAssetIds: assetData.linkedAssetIds || [],
-          tags: assetData.tags || []
-        });
+  const handleOpenMoveToFolder = useCallback((asset: Asset) => {
+    openMoveToFolder(asset.id);
+  }, [openMoveToFolder]);
 
-        if (res.error) {
-          return { success: false, error: res.error };
-        }
-        if (res.data) {
-          setIsCreateOpen(false);
-          return { success: true };
-        }
-      }
-    } catch (err: unknown) {
-      console.error('Save asset error:', err);
-      return { success: false, error: err instanceof Error ? err.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุในการบันทึกผลงาน' };
-    }
-    return { success: false, error: 'ไม่สามารถบันทึกข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อและลองใหม่อีกครั้ง' };
-  };
+  const handleForkSuccess = useCallback(() => {
+    setActiveView('vault');
+    setActiveVaultTab('my_assets');
+    confetti({ particleCount: 35, spread: 55, origin: { y: 0.6 } });
+  }, []);
 
-  // Feature 9: Soft Delete / Move to Trash
-  const handleSoftDeleteAsset = async (assetId: string) => {
-    if (!currentUser) return;
-    try {
-      const res = await softDeleteAsset(assetId);
-      if (res.success) {
-        setOperationError(null);
-        setViewingAsset(null);
-      } else {
-        setOperationError(res.error || 'ย้ายผลงานไปถังขยะไม่สำเร็จ');
-      }
-    } catch (err) {
-      console.error('Soft delete error:', err);
-      setOperationError('ย้ายผลงานไปถังขยะไม่สำเร็จ');
-    }
-  };
+  const handleBookmarkSuccess = useCallback(() => {
+    confetti({
+      particleCount: 20,
+      spread: 40,
+      origin: { y: 0.8 },
+      colors: ['#F59E0B', '#EC4899', '#8B5CF6']
+    });
+  }, []);
 
-  // Feature 9: Restore Asset from Trash
-  const handleRestoreAsset = async (assetId: string) => {
-    if (!currentUser) return;
-    try {
-      const res = await restoreAsset(assetId);
-      if (res.success) {
-        setOperationError(null);
-      } else {
-        setOperationError(res.error || 'กู้คืนผลงานไม่สำเร็จ');
-      }
-    } catch (err) {
-      console.error('Restore error:', err);
-      setOperationError('กู้คืนผลงานไม่สำเร็จ');
-    }
-  };
-
-  // Permanent Delete
-  const handlePermanentDeleteAsset = async (assetId: string) => {
-    if (!currentUser) return;
-    try {
-      const res = await permanentDeleteAsset(assetId);
-      if (res.success) {
-        setOperationError(null);
-        setViewingAsset(null);
-      } else {
-        setOperationError(res.error || 'ลบผลงานถาวรไม่สำเร็จ');
-      }
-    } catch (err) {
-      console.error('Delete asset error:', err);
-      setOperationError('ลบผลงานถาวรไม่สำเร็จ');
-    }
-  };
-
-  // Feature 2: Bookmark Toggle
-  const handleToggleBookmark = async (assetId: string) => {
-    if (!currentUser) {
-      openAuthModal('login');
-      return;
-    }
-    try {
-      const wasBookmarked = bookmarkedAssetIds.includes(assetId);
-      const result = await toggleBookmark(assetId);
-      if (!result.success) {
-        setOperationError(result.error || 'อัปเดตบุ๊กมาร์กไม่สำเร็จ');
-        return;
-      }
-
-      setOperationError(null);
-      if (result.isBookmarked && !wasBookmarked) {
-        confetti({
-          particleCount: 20,
-          spread: 40,
-          origin: { y: 0.8 },
-          colors: ['#F59E0B', '#EC4899', '#8B5CF6']
-        });
-      }
-    } catch (err) {
-      console.error('Bookmark error:', err);
-      setOperationError('อัปเดตบุ๊กมาร์กไม่สำเร็จ');
-    }
-  };
-
-  // Feature 4: Duplicate / Fork Asset into User's Vault
-  const handleForkAsset = async (sourceAsset: Asset) => {
-    if (!currentUser) {
-      openAuthModal('login');
-      return;
-    }
-    if (!canForkAsset(currentUser, sourceAsset)) {
-      setOperationError('ผลงานนี้เป็นส่วนตัว ถูกลบ หรือไม่สามารถสร้างสำเนาได้');
-      return;
-    }
-
-    try {
-      const res = await forkAsset(sourceAsset);
-
-      if (res.data) {
-        setOperationError(null);
-        if (viewingAsset?.id === sourceAsset.id && res.sourceForkCount !== null) {
-          setViewingAsset(prev => prev ? { ...prev, forkCount: res.sourceForkCount! } : null);
-        }
-        setActiveView('vault');
-        setActiveVaultTab('my_assets');
-        
-        confetti({
-          particleCount: 35,
-          spread: 55,
-          origin: { y: 0.6 }
-        });
-      } else {
-        setOperationError(res.error || 'สร้างสำเนาผลงานไม่สำเร็จ');
-      }
-    } catch (err) {
-      console.error('Fork asset error:', err);
-      setOperationError('สร้างสำเนาผลงานไม่สำเร็จ');
-    }
-  };
-
-  // Handle Move to Folder
-  const handleMoveToFolder = async (assetId: string, folderId: string | null): Promise<boolean> => {
-    if (!currentUser) return false;
-    try {
-      const res = await moveAsset(assetId, folderId);
-      if (res.data) {
-        setOperationError(null);
-        if (viewingAsset?.id === assetId) {
-          setViewingAsset(res.data);
-        }
-        return true;
-      }
-      setOperationError(res.error || 'ย้ายผลงานเข้าโฟลเดอร์ไม่สำเร็จ');
-    } catch (err) {
-      console.error('Move to folder error:', err);
-      setOperationError('ย้ายผลงานเข้าโฟลเดอร์ไม่สำเร็จ');
-    }
-    return false;
-  };
+  const {
+    handleSaveAsset,
+    handleSoftDeleteAsset,
+    handleRestoreAsset,
+    handlePermanentDeleteAsset,
+    handleToggleBookmark,
+    handleForkAsset,
+    handleMoveToFolder,
+    handleLikeAsset
+  } = useAssetActions({
+    currentUser,
+    editingAssetId,
+    bookmarkedAssetIds,
+    openAuthModal,
+    reportOperationError,
+    clearOperationError: () => setOperationError(null),
+    createAsset,
+    updateAsset,
+    softDeleteAsset,
+    restoreAsset,
+    permanentDeleteAsset,
+    forkAsset,
+    moveAsset,
+    toggleBookmark,
+    toggleLike,
+    updateAssetLikeCount,
+    onAssetDeleted: () => closeAssetView(),
+    onCreateSuccess: closeEditor,
+    onUpdateSuccess: closeEditor,
+    onForkSuccess: handleForkSuccess,
+    onBookmarkSuccess: handleBookmarkSuccess
+  });
 
   // Folder CRUD
   const handleCreateFolder = async (name: string, icon = '📁', color = 'purple'): Promise<boolean> => {
@@ -373,39 +260,13 @@ function MainApp() {
     return false;
   };
 
-  // Handle Like
-  const handleLikeAsset = async (assetId: string) => {
+  const handleOpenReport = useCallback((asset: Asset) => {
     if (!currentUser) {
       openAuthModal('login');
       return;
     }
-    try {
-      const result = await toggleLike(assetId);
-      if (!result.success) {
-        setOperationError(result.error || 'อัปเดตสถานะถูกใจไม่สำเร็จ');
-        return;
-      }
-
-      setOperationError(null);
-      if (result.likesCount !== null) {
-        updateAssetLikeCount(assetId, result.likesCount);
-        if (viewingAsset?.id === assetId) {
-          setViewingAsset(prev => prev ? { ...prev, likesCount: result.likesCount! } : null);
-        }
-      }
-    } catch (e) {
-      console.error('Like error:', e);
-      setOperationError('อัปเดตสถานะถูกใจไม่สำเร็จ');
-    }
-  };
-
-  const handleOpenReport = (asset: Asset) => {
-    if (!currentUser) {
-      openAuthModal('login');
-      return;
-    }
-    setReportingAsset(asset);
-  };
+    openReport(asset.id);
+  }, [currentUser, openAuthModal, openReport]);
 
   const { filteredAssets, categoryCounts, vaultStats, folderAssetCounts } = useAssetFilters({
     assets,
@@ -427,6 +288,37 @@ function MainApp() {
     assetsCount: folderAssetCounts[folder.id] || 0
   }));
 
+  const collectionProps = {
+    activeView,
+    activeVaultTab,
+    filteredAssets,
+    folders: foldersWithCounts,
+    isLoadingAssets,
+    searchQuery,
+    selectedCategory,
+    selectedTag,
+    selectedFolderId,
+    selectedStatusFilter,
+    visibilityFilter,
+    categoryCounts,
+    bookmarkedAssetIds,
+    likedAssetIds,
+    currentUserId: currentUser?.id,
+    onSelectCategory: (category: AssetCategory) => setSelectedCategory(category),
+    onClearTag: () => setSelectedTag(null),
+    onVisibilityFilterChange: setVisibilityFilter,
+    onOpenAsset: handleOpenAssetView,
+    onLike: handleLikeAsset,
+    onBookmark: handleToggleBookmark,
+    onFork: handleForkAsset,
+    onReport: handleOpenReport,
+    onRestore: handleRestoreAsset,
+    onPermanentDelete: handlePermanentDeleteAsset,
+    onSelectTag: setSelectedTag,
+    onOpenMoveToFolder: handleOpenMoveToFolder,
+    onCreateAsset: handleOpenCreateModal
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-200">
       
@@ -437,10 +329,7 @@ function MainApp() {
         activeView={activeView}
         onViewChange={handleViewChange}
         onOpenCreateModal={handleOpenCreateModal}
-        onOpenAIModal={() => {
-          setAiContext(null);
-          setIsAIOpen(true);
-        }}
+        onOpenAIModal={handleOpenAIModal}
         onOpenAuthModal={() => openAuthModal('login')}
         onOpenSignUpModal={() => openAuthModal('signup')}
         onOpenProfileModal={() => setIsProfileOpen(true)}
@@ -461,80 +350,13 @@ function MainApp() {
         
         {activeView === 'feed' ? (
           <DiscoverPage
-            collectionProps={{
-              activeView,
-              activeVaultTab,
-              filteredAssets,
-              folders: foldersWithCounts,
-              isLoadingAssets,
-              searchQuery,
-              selectedCategory,
-              selectedTag,
-              selectedFolderId,
-              selectedStatusFilter,
-              visibilityFilter,
-              categoryCounts,
-              bookmarkedAssetIds,
-              likedAssetIds,
-              currentUserId: currentUser?.id,
-              onSelectCategory: category => setSelectedCategory(category),
-              onClearTag: () => setSelectedTag(null),
-              onVisibilityFilterChange: setVisibilityFilter,
-              onOpenAsset: handleOpenAssetView,
-              onLike: handleLikeAsset,
-              onBookmark: handleToggleBookmark,
-              onFork: handleForkAsset,
-              onReport: handleOpenReport,
-              onRestore: handleRestoreAsset,
-              onPermanentDelete: handlePermanentDeleteAsset,
-              onSelectTag: setSelectedTag,
-              onOpenMoveToFolder: asset => {
-                setMovingAsset(asset);
-                setIsMoveToFolderOpen(true);
-              },
-              onCreateAsset: handleOpenCreateModal
-            }}
-            onOpenAIModal={() => {
-              setAiContext(null);
-              setIsAIOpen(true);
-            }}
+            collectionProps={collectionProps}
+            onOpenAIModal={handleOpenAIModal}
             onCreateAsset={handleOpenCreateModal}
           />
         ) : (
           <VaultPage
-            collectionProps={{
-              activeView,
-              activeVaultTab,
-              filteredAssets,
-              folders: foldersWithCounts,
-              isLoadingAssets,
-              searchQuery,
-              selectedCategory,
-              selectedTag,
-              selectedFolderId,
-              selectedStatusFilter,
-              visibilityFilter,
-              categoryCounts,
-              bookmarkedAssetIds,
-              likedAssetIds,
-              currentUserId: currentUser?.id,
-              onSelectCategory: category => setSelectedCategory(category),
-              onClearTag: () => setSelectedTag(null),
-              onVisibilityFilterChange: setVisibilityFilter,
-              onOpenAsset: handleOpenAssetView,
-              onLike: handleLikeAsset,
-              onBookmark: handleToggleBookmark,
-              onFork: handleForkAsset,
-              onReport: handleOpenReport,
-              onRestore: handleRestoreAsset,
-              onPermanentDelete: handlePermanentDeleteAsset,
-              onSelectTag: setSelectedTag,
-              onOpenMoveToFolder: asset => {
-                setMovingAsset(asset);
-                setIsMoveToFolderOpen(true);
-              },
-              onCreateAsset: handleOpenCreateModal
-            }}
+            collectionProps={collectionProps}
             totalAssetsCount={vaultStats.total}
             publicCount={vaultStats.publicCount}
             privateCount={vaultStats.privateCount}
@@ -578,12 +400,8 @@ function MainApp() {
       <AssetViewModal
         asset={viewingAsset}
         isOpen={!!viewingAsset}
-        onClose={() => setViewingAsset(null)}
-        onEdit={(asset) => {
-          setEditingAsset(asset);
-          setViewingAsset(null);
-          setIsCreateOpen(true);
-        }}
+        onClose={closeAssetView}
+        onEdit={asset => openEditEditor(asset.id)}
         onDelete={handleSoftDeleteAsset}
         onPermanentDelete={handlePermanentDeleteAsset}
         onRestore={handleRestoreAsset}
@@ -601,11 +419,8 @@ function MainApp() {
       />
 
       <AssetEditorModal
-        isOpen={isCreateOpen}
-        onClose={() => {
-          setIsCreateOpen(false);
-          setEditingAsset(null);
-        }}
+        isOpen={isEditorOpen}
+        onClose={closeEditor}
         onSave={handleSaveAsset}
         initialData={editingAsset}
         folders={folders}
@@ -618,7 +433,7 @@ function MainApp() {
 
       <ReportModal
         isOpen={!!reportingAsset}
-        onClose={() => setReportingAsset(null)}
+        onClose={closeReport}
         asset={reportingAsset}
       />
 
@@ -632,16 +447,13 @@ function MainApp() {
       />
 
       <MoveToFolderModal
-        isOpen={isMoveToFolderOpen}
-        onClose={() => {
-          setIsMoveToFolderOpen(false);
-          setMovingAsset(null);
-        }}
+        isOpen={!!movingAsset}
+        onClose={closeMoveToFolder}
         asset={movingAsset}
         folders={folders}
         onMoveToFolder={handleMoveToFolder}
         onOpenFolderManager={() => {
-          setIsMoveToFolderOpen(false);
+          closeMoveToFolder();
           setIsFolderManagerOpen(true);
         }}
       />
