@@ -235,7 +235,11 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
         setErrorMsg(saveError);
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : undefined;
+      const message = error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+          ? error.message
+          : undefined;
       setErrorMsg(message || 'บันทึกไม่สำเร็จ');
     } finally {
       setIsSubmitting(false);
