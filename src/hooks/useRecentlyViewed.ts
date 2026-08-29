@@ -1,31 +1,25 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  readRecentlyViewed,
+  recordRecentlyViewed,
+  writeRecentlyViewed
+} from '../lib/recentlyViewedStorage';
 
-const RECENTLY_VIEWED_STORAGE_KEY = 'creator_vault_recently_viewed';
-
-function readRecentlyViewed(): string[] {
-  try {
-    const stored = localStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
-    const parsed = stored ? JSON.parse(stored) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function getStorage(): Storage | undefined {
+  return typeof window === 'undefined' ? undefined : window.localStorage;
 }
 
 export function useRecentlyViewed() {
-  const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>(readRecentlyViewed);
+  const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>(() =>
+    readRecentlyViewed(getStorage())
+  );
+
+  useEffect(() => {
+    writeRecentlyViewed(getStorage(), recentlyViewedIds);
+  }, [recentlyViewedIds]);
 
   const trackRecentlyViewed = useCallback((assetId: string) => {
-    setRecentlyViewedIds(previousIds => {
-      const filtered = previousIds.filter(id => id !== assetId);
-      const updated = [assetId, ...filtered].slice(0, 30);
-      try {
-        localStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(updated));
-      } catch (error) {
-        console.error(error);
-      }
-      return updated;
-    });
+    setRecentlyViewedIds(previousIds => recordRecentlyViewed(previousIds, assetId));
   }, []);
 
   return { recentlyViewedIds, trackRecentlyViewed };
