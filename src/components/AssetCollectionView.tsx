@@ -1,0 +1,161 @@
+import React from 'react';
+import { Plus, RefreshCw } from 'lucide-react';
+import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
+import { CategoryNav } from './CategoryNav';
+import { AssetCard } from './AssetCard';
+import type { VaultTabType } from './PersonalVaultHeader';
+
+interface AssetCollectionViewProps {
+  activeView: 'feed' | 'vault';
+  activeVaultTab: VaultTabType;
+  filteredAssets: Asset[];
+  folders: Folder[];
+  isLoadingAssets: boolean;
+  searchQuery: string;
+  selectedCategory: AssetCategory | 'all';
+  selectedTag: string | null;
+  selectedFolderId: string | 'all' | 'unassigned';
+  selectedStatusFilter: AssetStatus | 'all';
+  visibilityFilter: 'all' | 'public' | 'private';
+  categoryCounts: Record<string, number>;
+  bookmarkedAssetIds: string[];
+  likedAssetIds: string[];
+  currentUserId: string | undefined;
+  onSelectCategory: (category: AssetCategory) => void;
+  onClearTag: () => void;
+  onVisibilityFilterChange: (filter: 'all' | 'public' | 'private') => void;
+  onOpenAsset: (asset: Asset) => void;
+  onLike: (assetId: string) => void;
+  onBookmark: (assetId: string) => void;
+  onFork: (asset: Asset) => void;
+  onReport: (asset: Asset) => void;
+  onRestore: (assetId: string) => void;
+  onPermanentDelete: (assetId: string) => void;
+  onSelectTag: (tag: string) => void;
+  onOpenMoveToFolder: (asset: Asset) => void;
+  onCreateAsset: () => void;
+}
+
+export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
+  activeView,
+  activeVaultTab,
+  filteredAssets,
+  folders,
+  isLoadingAssets,
+  searchQuery,
+  selectedCategory,
+  selectedTag,
+  selectedFolderId,
+  selectedStatusFilter,
+  visibilityFilter,
+  categoryCounts,
+  bookmarkedAssetIds,
+  likedAssetIds,
+  currentUserId,
+  onSelectCategory,
+  onClearTag,
+  onVisibilityFilterChange,
+  onOpenAsset,
+  onLike,
+  onBookmark,
+  onFork,
+  onReport,
+  onRestore,
+  onPermanentDelete,
+  onSelectTag,
+  onOpenMoveToFolder,
+  onCreateAsset
+}) => {
+  return (
+    <>
+      <CategoryNav
+        selectedCategory={selectedCategory}
+        onSelectCategory={onSelectCategory}
+        selectedTag={selectedTag}
+        onClearTag={onClearTag}
+        categoryCounts={categoryCounts}
+        activeView={activeView}
+        visibilityFilter={visibilityFilter}
+        onVisibilityFilterChange={onVisibilityFilterChange}
+      />
+
+      {isLoadingAssets ? (
+        <div className="py-20 flex flex-col items-center justify-center text-center space-y-3">
+          <RefreshCw className="w-8 h-8 text-purple-500 animate-spin" />
+          <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">กำลังโหลดข้อมูลคลังผลงาน...</p>
+        </div>
+      ) : filteredAssets.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 pt-2">
+          {filteredAssets.map(asset => {
+            const folder = folders.find(item => item.id === asset.folderId);
+            return (
+              <AssetCard
+                key={asset.id}
+                asset={asset}
+                folderName={folder?.name}
+                folderIcon={folder?.icon}
+                onClick={onOpenAsset}
+                onLike={onLike}
+                onBookmark={onBookmark}
+                onFork={onFork}
+                onReport={onReport}
+                onRestore={onRestore}
+                onPermanentDelete={onPermanentDelete}
+                onSelectCategory={onSelectCategory}
+                onSelectTag={onSelectTag}
+                onOpenMoveToFolder={onOpenMoveToFolder}
+                isOwner={asset.userId === currentUserId}
+                isBookmarked={bookmarkedAssetIds.includes(asset.id)}
+                isLiked={likedAssetIds.includes(asset.id)}
+                isTrashMode={activeVaultTab === 'trash'}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <div className="py-16 px-4 bg-white/70 dark:bg-slate-900/70 rounded-3xl border border-purple-100 dark:border-slate-800 text-center max-w-md mx-auto my-8 space-y-3">
+          <div className="w-14 h-14 bg-purple-50 dark:bg-slate-800 rounded-2xl text-2xl flex items-center justify-center mx-auto shadow-xs">
+            {activeView === 'vault'
+              ? (activeVaultTab === 'trash' ? '🗑️' : activeVaultTab === 'bookmarks' ? '⭐' : activeVaultTab === 'recent' ? '🕒' : '🔒')
+              : '🔍'}
+          </div>
+          <h3 className="text-base font-bold text-slate-800 dark:text-white">
+            {searchQuery
+              ? `ไม่พบผลงานที่ตรงกับ "${searchQuery}"`
+              : selectedTag
+              ? `ไม่พบผลงานที่มีแท็ก #${selectedTag}`
+              : activeView === 'vault'
+              ? (activeVaultTab === 'trash'
+                  ? 'ไม่มีผลงานในถังขยะ'
+                  : activeVaultTab === 'bookmarks'
+                  ? 'ยังไม่มีผลงานที่บันทึกไว้ในบุ๊กมาร์ก'
+                  : activeVaultTab === 'recent'
+                  ? 'ยังไม่มีประวัติการดูผลงานล่าสุด'
+                  : 'ยังไม่มีผลงานในคลังส่วนตัวหรือโฟลเดอร์นี้')
+              : 'ยังไม่มีผลงานในหมวดหมู่นี้'}
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            {activeView === 'vault'
+              ? (activeVaultTab === 'trash'
+                  ? 'ผลงานที่คุณย้ายลงถังขยะจะปรากฏที่นี่เพื่อกู้คืนได้ทุกเมื่อ'
+                  : activeVaultTab === 'bookmarks'
+                  ? 'กดบันทึกผลงานโปรดจากฟีดสาธารณะเพื่อเก็บไว้อ่านได้ที่นี่'
+                  : 'เริ่มต้นสร้างโปรไฟล์บอท, บันทึก System Prompt หรือโค้ด UI ชิ้นแรกของคุณได้ทันที')
+              : 'เป็นคนแรกที่สร้างสรรค์และแชร์ความรู้ลงในหมวดหมู่นี้!'}
+          </p>
+          {activeView === 'vault' && activeVaultTab === 'my_assets' && (
+            <div className="pt-2">
+              <button
+                onClick={onCreateAsset}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-transform active:scale-95 shadow-sm shadow-purple-200 dark:shadow-purple-950 inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>สร้างผลงานใหม่</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+};
