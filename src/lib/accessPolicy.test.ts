@@ -52,6 +52,8 @@ describe('visitor and legacy Guest policy', () => {
   it('prevents a visitor from bypassing the account requirement through Fork', () => {
     expect(canForkAsset(null, makeAsset())).toBe(false);
     expect(canForkAsset(user, makeAsset())).toBe(true);
+    expect(canForkAsset(user, makeAsset({ visibility: 'public', isPublic: false }))).toBe(false);
+    expect(canForkAsset(user, makeAsset({ visibility: 'private', isPublic: true }))).toBe(false);
     expect(canForkAsset(user, makeAsset({ visibility: 'private', isPublic: false }))).toBe(false);
     expect(canForkAsset(user, makeAsset({ deletedAt: '2026-02-01T00:00:00.000Z' }))).toBe(false);
   });
