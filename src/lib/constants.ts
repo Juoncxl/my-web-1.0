@@ -227,8 +227,11 @@ export const REPORT_REASONS = [
   { id: 'other', label: 'อื่นๆ (Other reasons)' }
 ] as const;
 
+// Deprecated display-only reference. Never execute this string against an
+// existing project; review src/db/schema.sql and the Phase 1 migration instead.
 export const SUPABASE_SQL_SCHEMA = `-- ==============================================================================
 -- 🌸 CREATOR VAULT - ADVANCED DATABASE SCHEMA & MIGRATION SCRIPT
+-- DEPRECATED REFERENCE: REVIEW src/db/schema.sql AND supabase/migrations/ INSTEAD
 -- Supports: Visibility, Status, Bookmarks, Soft Delete/Trash, Reports, Forking, Version Proof
 -- ==============================================================================
 
@@ -360,13 +363,14 @@ CREATE POLICY "Users can delete own folders" ON public.folders FOR DELETE USING 
 
 -- Assets (Non-deleted public assets or owner's assets)
 CREATE POLICY "Public non-deleted assets are viewable" ON public.assets FOR SELECT 
-USING ((visibility = 'public' AND deleted_at IS NULL) OR auth.uid()::text = user_id);
+USING ((visibility = 'public' AND is_public = true AND deleted_at IS NULL) OR auth.uid()::text = user_id);
 
 CREATE POLICY "Authenticated users can create assets" ON public.assets FOR INSERT 
 WITH CHECK (auth.uid()::text = user_id);
 
 CREATE POLICY "Users can update own assets" ON public.assets FOR UPDATE 
-USING (auth.uid()::text = user_id OR true);
+USING (auth.uid()::text = user_id)
+WITH CHECK (auth.uid()::text = user_id);
 
 CREATE POLICY "Users can delete own assets" ON public.assets FOR DELETE 
 USING (auth.uid()::text = user_id);
@@ -377,7 +381,8 @@ CREATE POLICY "Users can create own bookmarks" ON public.bookmarks FOR INSERT WI
 CREATE POLICY "Users can delete own bookmarks" ON public.bookmarks FOR DELETE USING (auth.uid()::text = user_id);
 
 -- Reports
-CREATE POLICY "Users can submit reports" ON public.reports FOR INSERT WITH CHECK (true);
-CREATE POLICY "Admins can view reports" ON public.reports FOR SELECT USING (auth.uid()::text = reporter_id OR true);
+CREATE POLICY "Users can submit reports" ON public.reports FOR INSERT
+WITH CHECK (reporter_id = auth.uid()::text AND status = 'pending');
+-- Intentionally no SELECT policy. Moderation requires a trusted admin backend.
 `;
 

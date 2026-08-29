@@ -54,7 +54,7 @@ async function requireCloudUser(expectedUserId?: string): Promise<CloudAuth> {
   }
 }
 
-// Helper to get local fallback assets (Empty by default, no mock data)
+// Read-only access to legacy browser Guest data for explicit recovery after login.
 function getLocalAssets(): Asset[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_ASSETS);

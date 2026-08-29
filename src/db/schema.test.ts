@@ -6,11 +6,14 @@ const migration = readFileSync(
   new URL('../../supabase/migrations/20260828140320_phase_1_stabilize_security.sql', import.meta.url),
   'utf8'
 );
+const legacyReference = readFileSync(new URL('../lib/constants.ts', import.meta.url), 'utf8');
 
 describe('Phase 1 database security contract', () => {
   it('does not contain the critical ownership bypass', () => {
     expect(schema).not.toMatch(/auth\.uid\(\)::text\s*=\s*user_id\s+or\s+true/i);
     expect(migration).not.toMatch(/auth\.uid\(\)::text\s*=\s*user_id\s+or\s+true/i);
+    expect(legacyReference).not.toMatch(/auth\.uid\(\)::text\s*=\s*user_id\s+or\s+true/i);
+    expect(legacyReference).not.toMatch(/reports[^`]*for\s+select[^`]*using[^`]*or\s+true/i);
   });
 
   it('enforces one Like per user and asset at database level', () => {

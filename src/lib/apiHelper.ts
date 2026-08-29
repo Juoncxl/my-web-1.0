@@ -64,7 +64,7 @@ export function formatFriendlyErrorMessage(err: any): string {
     rawMsg.includes('<!DOCTYPE') ||
     rawMsg.includes('<html')
   ) {
-    return 'เซิร์ฟเวอร์หรือ Supabase ตอบกลับเป็นหน้าเว็บ HTML (404/500) แทนที่จะเป็นข้อมูล JSON กรุณาตรวจสอบการตั้งค่า Supabase URL หรือทดลองใช้งานในโหมด Local/Guest';
+    return 'เซิร์ฟเวอร์หรือ Supabase ตอบกลับเป็นหน้าเว็บ HTML (404/500) แทนที่จะเป็นข้อมูล JSON กรุณาตรวจสอบการตั้งค่า Supabase URL แล้วลองใหม่';
   }
 
   if (rawMsg.includes('Failed to fetch') || rawMsg.includes('NetworkError') || rawMsg.includes('ERR_CONNECTION')) {
