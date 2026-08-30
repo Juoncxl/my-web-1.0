@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { Clock3, LockKeyhole, Plus, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
 import { CategoryNav } from './CategoryNav';
 import { AssetCard } from './AssetCard';
@@ -35,6 +36,14 @@ interface AssetCollectionViewProps {
   onOpenMoveToFolder: (asset: Asset) => void;
   onCreateAsset: () => void;
 }
+
+const getEmptyStateIcon = (activeView: 'feed' | 'vault', activeVaultTab: VaultTabType): LucideIcon => {
+  if (activeView === 'feed') return Search;
+  if (activeVaultTab === 'trash') return Trash2;
+  if (activeVaultTab === 'bookmarks') return Star;
+  if (activeVaultTab === 'recent') return Clock3;
+  return LockKeyhole;
+};
 
 export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
   activeView,
@@ -166,10 +175,8 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
         </div>
       ) : (
         <div className="cv-empty-state">
-          <div className="cv-empty-orbit">
-            {activeView === 'vault'
-              ? (activeVaultTab === 'trash' ? '🗑️' : activeVaultTab === 'bookmarks' ? '⭐' : activeVaultTab === 'recent' ? '🕒' : '🔒')
-              : '🔍'}
+          <div className="cv-empty-orbit" aria-hidden="true">
+            {React.createElement(getEmptyStateIcon(activeView, activeVaultTab), { className: 'cv-empty-state-icon', strokeWidth: 1.7 })}
           </div>
           <h3 className="text-base font-bold text-slate-800 dark:text-white">
             {searchQuery

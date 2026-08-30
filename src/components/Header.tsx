@@ -11,7 +11,8 @@ import {
   Settings, 
   ChevronDown,
   Sun,
-  Moon
+  Moon,
+  Orbit
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -22,7 +23,6 @@ interface HeaderProps {
   activeView: 'feed' | 'vault';
   onViewChange: (v: 'feed' | 'vault') => void;
   onOpenCreateModal: () => void;
-  onOpenAIModal: () => void;
   onOpenAuthModal: () => void;
   onOpenSignUpModal?: () => void;
   onOpenProfileModal: () => void;
@@ -35,7 +35,6 @@ export const Header: React.FC<HeaderProps> = ({
   activeView,
   onViewChange,
   onOpenCreateModal,
-  onOpenAIModal,
   onOpenAuthModal,
   onOpenSignUpModal,
   onOpenProfileModal,
@@ -72,8 +71,8 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => onViewChange('feed')}
               className="flex items-center gap-2 text-left group transition-transform active:scale-95 cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-500 via-pink-400 to-amber-300 flex items-center justify-center text-white shadow-sm shadow-purple-200 dark:shadow-purple-950 group-hover:shadow-md transition-shadow">
-                <span className="text-xl">🌸</span>
+              <div className="cv-brand-mark w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-sm shadow-purple-200 dark:shadow-purple-950 group-hover:shadow-md transition-shadow">
+                <Orbit className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
               </div>
               <div className="hidden sm:block">
                 <div className="flex items-center gap-1.5">
@@ -117,12 +116,12 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             
             {/* View Switcher: Public Feed vs My Vault */}
-            <div className="hidden md:flex items-center bg-purple-50/80 dark:bg-slate-800/80 p-1 rounded-full border border-purple-100 dark:border-purple-900/60">
+            <div className="cv-view-switcher hidden md:flex items-center p-1 rounded-full">
               <button
                 onClick={() => onViewChange('feed')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                className={`cv-view-tab flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                   activeView === 'feed'
-                    ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs'
+                    ? 'is-active text-purple-700 dark:text-purple-200 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-purple-700 dark:hover:text-purple-300'
                 }`}
               >
@@ -131,9 +130,9 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
               <button
                 onClick={() => isAuthenticated ? onViewChange('vault') : onOpenAuthModal()}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                className={`cv-view-tab flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                   activeView === 'vault'
-                    ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs'
+                    ? 'is-active text-purple-700 dark:text-purple-200 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-purple-700 dark:hover:text-purple-300'
                 }`}
               >
@@ -226,17 +225,6 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {/* Menu Navigation Items */}
                   <div className="space-y-0.5">
-                    <button
-                      onClick={() => {
-                        onOpenAIModal();
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-500" />
-                      <span>AI ผู้ช่วยสร้างสรรค์</span>
-                    </button>
-
                     <button
                       onClick={() => {
                         if (isAuthenticated) onViewChange('vault');

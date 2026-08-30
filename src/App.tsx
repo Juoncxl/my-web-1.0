@@ -18,7 +18,7 @@ import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { ReportModal } from './components/ReportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AlertCircle, X } from 'lucide-react';
+import { AlertCircle, Orbit, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAssetData } from './hooks/useAssetData';
 import { useFolderData } from './hooks/useFolderData';
@@ -320,7 +320,7 @@ function MainApp() {
   };
 
   return (
-    <div className="cv-app-shell min-h-screen flex flex-col bg-[#FAF8F5] dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-200">
+    <div className="cv-app-shell min-h-screen flex flex-col text-slate-800 dark:text-slate-100 transition-colors duration-200">
       
       {/* Top Header */}
       <Header
@@ -329,7 +329,6 @@ function MainApp() {
         activeView={activeView}
         onViewChange={handleViewChange}
         onOpenCreateModal={handleOpenCreateModal}
-        onOpenAIModal={handleOpenAIModal}
         onOpenAuthModal={() => openAuthModal('login')}
         onOpenSignUpModal={() => openAuthModal('signup')}
         onOpenProfileModal={() => setIsProfileOpen(true)}
@@ -351,7 +350,6 @@ function MainApp() {
         {activeView === 'feed' ? (
           <DiscoverPage
             collectionProps={collectionProps}
-            onCreateAsset={handleOpenCreateModal}
           />
         ) : (
           <VaultPage
@@ -377,21 +375,15 @@ function MainApp() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-purple-100 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 py-6 mt-12">
+      <footer className="cv-footer border-t py-6 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
-            <span>🌸</span>
+            <Orbit className="w-4 h-4 text-cyan-600 dark:text-cyan-300" strokeWidth={1.8} aria-hidden="true" />
             <span className="font-bold text-slate-700 dark:text-slate-300">CXL Studio</span>
-            <span>— Creator Vault สำหรับนักสร้างแชทบอทและนักเขียน</span>
+            <span>— คลังไอเดียสำหรับนักเขียนและครีเอเตอร์</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1 text-purple-700 dark:text-purple-400 font-medium">
-              <span>✦ Minimalist Gen Z Creator Studio</span>
-            </span>
-            <span>•</span>
-              <span>Creator Vault · Private by default</span>
-          </div>
+          <span>เก็บและจัดการผลงานของคุณไว้ในที่เดียว</span>
         </div>
       </footer>
 
