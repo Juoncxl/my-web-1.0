@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 220" role="img" aria-labelledby="title desc">
+  <title id="title">CXL Studio Concept A lockup</title>
+  <desc id="desc">Minimal CXL monogram lockup with CXL Studio and Creator Vault.</desc>
+  <defs>
+    <linearGradient id="aIri" x1="34" y1="45" x2="276" y2="270" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b779ff"/><stop offset="0.42" stop-color="#dfc5ff"/><stop offset="0.72" stop-color="#a7dbff"/><stop offset="1" stop-color="#f5bfd8"/>
+    </linearGradient>
+    <linearGradient id="aBlade" x1="102" y1="212" x2="258" y2="212" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d0b6ff"/><stop offset="0.6" stop-color="#b7e5ff"/><stop offset="1" stop-color="#f5c8dd"/>
+    </linearGradient>
+    <linearGradient id="aWord" x1="0" y1="0" x2="290" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#7455a9"/><stop offset=".48" stop-color="#7669c2"/><stop offset="1" stop-color="#447da8"/></linearGradient>
+    <filter id="aGlow" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <mask id="aCatCutout" maskUnits="userSpaceOnUse" x="0" y="0" width="320" height="320">
+      <rect width="320" height="320" fill="white"/><path d="M148 144 L156 132 L166 141 L176 132 L184 145 L184 164 C184 178 174 187 166 187 C154 187 146 177 146 164Z" fill="black"/>
+    </mask>
+  </defs>
+  <g transform="translate(18 2) scale(.66)">
+    <g fill="none" stroke="url(#aIri)" stroke-linecap="round" stroke-linejoin="round" filter="url(#aGlow)" mask="url(#aCatCutout)">
+      <path d="M238 77 C218 54 183 43 146 47 C91 53 52 93 52 151 C52 210 92 251 148 255 C184 258 217 245 239 222" stroke-width="24"/>
+      <path d="M122 108 L202 198" stroke-width="22"/><path d="M202 108 L122 198" stroke-width="22"/>
+      <path d="M203 91 L203 215" stroke-width="22"/><path d="M203 215 L258 215" stroke="url(#aBlade)" stroke-width="13"/>
+      <path d="M258 215 L278 211 L258 219" fill="url(#aBlade)" stroke="none"/><path d="M191 205 L215 205" stroke="#e9d9ff" stroke-width="5"/>
+    </g>
+    <path d="M72 238 C112 286 204 286 263 246" fill="none" stroke="#c7b2f4" stroke-width="3" opacity=".72"/><path d="M265 245 l3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="#f1d8f0"/>
+  </g>
+  <g transform="translate(250 74)" fill="url(#aWord)">
+    <text x="0" y="52" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="54" font-weight="650" letter-spacing="-.045em">CXL Studio</text>
+    <text x="4" y="88" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="17" font-weight="600" letter-spacing=".23em" fill="#77688f">CREATOR VAULT</text>
+  </g>
+</svg>

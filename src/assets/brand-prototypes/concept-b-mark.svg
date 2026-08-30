@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">CXL Studio Concept B mark</title>
+  <desc id="desc">A soft luxury CXL crescent with an abstract cat face, orbit, and katana stroke.</desc>
+  <defs>
+    <linearGradient id="bIri" x1="44" y1="45" x2="270" y2="279" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#eab0d0"/><stop offset=".34" stop-color="#cdb4ff"/><stop offset=".7" stop-color="#a7dfff"/><stop offset="1" stop-color="#d8f0e8"/>
+    </linearGradient>
+    <linearGradient id="bSoft" x1="85" y1="100" x2="245" y2="230" gradientUnits="userSpaceOnUse"><stop stop-color="#c3a6fb"/><stop offset="1" stop-color="#f1bfd8"/></linearGradient>
+    <filter id="bGlow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <!-- Rounded crescent reads as C while the open side creates breathing room. -->
+  <path d="M229 67 A104 104 0 1 0 230 253 A82 82 0 1 1 229 67Z" fill="url(#bSoft)" opacity=".94" filter="url(#bGlow)"/>
+  <path d="M228 73 A98 98 0 1 0 228 247" fill="none" stroke="#f7e7f3" stroke-width="4" opacity=".8"/>
+  <!-- X and L share one rounded, blade-like continuous stroke. -->
+  <path d="M102 104 C133 128 172 170 217 215" fill="none" stroke="url(#bIri)" stroke-width="17" stroke-linecap="round"/>
+  <path d="M217 104 C182 132 151 165 116 204" fill="none" stroke="url(#bIri)" stroke-width="17" stroke-linecap="round"/>
+  <path d="M116 204 C142 226 181 238 226 229" fill="none" stroke="url(#bIri)" stroke-width="17" stroke-linecap="round"/>
+  <!-- Cat is a small, deliberate face inside the counter, not a mascot. -->
+  <path d="M139 139 L149 126 L160 136 L171 126 L181 140 L181 159 C181 177 167 187 160 187 C150 187 139 176 139 159Z" fill="#8170a5" stroke="#f9eaf5" stroke-width="4"/>
+  <path d="M151 155 Q155 151 159 155 M165 155 Q169 151 173 155" fill="none" stroke="#fff7ff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M159 164 l4 0 -2 3Z" fill="#f8d5e5"/>
+  <!-- A minimal katana guard makes the diagonal read intentional. -->
+  <path d="M205 104 L229 104" stroke="#f8eaf2" stroke-width="7" stroke-linecap="round"/>
+  <path d="M224 104 L253 91 L230 111" fill="url(#bIri)"/>
+  <path d="M75 240 C111 272 191 281 253 238" fill="none" stroke="#b9c8f0" stroke-width="3" opacity=".75"/>
+  <path d="M254 237 l3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" fill="#fff1db"/>
+  <circle cx="78" cy="86" r="5" fill="#f5d5e4"/>
+</svg>

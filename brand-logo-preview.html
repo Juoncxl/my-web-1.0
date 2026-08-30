@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CXL Studio — Logo Exploration Round 1</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #070914; color: #f8f5ff; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; background: radial-gradient(circle at 50% -10%, #252047 0, #0d1022 38%, #070914 74%); }
+      main { width: min(1500px, calc(100% - 40px)); margin: 0 auto; padding: 56px 0 80px; }
+      header { max-width: 760px; margin-bottom: 38px; }
+      .eyebrow { margin: 0 0 10px; color: #bea8ef; font-size: 12px; font-weight: 750; letter-spacing: .2em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: clamp(30px, 5vw, 60px); line-height: .98; letter-spacing: -.055em; }
+      .intro { margin: 18px 0 0; color: #c7c2d8; font-size: 16px; line-height: 1.6; }
+      .concept { margin-top: 34px; padding: 24px; border: 1px solid rgba(207, 191, 255, .16); border-radius: 28px; background: rgba(17, 19, 42, .74); box-shadow: 0 20px 70px rgba(0,0,0,.2); }
+      .concept-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+      h2 { margin: 0; font-size: 24px; letter-spacing: -.03em; }
+      .direction { margin: 5px 0 0; color: #aaa5bf; font-size: 14px; }
+      .badge { flex: none; padding: 7px 10px; border: 1px solid rgba(218, 199, 255, .25); border-radius: 999px; color: #ded1ff; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      .stage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .stage { min-width: 0; padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,.12); }
+      .stage.light { background: #f8f4ed; color: #202036; }
+      .stage.dark { background: #090b18; color: #f8f5ff; }
+      .stage-label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; font-size: 11px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; opacity: .65; }
+      .sample-large { min-height: 260px; display: grid; place-items: center; border-radius: 15px; background-image: radial-gradient(circle at center, rgba(170,140,255,.1), transparent 68%); }
+      .sample-large img { width: min(320px, 90%); height: auto; }
+      .sample-large img.lockup { width: min(620px, 100%); }
+      .sample-large img.mono, .size img.mono { filter: grayscale(1) contrast(1.18) saturate(0); }
+      .sizes { display: flex; flex-wrap: wrap; align-items: end; gap: 18px; margin-top: 18px; padding-top: 18px; border-top: 1px solid currentColor; opacity: .9; }
+      .size { display: grid; justify-items: center; gap: 8px; color: inherit; }
+      .size img { display: block; width: var(--size); height: var(--size); object-fit: contain; }
+      .size span { font-size: 10px; font-weight: 700; letter-spacing: .08em; opacity: .62; }
+      .notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+      .note { padding: 14px; border-radius: 15px; background: rgba(255,255,255,.045); color: #c6c0d7; font-size: 13px; line-height: 1.5; }
+      .note strong { display: block; margin-bottom: 4px; color: #eee9fa; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+      footer { margin-top: 36px; color: #8d879f; font-size: 12px; line-height: 1.6; }
+      @media (max-width: 760px) { main { width: min(100% - 24px, 620px); padding-top: 34px; } .concept { padding: 16px; border-radius: 22px; } .stage-grid { grid-template-columns: 1fr; } .notes { grid-template-columns: 1fr; } .concept-head { display: block; } .badge { display: inline-block; margin-top: 12px; } .sample-large { min-height: 220px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">CXL Studio / Creator Vault</p>
+        <h1>Logo exploration<br />round 01</h1>
+        <p class="intro">Four editable SVG directions translating the existing Juoncxl visual DNA into a usable product mark. Compare silhouette first, then mood, then the small-size tests.</p>
+      </header>
+      <section id="concepts" aria-label="Logo concepts"></section>
+      <footer>This is an isolated evaluation page. It does not change the production application logo or application UI. Monochrome previews use a grayscale filter to test the underlying vector silhouette.</footer>
+    </main>
+    <script>
+      const base = "src/assets/brand-prototypes/";
+      const concepts = [
+        { id: "a", name: "Concept A — Minimal Monogram", direction: "Most compact / strongest favicon candidate", mark: "concept-a-mark.svg", lockup: "concept-a-lockup.svg", notes: ["Cat: negative-space ear cue in the monogram counter.", "Katana: the L foot becomes a sharpened baseline.", "Orbit: one tide line with a single anchor star."] },
+        { id: "b", name: "Concept B — Cute Luxury", direction: "Softer curves / more noticeable cat identity", mark: "concept-b-mark.svg", lockup: "concept-b-lockup.svg", notes: ["Cat: small abstract face contained inside the C/X counter.", "Katana: diagonal X stroke receives a minimal guard and point.", "Orbit: rounded crescent and lower orbit soften the symbol."] },
+        { id: "c", name: "Concept C — Fantasy Luminous", direction: "Most expressive / strongest watermark DNA", mark: "concept-c-mark.svg", lockup: "concept-c-lockup.svg", notes: ["Cat: masked ear silhouette hidden in the circular counter.", "Katana: long upper diagonal resolves into a blade tip.", "Orbit: flowing tide line, crescent moon, and one star anchor."] },
+        { id: "d", name: "Concept D — Final Candidate", direction: "Concept A X/L / Concept D luminous crescent mood", mark: "concept-d-mark.svg", micro: "concept-d-micro-mark.svg", lockup: "concept-d-lockup.svg", notes: ["Cat: two ear-shaped voids remain hidden in the central counter; no face or mascot.", "Monogram: Concept A's clean crossed X and upright L are transplanted into D, with a short rounded blade foot.", "Orbit: Concept D's crescent, lower tide line, glow, gradient, and star anchor remain unchanged."] }
+      ];
+      const sizeSamples = [["32px", 32], ["24px", 24], ["16px", 16]];
+      const image = (src, cls = "") => `<img src="${base}${src}" alt="" class="${cls}" loading="lazy" />`;
+      const sample = (label, theme, concept, mono) => `
+        <div class="stage ${theme}">
+          <div class="stage-label"><span>${label}</span><span>${mono ? "Monochrome" : "Full color"}</span></div>
+          <div class="sample-large">${image(concept.mark, mono ? "mono" : "")}</div>
+          <div class="sizes">${sizeSamples.map(([name, size]) => `<div class="size" style="--size:${size}px">${image(concept.mark, mono ? "mono" : "")}<span>${name}</span></div>`).join("")}</div>
+        </div>`;
+      const lockupSample = (label, theme, concept, mono) => `
+        <div class="stage ${theme}">
+          <div class="stage-label"><span>${label}</span><span>${mono ? "Monochrome" : "Full color"}</span></div>
+          <div class="sample-large">${image(concept.lockup, `lockup ${mono ? "mono" : ""}`)}</div>
+        </div>`;
+      const microSample = (label, theme, concept) => `
+        <div class="stage ${theme}">
+          <div class="stage-label"><span>${label}</span><span>Micro mark</span></div>
+          <div class="sample-large">${image(concept.micro)}</div>
+          <div class="sizes">${sizeSamples.map(([name, size]) => `<div class="size" style="--size:${size}px">${image(concept.micro)}<span>${name}</span></div>`).join("")}</div>
+        </div>`;
+      document.getElementById("concepts").innerHTML = concepts.map((concept) => `
+        <article class="concept">
+          <div class="concept-head"><div><h2>${concept.name}</h2><p class="direction">${concept.direction}</p></div><span class="badge">${concept.id} / vector</span></div>
+          <div class="stage-grid">
+            ${sample("Mark / light", "light", concept, false)}
+            ${sample("Mark / dark", "dark", concept, false)}
+            ${sample("Mark / light", "light", concept, true)}
+            ${sample("Mark / dark", "dark", concept, true)}
+            ${lockupSample("Lockup / light", "light", concept, false)}
+            ${lockupSample("Lockup / dark", "dark", concept, false)}
+            ${concept.micro ? microSample("Micro / light", "light", concept) : ""}
+            ${concept.micro ? microSample("Micro / dark", "dark", concept) : ""}
+          </div>
+          <div class="notes">${concept.notes.map((note) => `<div class="note"><strong>${note.split(":")[0]}</strong>${note.substring(note.indexOf(":") + 1).trim()}</div>`).join("")}</div>
+        </article>`).join("");
+    </script>
+  </body>
+</html>

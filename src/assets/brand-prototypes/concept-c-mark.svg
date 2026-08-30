@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">CXL Studio Concept C mark</title>
+  <desc id="desc">A flowing luminous CXL monogram with an integrated katana, crescent orbit, and hidden cat ears.</desc>
+  <defs>
+    <linearGradient id="cIri" x1="36" y1="55" x2="282" y2="267" gradientUnits="userSpaceOnUse"><stop stop-color="#b27bff"/><stop offset=".28" stop-color="#ecb9e8"/><stop offset=".61" stop-color="#a6dfff"/><stop offset="1" stop-color="#f2bed4"/></linearGradient>
+    <radialGradient id="cMoon" cx="50%" cy="42%" r="65%"><stop stop-color="#e9d9ff"/><stop offset=".55" stop-color="#b7b7ff"/><stop offset="1" stop-color="#7b75d8"/></radialGradient>
+    <filter id="cGlow" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="6" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <mask id="cCatCutout" maskUnits="userSpaceOnUse" x="0" y="0" width="320" height="320"><rect width="320" height="320" fill="white"/><path d="M139 108 L151 91 L164 104 L177 91 L189 109 L188 131 C186 147 174 156 163 156 C150 156 140 146 139 131Z" fill="black"/></mask>
+  </defs>
+  <!-- One broad flowing C/tide gesture. -->
+  <path d="M251 71 C215 38 142 34 89 75 C38 114 37 201 93 241 C137 272 202 266 244 232" fill="none" stroke="url(#cIri)" stroke-width="15" stroke-linecap="round" filter="url(#cGlow)"/>
+  <!-- X is intentionally long and calligraphic, with the upper diagonal becoming a blade. -->
+  <path d="M87 93 C130 117 183 171 251 220" fill="none" stroke="url(#cIri)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M246 220 L277 238 L247 229" fill="url(#cIri)"/>
+  <path d="M248 217 L260 226" stroke="#f8e7f3" stroke-width="4" stroke-linecap="round"/>
+  <path d="M247 74 C206 105 166 155 111 226" fill="none" stroke="url(#cIri)" stroke-width="13" stroke-linecap="round"/>
+  <!-- L is the lower return stroke, ending in a soft hook. -->
+  <path d="M112 226 C144 252 196 259 232 242 C248 235 257 227 261 215" fill="none" stroke="url(#cIri)" stroke-width="13" stroke-linecap="round"/>
+  <!-- Restrained moon/orbit accent. -->
+  <path d="M103 263 C159 298 235 284 276 240" fill="none" stroke="#b9c8ff" stroke-width="3" opacity=".8"/>
+  <path d="M202 59 A31 31 0 1 0 224 104 A25 25 0 1 1 202 59Z" fill="url(#cMoon)" opacity=".95"/>
+  <path d="M253 55 l4 10 10 4-10 4-4 10-4-10-10-4 10-4Z" fill="#f6ddf1"/>
+  <!-- The masked counter suggests cat ears without adding a character illustration. -->
+  <g mask="url(#cCatCutout)"><circle cx="163" cy="122" r="34" fill="none" stroke="#f6e5fb" stroke-width="5"/></g>
+  <circle cx="163" cy="122" r="3" fill="#fff3ff"/>
+</svg>
