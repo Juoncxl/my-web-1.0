@@ -185,7 +185,8 @@
     pointer-events: none;
   }
 
-  .cv-brand-mark > svg { position: relative; z-index: 1; }
+  .cv-brand-mark > svg,
+  .cv-brand-mark > img { position: relative; z-index: 1; display: block; }
 
   .cv-shell-header {
     position: relative;

@@ -11,11 +11,12 @@ import {
   Settings, 
   ChevronDown,
   Sun,
-  Moon,
-  Orbit
+  Moon
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+
+const brandMarkUrl = new URL('../assets/brand/brand-mark.svg', import.meta.url).href;
 
 interface HeaderProps {
   searchQuery: string;
@@ -70,9 +71,10 @@ export const Header: React.FC<HeaderProps> = ({
             <button 
               onClick={() => onViewChange('feed')}
               className="flex items-center gap-2 text-left group transition-transform active:scale-95 cursor-pointer"
+              aria-label="CXL Studio — หน้าแรก"
             >
               <div className="cv-brand-mark w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-sm group-hover:shadow-md transition-shadow">
-                <Orbit className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
+                <img src={brandMarkUrl} alt="" aria-hidden="true" className="w-8 h-8 object-contain" />
               </div>
               <div className="hidden sm:block">
                 <div className="flex items-center gap-1.5">

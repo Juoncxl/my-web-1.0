@@ -18,8 +18,10 @@ import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { ReportModal } from './components/ReportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AlertCircle, Orbit, X } from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
+
+const brandMicroMarkUrl = new URL('./assets/brand/brand-micro-mark.svg', import.meta.url).href;
 import { useAssetData } from './hooks/useAssetData';
 import { useFolderData } from './hooks/useFolderData';
 import { useEngagementData } from './hooks/useEngagementData';
@@ -378,7 +380,7 @@ function MainApp() {
       <footer className="cv-footer border-t py-6 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
-            <Orbit className="w-4 h-4 text-cyan-600 dark:text-cyan-300" strokeWidth={1.8} aria-hidden="true" />
+            <img src={brandMicroMarkUrl} alt="" aria-hidden="true" className="w-4 h-4 object-contain" />
             <span className="font-bold text-slate-700 dark:text-slate-300">CXL Studio</span>
             <span>— คลังไอเดียสำหรับนักเขียนและครีเอเตอร์</span>
           </div>
