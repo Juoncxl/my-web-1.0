@@ -320,7 +320,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF8F5] dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-200">
+    <div className="cv-app-shell min-h-screen flex flex-col bg-[#FAF8F5] dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-200">
       
       {/* Top Header */}
       <Header
@@ -337,7 +337,7 @@ function MainApp() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="cv-main-container flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {operationError && (
           <div className="mb-4 p-3 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2" role="alert">
             <AlertCircle className="w-4 h-4 shrink-0" />
@@ -351,7 +351,6 @@ function MainApp() {
         {activeView === 'feed' ? (
           <DiscoverPage
             collectionProps={collectionProps}
-            onOpenAIModal={handleOpenAIModal}
             onCreateAsset={handleOpenCreateModal}
           />
         ) : (
@@ -382,8 +381,8 @@ function MainApp() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <span>🌸</span>
-            <span className="font-bold text-slate-700 dark:text-slate-300">Creator Vault</span>
-            <span>— คลังความรู้ & ผลงานสำหรับนักสร้างแชทบอทและนักเขียน</span>
+            <span className="font-bold text-slate-700 dark:text-slate-300">CXL Studio</span>
+            <span>— Creator Vault สำหรับนักสร้างแชทบอทและนักเขียน</span>
           </div>
 
           <div className="flex items-center gap-4">
@@ -391,7 +390,7 @@ function MainApp() {
               <span>✦ Minimalist Gen Z Creator Studio</span>
             </span>
             <span>•</span>
-            <span>Supabase BaaS Realtime Sync</span>
+              <span>Creator Vault · Private by default</span>
           </div>
         </div>
       </footer>

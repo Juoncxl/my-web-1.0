@@ -77,15 +77,15 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <div className="hidden sm:block">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-lg bg-gradient-to-r from-purple-700 via-pink-600 to-indigo-600 dark:from-purple-300 dark:via-pink-300 dark:to-indigo-300 bg-clip-text text-transparent">
-                    Creator Vault
+                  <span className="font-bold text-lg tracking-tight text-slate-900 dark:text-white">
+                    CXL <span className="text-purple-600 dark:text-purple-300">Studio</span>
                   </span>
                   <span className="text-[10px] font-semibold tracking-wide bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
-                    THAI HUB
+                    CREATOR VAULT
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium -mt-0.5">
-                  คลังความรู้ & แอสเซทคนสร้างบอท
+                  คลังไอเดียสำหรับนักสร้าง
                 </p>
               </div>
             </button>
@@ -156,16 +156,6 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* AI Assistant Button */}
-            <button
-              onClick={onOpenAIModal}
-              title="AI ผู้ช่วยสร้าง Prompt / Lore / UI Code"
-              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-pink-50 dark:from-amber-950/40 dark:to-pink-950/40 hover:from-amber-100 hover:to-pink-100 dark:hover:from-amber-900/60 dark:hover:to-pink-900/60 text-amber-900 dark:text-amber-200 border border-amber-200/70 dark:border-amber-800/70 rounded-full text-xs font-medium transition-all shadow-xs active:scale-95 cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-              <span className="hidden lg:inline">AI ผู้ช่วย</span>
-            </button>
-
             {/* Create Asset Button */}
             <button
               onClick={onOpenCreateModal}
@@ -213,6 +203,17 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {/* Menu Navigation Items */}
                   <div className="space-y-0.5">
+                    <button
+                      onClick={() => {
+                        onOpenAIModal();
+                        setDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span>AI ผู้ช่วยสร้างสรรค์</span>
+                    </button>
+
                     <button
                       onClick={() => {
                         if (isAuthenticated) onViewChange('vault');
