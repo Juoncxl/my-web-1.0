@@ -34,8 +34,23 @@
       .notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
       .note { padding: 14px; border-radius: 15px; background: rgba(255,255,255,.045); color: #c6c0d7; font-size: 13px; line-height: 1.5; }
       .note strong { display: block; margin-bottom: 4px; color: #eee9fa; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+      .final-production { margin-top: 34px; padding: 28px; border: 1px solid rgba(224, 205, 255, .32); border-radius: 30px; background: linear-gradient(135deg, rgba(41, 31, 79, .92), rgba(16, 31, 58, .9)); box-shadow: 0 24px 90px rgba(0,0,0,.28), 0 0 50px rgba(155, 113, 235, .1); }
+      .final-production h2 { margin: 0; color: #fff; }
+      .final-production .direction { color: #d7ccee; }
+      .final-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+      .final-stage { min-width: 0; padding: 20px; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: rgba(7, 9, 20, .44); }
+      .final-stage.light { background: #f8f4ed; color: #202036; }
+      .final-stage.dark { background: #090b18; color: #f8f5ff; }
+      .final-stage .stage-label { margin-bottom: 14px; }
+      .final-art { min-height: 220px; display: grid; place-items: center; border-radius: 15px; background-image: radial-gradient(circle at center, rgba(170,140,255,.1), transparent 68%); }
+      .final-art img { display: block; width: min(300px, 92%); height: auto; }
+      .final-art img.lockup { width: min(620px, 100%); }
+      .final-size-row { display: flex; align-items: end; justify-content: center; gap: 24px; margin-top: 16px; padding-top: 16px; border-top: 1px solid currentColor; opacity: .9; }
+      .final-size-row .size { gap: 7px; }
+      .final-size-row .size img { width: var(--size); height: var(--size); }
+      .final-callout { margin: 18px 0 0; color: #d7cfee; font-size: 13px; line-height: 1.6; }
       footer { margin-top: 36px; color: #8d879f; font-size: 12px; line-height: 1.6; }
-      @media (max-width: 760px) { main { width: min(100% - 24px, 620px); padding-top: 34px; } .concept { padding: 16px; border-radius: 22px; } .stage-grid { grid-template-columns: 1fr; } .notes { grid-template-columns: 1fr; } .concept-head { display: block; } .badge { display: inline-block; margin-top: 12px; } .sample-large { min-height: 220px; } }
+      @media (max-width: 760px) { main { width: min(100% - 24px, 620px); padding-top: 34px; } .concept, .final-production { padding: 16px; border-radius: 22px; } .stage-grid, .final-grid { grid-template-columns: 1fr; } .notes { grid-template-columns: 1fr; } .concept-head { display: block; } .badge { display: inline-block; margin-top: 12px; } .sample-large, .final-art { min-height: 220px; } }
     </style>
   </head>
   <body>
@@ -45,6 +60,60 @@
         <h1>Logo exploration<br />round 01</h1>
         <p class="intro">Four editable SVG directions translating the existing Juoncxl visual DNA into a usable product mark. Compare silhouette first, then mood, then the small-size tests.</p>
       </header>
+      <section class="final-production" aria-labelledby="final-production-title">
+        <div class="concept-head">
+          <div>
+            <h2 id="final-production-title">FINAL — CXL Studio Production Logo</h2>
+            <p class="direction">Concept D luminous tide mood with the approved Concept A X/L monogram geometry.</p>
+          </div>
+          <span class="badge">production / vector</span>
+        </div>
+        <div class="final-grid">
+          <div class="final-stage light">
+            <div class="stage-label"><span>Primary mark / light</span><span>Full color</span></div>
+            <div class="final-art"><img src="src/assets/brand/brand-mark.svg" alt="" /></div>
+          </div>
+          <div class="final-stage dark">
+            <div class="stage-label"><span>Primary mark / dark</span><span>Full color</span></div>
+            <div class="final-art"><img src="src/assets/brand/brand-mark.svg" alt="" /></div>
+          </div>
+          <div class="final-stage light">
+            <div class="stage-label"><span>Lockup / light</span><span>Full color</span></div>
+            <div class="final-art"><img class="lockup" src="src/assets/brand/brand-lockup.svg" alt="" /></div>
+          </div>
+          <div class="final-stage dark">
+            <div class="stage-label"><span>Lockup / dark</span><span>Full color</span></div>
+            <div class="final-art"><img class="lockup" src="src/assets/brand/brand-lockup.svg" alt="" /></div>
+          </div>
+          <div class="final-stage light">
+            <div class="stage-label"><span>Primary mark / light</span><span>Monochrome</span></div>
+            <div class="final-art"><img class="mono" src="src/assets/brand/brand-mark.svg" alt="" /></div>
+          </div>
+          <div class="final-stage dark">
+            <div class="stage-label"><span>Primary mark / dark</span><span>Monochrome</span></div>
+            <div class="final-art"><img class="mono" src="src/assets/brand/brand-mark.svg" alt="" /></div>
+          </div>
+          <div class="final-stage light">
+            <div class="stage-label"><span>Micro mark / light</span><span>Favicon test</span></div>
+            <div class="final-art"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /></div>
+            <div class="final-size-row">
+              <div class="size" style="--size:32px"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /><span>32px</span></div>
+              <div class="size" style="--size:24px"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /><span>24px</span></div>
+              <div class="size" style="--size:16px"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /><span>16px</span></div>
+            </div>
+          </div>
+          <div class="final-stage dark">
+            <div class="stage-label"><span>Micro mark / dark</span><span>Favicon test</span></div>
+            <div class="final-art"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /></div>
+            <div class="final-size-row">
+              <div class="size" style="--size:32px"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /><span>32px</span></div>
+              <div class="size" style="--size:24px"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /><span>24px</span></div>
+              <div class="size" style="--size:16px"><img src="src/assets/brand/brand-micro-mark.svg" alt="" /><span>16px</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="final-callout"><strong>Reading notes:</strong> the hidden cat is only the ear-shaped cutout in the C/X counter; the katana cue is the rounded continuation from the L stem; the crescent frames the monogram and the lower orbit softens the base. The micro mark removes the orbit and sparkle so the crescent and X/L silhouette survive at favicon scale.</p>
+      </section>
       <section id="concepts" aria-label="Logo concepts"></section>
       <footer>This is an isolated evaluation page. It does not change the production application logo or application UI. Monochrome previews use a grayscale filter to test the underlying vector silhouette.</footer>
     </main>

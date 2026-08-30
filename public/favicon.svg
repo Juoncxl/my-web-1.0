@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">CXL Studio favicon</title>
+  <desc id="desc">CXL Studio micro mark with a crescent and compact X/L silhouette.</desc>
+  <defs>
+    <linearGradient id="faviconIri" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a06ff0"/>
+      <stop offset=".45" stop-color="#d9c1ff"/>
+      <stop offset=".75" stop-color="#a9def7"/>
+      <stop offset="1" stop-color="#efbfd7"/>
+    </linearGradient>
+    <mask id="faviconCatCutout" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="white"/>
+      <path d="M27 30 L30 25 L34 29 L38 25 L41 31 L40 36 L28 36Z" fill="black"/>
+    </mask>
+  </defs>
+  <g fill="none" stroke="url(#faviconIri)" stroke-linecap="round" stroke-linejoin="round" mask="url(#faviconCatCutout)">
+    <path d="M50 15 C42 8 32 7 23 10 C13 14 8 23 8 32 C8 43 16 52 27 54 C36 56 45 52 50 47" stroke-width="7"/>
+    <path d="M24 22 L40 40" stroke-width="7"/>
+    <path d="M40 22 L24 40" stroke-width="7"/>
+    <path d="M41 18 L41 43" stroke-width="7"/>
+    <path d="M41 43 L50 43" stroke-width="5"/>
+  </g>
+</svg>
