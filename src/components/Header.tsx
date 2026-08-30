@@ -71,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => onViewChange('feed')}
               className="flex items-center gap-2 text-left group transition-transform active:scale-95 cursor-pointer"
             >
-              <div className="cv-brand-mark w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-sm shadow-purple-200 dark:shadow-purple-950 group-hover:shadow-md transition-shadow">
+              <div className="cv-brand-mark w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-sm group-hover:shadow-md transition-shadow">
                 <Orbit className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
               </div>
               <div className="hidden sm:block">
@@ -79,12 +79,12 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="font-bold text-lg tracking-tight text-slate-900 dark:text-white">
                     CXL <span className="text-purple-600 dark:text-purple-300">Studio</span>
                   </span>
-                  <span className="text-[10px] font-semibold tracking-wide bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
+                  <span className="cv-brand-badge text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full">
                     CREATOR VAULT
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium -mt-0.5">
-                  คลังไอเดียสำหรับนักสร้าง
+                  คลังไอเดียสำหรับนักเขียนและครีเอเตอร์
                 </p>
               </div>
             </button>
@@ -98,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="ค้นหาตัวละคร, คำสั่ง Prompt, UI Code, Lore..."
+                placeholder="ค้นหาตัวละคร, Prompt, UI Code, Lore..."
                 className="cv-shell-input w-full pl-10 pr-4 py-2 text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-purple-300/60 focus:border-purple-300 transition-all placeholder:text-slate-400 text-slate-700 dark:text-slate-200"
               />
               {searchQuery && (
@@ -136,7 +136,7 @@ export const Header: React.FC<HeaderProps> = ({
                     : 'text-slate-600 dark:text-slate-400 hover:text-purple-700 dark:hover:text-purple-300'
                 }`}
               >
-                <Lock className="w-3.5 h-3.5 text-pink-500" />
+                <Lock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300" />
                 <span>คลังของฉัน</span>
               </button>
             </div>
@@ -158,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Create Asset Button */}
             <button
               onClick={onOpenCreateModal}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-full text-xs font-medium transition-all shadow-sm shadow-purple-200 dark:shadow-purple-950 active:scale-95 cursor-pointer"
+              className="cv-create-button flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">สร้างผลงาน</span>
@@ -234,7 +234,7 @@ export const Header: React.FC<HeaderProps> = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                     >
                       <UserIcon className="w-4 h-4 text-purple-500" />
-                      <span>คลังผลงานของฉัน (My Vault)</span>
+                      <span>คลังผลงานของฉัน</span>
                     </button>
 
                     <button
@@ -245,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left md:hidden cursor-pointer"
                     >
                       <Globe className="w-4 h-4 text-indigo-500" />
-                      <span>ฟีดสาธารณะ (Public Feed)</span>
+                      <span>ฟีดสาธารณะ</span>
                     </button>
 
                     {isAuthenticated && (
@@ -259,7 +259,7 @@ export const Header: React.FC<HeaderProps> = ({
                           className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <Settings className="w-4 h-4 text-purple-500" />
-                          <span>ตั้งค่าบัญชี & รหัสผ่าน (Settings)</span>
+                          <span>ตั้งค่าบัญชีและรหัสผ่าน</span>
                         </button>
 
                         <button
@@ -270,7 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
                           className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <UserIcon className="w-4 h-4 text-slate-400" />
-                          <span>แก้ไขโปรไฟล์ (Edit Profile)</span>
+                          <span>แก้ไขโปรไฟล์</span>
                         </button>
                       </>
                     )}
@@ -285,10 +285,10 @@ export const Header: React.FC<HeaderProps> = ({
                             onOpenAuthModal();
                             setDropdownOpen(false);
                           }}
-                          className="cv-menu-primary-action w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-200 rounded-xl transition-colors text-left cursor-pointer"
+                          className="cv-menu-primary-action cv-auth-menu-primary w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-200 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <LogIn className="w-4 h-4" />
-                          <span>เข้าสู่ระบบ (Log In)</span>
+                          <span>เข้าสู่ระบบ</span>
                         </button>
                         <button
                           onClick={() => {
@@ -296,10 +296,10 @@ export const Header: React.FC<HeaderProps> = ({
                             else onOpenAuthModal();
                             setDropdownOpen(false);
                           }}
-                          className="cv-menu-secondary-action w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-pink-600 dark:text-pink-300 rounded-xl transition-colors text-left cursor-pointer"
+                          className="cv-menu-secondary-action cv-auth-menu-secondary w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-purple-600 dark:text-purple-300 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <Sparkles className="w-4 h-4" />
-                          <span>สมัครสมาชิกใหม่ (Sign Up)</span>
+                          <span>สมัครสมาชิก</span>
                         </button>
                       </>
                     ) : (

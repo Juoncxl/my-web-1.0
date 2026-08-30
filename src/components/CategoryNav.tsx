@@ -3,6 +3,15 @@ import { Globe, Lock, SlidersHorizontal, Tag as TagIcon, X } from 'lucide-react'
 import { CATEGORIES } from '../lib/constants';
 import type { AssetCategory } from '../types';
 
+const CATEGORY_EMOJIS: Record<AssetCategory, string> = {
+  character: '🎭',
+  lore: '📖',
+  ui_code: '💻',
+  prompts: '✨',
+  collab: '🤝',
+  app_data: '🧩'
+};
+
 interface CategoryNavProps {
   selectedCategory: AssetCategory | 'all';
   onSelectCategory: (cat: AssetCategory | 'all') => void;
@@ -35,7 +44,8 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
           aria-pressed={selectedCategory === 'all' && !selectedTag}
           className={`cv-category-pill ${selectedCategory === 'all' && !selectedTag ? 'is-active' : ''}`}
         >
-          <span>✦ ทั้งหมด</span>
+          <span className="cv-category-emoji" aria-hidden="true">✦</span>
+          <span>ทั้งหมด</span>
           <span className="cv-pill-count">{categoryCounts.all || 0}</span>
         </button>
 
@@ -50,7 +60,7 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
               aria-pressed={isSelected}
               className={`cv-category-pill ${isSelected ? 'is-active' : ''}`}
             >
-              <span>{meta.emoji}</span>
+              <span className="cv-category-emoji" aria-hidden="true">{CATEGORY_EMOJIS[category]}</span>
               <span>{meta.name}</span>
               <span className="cv-pill-count">{categoryCounts[category] || 0}</span>
             </button>

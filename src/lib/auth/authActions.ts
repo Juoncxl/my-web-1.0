@@ -11,7 +11,7 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
     if (!supabase) {
       return {
         success: false,
-        error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลเว็บไซต์'
+        error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
 
@@ -53,7 +53,7 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
     if (!supabase) {
       return {
         success: false,
-        error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลเว็บไซต์'
+        error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
 
@@ -82,7 +82,7 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
 export async function loginWithGoogle(): Promise<AuthResponse> {
   try {
     const supabase = getSupabaseClient();
-    if (!supabase) return { success: false, error: 'ระบบบัญชียังไม่พร้อมใช้งาน' };
+    if (!supabase) return { success: false, error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

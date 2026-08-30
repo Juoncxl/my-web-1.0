@@ -23,7 +23,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   <form onSubmit={onSubmit} className="space-y-3.5">
     <div className="space-y-1">
       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-        อีเมล (Email)
+        อีเมล
       </label>
       <div className="relative">
         <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -40,7 +40,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
 
     <div className="space-y-1">
       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-        รหัสผ่าน (Password)
+        รหัสผ่าน
       </label>
       <div className="relative">
         <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -58,10 +58,10 @@ export const LoginForm: React.FC<LoginFormProps> = ({
     <button
       type="submit"
       disabled={isLoading}
-      className="w-full py-2.5 mt-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+      className="cv-auth-primary-button w-full py-2.5 mt-3 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
     >
       <LogIn className="w-4 h-4" />
-      <span>{isLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ (Log In)'}</span>
+      <span>{isLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}</span>
     </button>
 
     <div className="text-center pt-2">

@@ -13,11 +13,7 @@ export const AuthModeTabs: React.FC<AuthModeTabsProps> = ({ mode, onModeChange }
     <button
       type="button"
       onClick={() => onModeChange('login')}
-      className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-        mode === 'login'
-          ? 'bg-purple-600 text-white shadow-sm'
-          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-      }`}
+      className={`cv-auth-tab py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${mode === 'login' ? 'is-active' : ''}`}
     >
       <LogIn className="w-3.5 h-3.5" />
       <span>เข้าสู่ระบบ</span>
@@ -26,11 +22,7 @@ export const AuthModeTabs: React.FC<AuthModeTabsProps> = ({ mode, onModeChange }
     <button
       type="button"
       onClick={() => onModeChange('signup')}
-      className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-        mode === 'signup'
-          ? 'bg-purple-600 text-white shadow-sm'
-          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-      }`}
+      className={`cv-auth-tab py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${mode === 'signup' ? 'is-active' : ''}`}
     >
       <UserPlus className="w-3.5 h-3.5" />
       <span>สมัครสมาชิก</span>

@@ -27,7 +27,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
   <form onSubmit={onSubmit} className="space-y-3.5">
     <div className="space-y-1">
       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-        อีเมล (Email) <span className="text-rose-500">*</span>
+        อีเมล <span className="text-rose-500">*</span>
       </label>
       <div className="relative">
         <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -44,7 +44,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     <div className="space-y-1">
       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-        รหัสผ่าน (Password) <span className="text-rose-500">* (อย่างน้อย 6 ตัวอักษร)</span>
+        รหัสผ่าน <span className="text-rose-500">* (อย่างน้อย 6 ตัวอักษร)</span>
       </label>
       <div className="relative">
         <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -61,7 +61,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({
 
     <div className="space-y-1">
       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-        ยืนยันรหัสผ่าน (Confirm Password) <span className="text-rose-500">*</span>
+        ยืนยันรหัสผ่าน <span className="text-rose-500">*</span>
       </label>
       <div className="relative">
         <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -79,10 +79,10 @@ export const SignupForm: React.FC<SignupFormProps> = ({
     <button
       type="submit"
       disabled={isLoading}
-      className="w-full py-2.5 mt-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-200 dark:shadow-purple-950/50 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+      className="cv-auth-primary-button w-full py-2.5 mt-3 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
     >
       <UserPlus className="w-4 h-4" />
-      <span>{isLoading ? 'กำลังสร้างบัญชี...' : 'สมัครสมาชิก & ใช้งาน (Sign Up)'}</span>
+      <span>{isLoading ? 'กำลังสร้างบัญชี...' : 'สมัครสมาชิก'}</span>
     </button>
 
     <div className="text-center pt-2">

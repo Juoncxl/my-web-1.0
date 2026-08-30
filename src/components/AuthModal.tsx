@@ -105,15 +105,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         {/* Header */}
         <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="cv-brand-mark w-10 h-10 rounded-2xl text-white flex items-center justify-center shadow-md shadow-purple-500/20">
+            <div className="cv-brand-mark w-10 h-10 rounded-2xl text-white flex items-center justify-center">
               <Orbit className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
-                {mode === 'login' ? 'เข้าสู่ระบบ Creator Vault' : 'สมัครสมาชิกผู้สร้าง'}
+                {mode === 'login' ? 'เข้าสู่ระบบ' : 'สร้างบัญชี CXL Studio'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {mode === 'login' ? 'เชื่อมต่อและซิงค์ผลงานของคุณบนทุกอุปกรณ์' : 'เก็บและจัดการผลงานของคุณไว้ในที่เดียว'}
+                {mode === 'login' ? 'กลับมาจัดการคลังผลงานของคุณ' : 'เก็บและจัดการผลงานของคุณไว้ในที่เดียว'}
               </p>
             </div>
           </div>

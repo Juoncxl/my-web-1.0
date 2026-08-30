@@ -143,7 +143,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
       {isLoadingAssets ? (
         <div className="cv-state-box">
           <RefreshCw className="w-8 h-8 text-purple-500 animate-spin" />
-          <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">กำลังโหลดข้อมูลคลังผลงาน...</p>
+          <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">กำลังโหลดผลงาน...</p>
         </div>
       ) : sortedAssets.length > 0 ? (
         <div className="cv-asset-grid">
@@ -200,7 +200,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                   : activeVaultTab === 'bookmarks'
                   ? 'กดบันทึกผลงานโปรดจากฟีดสาธารณะเพื่อเก็บไว้อ่านได้ที่นี่'
                   : 'เริ่มต้นสร้างโปรไฟล์บอท, บันทึก System Prompt หรือโค้ด UI ชิ้นแรกของคุณได้ทันที')
-              : 'เป็นคนแรกที่สร้างสรรค์และแชร์ความรู้ลงในหมวดหมู่นี้!'}
+              : 'ผลงานใหม่ในหมวดนี้จะปรากฏที่นี่'}
           </p>
           {activeView === 'vault' && activeVaultTab === 'my_assets' && (
             <div className="pt-2">

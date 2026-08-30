@@ -27,7 +27,7 @@ function toServiceError(error: any, fallback: string): string {
   }
   if (code === '23505') return 'ข้อมูลนี้มีอยู่แล้วในระบบ';
   if (/failed to fetch|network|connection/i.test(message)) {
-    return 'เชื่อมต่อระบบคลาวด์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
+    return 'ไม่สามารถเชื่อมต่อระบบได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
   }
 
   const friendly = formatFriendlyErrorMessage(error);
@@ -37,7 +37,7 @@ function toServiceError(error: any, fallback: string): string {
 async function requireCloudUser(expectedUserId?: string): Promise<CloudAuth> {
   const supabase = getSupabaseClient();
   if (!supabase) {
-    return { userId: null, error: 'ระบบคลาวด์ยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลเว็บไซต์' };
+    return { userId: null, error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
   }
 
   try {
@@ -209,7 +209,7 @@ export const supabaseService = {
   }): Promise<{ data: Asset[]; error: string | null }> {
     const supabase = getSupabaseClient();
     if (!supabase) {
-      return { data: [], error: 'ระบบคลาวด์ยังไม่พร้อมใช้งาน จึงไม่สามารถโหลดคลังผลงานได้' };
+      return { data: [], error: 'ยังโหลดผลงานไม่ได้ กรุณาลองใหม่อีกครั้ง' };
     }
 
     try {
@@ -283,7 +283,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(assetData.userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: null, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
     const newId = `asset_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
@@ -360,7 +360,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
-      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: null, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
     const now = new Date().toISOString();
 
@@ -447,7 +447,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
     const now = new Date().toISOString();
 
@@ -473,7 +473,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -498,7 +498,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -523,7 +523,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -552,7 +552,7 @@ export const supabaseService = {
       return {
         data: null,
         sourceForkCount: null,
-        error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน'
+        error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
     const newId = `asset_fork_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -600,7 +600,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { data: [], error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: [], error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -627,7 +627,7 @@ export const supabaseService = {
         success: false,
         isLiked: !shouldLike,
         likesCount: null,
-        error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน'
+        error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
 
@@ -681,7 +681,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { data: [], error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: [], error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -707,7 +707,7 @@ export const supabaseService = {
       return {
         success: false,
         isBookmarked: !shouldBookmark,
-        error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน'
+        error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
 
@@ -759,7 +759,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(report.reporterId);
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -785,7 +785,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { data: [], error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: [], error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -807,7 +807,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(folder.userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: null, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
     if (!folder.name.trim()) return { data: null, error: 'กรุณาตั้งชื่อโฟลเดอร์' };
     const newId = `folder_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -844,7 +844,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { data: null, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { data: null, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
     if (updates.name !== undefined && !updates.name.trim()) {
       return { data: null, error: 'ชื่อโฟลเดอร์ต้องไม่เป็นค่าว่าง' };
@@ -875,7 +875,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {
@@ -930,7 +930,7 @@ export const supabaseService = {
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(user.id);
     if (!supabase || auth.error || !auth.userId) {
-      return { success: false, error: auth.error || 'ระบบคลาวด์ยังไม่พร้อมใช้งาน' };
+      return { success: false, error: auth.error || 'ระบบยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
     try {

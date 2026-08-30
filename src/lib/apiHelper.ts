@@ -64,7 +64,7 @@ export function formatFriendlyErrorMessage(err: any): string {
     rawMsg.includes('<!DOCTYPE') ||
     rawMsg.includes('<html')
   ) {
-    return 'เซิร์ฟเวอร์หรือ Supabase ตอบกลับเป็นหน้าเว็บ HTML (404/500) แทนที่จะเป็นข้อมูล JSON กรุณาตรวจสอบการตั้งค่า Supabase URL แล้วลองใหม่';
+    return 'ยังโหลดข้อมูลไม่ได้ กรุณาลองใหม่อีกครั้ง';
   }
 
   if (rawMsg.includes('Failed to fetch') || rawMsg.includes('NetworkError') || rawMsg.includes('ERR_CONNECTION')) {
@@ -76,7 +76,7 @@ export function formatFriendlyErrorMessage(err: any): string {
   }
 
   if (rawMsg.includes('User already registered') || rawMsg.includes('user_already_exists')) {
-    return 'อีเมลนี้ถูกลงทะเบียนไว้แล้ว กรุณาเข้าสู่ระบบ (Log In)';
+    return 'อีเมลนี้ถูกลงทะเบียนไว้แล้ว กรุณาเข้าสู่ระบบ';
   }
 
   if (rawMsg.includes('Password should be at least')) {
@@ -130,7 +130,7 @@ export async function safeFetchJson<T = any>(
       } catch (jsonParseErr) {
         return {
           success: false,
-          error: 'ไม่สามารถแยกวิเคราะห์ข้อมูล JSON จากเซิร์ฟเวอร์ได้',
+          error: 'ยังโหลดข้อมูลไม่ได้ กรุณาลองใหม่อีกครั้ง',
           status,
           isHtmlError: false
         };
@@ -140,13 +140,13 @@ export async function safeFetchJson<T = any>(
       const text = await res.text().catch(() => '');
       const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE') || text.includes('The page');
 
-      let errorMsg = `เซิร์ฟเวอร์ส่งการตอบกลับรูปแบบที่ไม่ถูกต้อง (${status})`;
+      let errorMsg = 'ยังโหลดข้อมูลไม่ได้ กรุณาลองใหม่อีกครั้ง';
       if (status === 404) {
-        errorMsg = `ไม่พบ Endpoint ที่เรียกใช้งาน (404 Not Found) - เซิร์ฟเวอร์ตอบกลับเป็นหน้าเว็บ`;
+        errorMsg = 'ยังโหลดข้อมูลไม่ได้ กรุณาลองใหม่อีกครั้ง';
       } else if (status >= 500) {
-        errorMsg = `เซิร์ฟเวอร์ปลายทางขัดข้อง (${status} Internal Server Error)`;
+        errorMsg = 'ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง';
       } else if (isHtml) {
-        errorMsg = `เซิร์ฟเวอร์ตอบกลับเป็นหน้าเว็บ HTML แทนที่จะเป็นข้อมูล JSON`;
+        errorMsg = 'ยังโหลดข้อมูลไม่ได้ กรุณาลองใหม่อีกครั้ง';
       }
 
       return {

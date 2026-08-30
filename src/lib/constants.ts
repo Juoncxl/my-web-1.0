@@ -43,7 +43,7 @@ export const CATEGORIES: Record<AssetCategory, CategoryMeta> = {
   },
   collab: {
     id: 'collab',
-    name: 'โน้ตทำงานร่วมกัน',
+    name: 'คอลแลป',
     nameEn: 'Collab Notes',
     emoji: '🤝',
     color: 'text-emerald-600',
@@ -53,7 +53,7 @@ export const CATEGORIES: Record<AssetCategory, CategoryMeta> = {
   },
   app_data: {
     id: 'app_data',
-    name: 'ข้อมูลเฉพาะแอพ',
+    name: 'แอป / แพลตฟอร์ม',
     nameEn: 'App-Specific Data',
     emoji: '📦',
     color: 'text-sky-600',
