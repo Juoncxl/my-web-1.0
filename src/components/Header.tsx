@@ -17,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 const brandMarkUrl = new URL('../assets/brand/brand-mark.svg', import.meta.url).href;
+const brandMarkLightUrl = new URL('../assets/brand/brand-mark-light.svg', import.meta.url).href;
 
 interface HeaderProps {
   searchQuery: string;
@@ -67,25 +68,27 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center justify-between h-16 gap-3 sm:gap-4">
           
           {/* Logo & Brand */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button 
               onClick={() => onViewChange('feed')}
-              className="flex items-center gap-2 text-left group transition-transform active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 sm:gap-2 text-left group transition-transform active:scale-95 cursor-pointer"
               aria-label="CXL Studio — หน้าแรก"
             >
-              <div className="cv-brand-mark w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-sm group-hover:shadow-md transition-shadow">
-                <img src={brandMarkUrl} alt="" aria-hidden="true" className="w-8 h-8 object-contain" />
+              <div className="cv-brand-mark w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center">
+                <img src={brandMarkLightUrl} alt="" aria-hidden="true" className="w-7 h-7 sm:w-8 sm:h-8 object-contain dark:hidden" />
+                <img src={brandMarkUrl} alt="" aria-hidden="true" className="hidden w-7 h-7 sm:w-8 sm:h-8 object-contain dark:block" />
               </div>
-              <div className="hidden sm:block">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-lg tracking-tight text-slate-900 dark:text-white">
-                    CXL <span className="text-purple-600 dark:text-purple-300">Studio</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+                  <span className="cv-brand-wordmark" aria-label="CXL Studio">
+                    <span className="cv-brand-wordmark-cxl">CXL</span>
+                    <span className="cv-brand-wordmark-studio">Studio</span>
                   </span>
-                  <span className="cv-brand-badge text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded-full">
+                  <span className="cv-brand-badge hidden sm:inline-flex text-[9px] font-semibold tracking-wide px-1 py-0.5 rounded-full">
                     CREATOR VAULT
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium -mt-0.5">
+                <p className="hidden md:block text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0">
                   คลังไอเดียสำหรับนักเขียนและครีเอเตอร์
                 </p>
               </div>
@@ -93,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Center Search Bar */}
-          <div className="flex-1 max-w-md mx-2">
+          <div className="flex-1 min-w-0 max-w-md mx-2">
             <div className="relative group">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400 group-focus-within:text-purple-600 transition-colors" />
               <input

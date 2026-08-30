@@ -134,17 +134,55 @@
 }
 
 @layer components {
-  .cv-brand-mark {
-    position: relative;
-    overflow: hidden;
-    background: linear-gradient(140deg, #7568cf, #55a7cb 58%, #344c87);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .46), 0 10px 22px rgba(77, 99, 181, .2);
-  }
+.cv-brand-mark {
+  display: grid;
+  place-items: center;
+}
 
-  .dark .cv-brand-mark {
-    background: linear-gradient(140deg, #8076df, #4f9fc7 58%, #263f7d);
-    box-shadow: inset 0 1px 0 rgba(214, 235, 255, .34), 0 10px 24px rgba(3, 18, 52, .38), 0 0 18px rgba(86, 190, 211, .14);
+.cv-brand-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.18em;
+  white-space: nowrap;
+  font-family: 'DM Serif Display', Georgia, serif;
+  font-size: 1.45rem;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 0.95;
+}
+
+.cv-brand-wordmark-cxl {
+  color: #171a2e;
+}
+
+.cv-brand-wordmark-studio {
+  color: transparent;
+  background-image: linear-gradient(100deg, #7a5cc7 0%, #a078d2 35%, #8296df 68%, #59afcc 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.dark .cv-brand-wordmark-cxl {
+  color: #f2f0ff;
+}
+
+.dark .cv-brand-wordmark-studio {
+  background-image: linear-gradient(100deg, #b78cff 0%, #d3a5ea 34%, #aab8ff 66%, #79d5ec 100%);
+}
+
+@media (max-width: 639px) {
+  .cv-brand-wordmark {
+    font-size: 1.08rem;
+    letter-spacing: -0.01em;
   }
+}
+
+@media (min-width: 640px) and (max-width: 767px) {
+  .cv-brand-wordmark {
+    font-size: 1.25rem;
+  }
+}
 
   .cv-brand-badge {
     color: var(--cv-purple-dark);
@@ -156,33 +194,6 @@
     color: #c9d7ff;
     background: rgba(55, 75, 140, .34);
     border-color: rgba(141, 187, 239, .28);
-  }
-
-  .cv-brand-mark::after {
-    content: '';
-    position: absolute;
-    width: 1.8rem;
-    height: .65rem;
-    right: -.45rem;
-    bottom: .5rem;
-    border: 1px solid rgba(255, 255, 255, .52);
-    border-radius: 50%;
-    transform: rotate(-28deg);
-    pointer-events: none;
-  }
-
-  .cv-brand-mark::before {
-    content: '';
-    position: absolute;
-    width: .42rem;
-    height: .42rem;
-    top: .48rem;
-    right: .58rem;
-    border: 1px solid rgba(255, 255, 255, .72);
-    border-radius: 50%;
-    background: rgba(211, 247, 255, .48);
-    box-shadow: 0 0 .65rem rgba(173, 236, 249, .55);
-    pointer-events: none;
   }
 
   .cv-brand-mark > svg,

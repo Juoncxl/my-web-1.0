@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CXL Studio — Logo Exploration Round 1</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
     <style>
       :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #070914; color: #f8f5ff; }
       * { box-sizing: border-box; }
@@ -49,8 +52,37 @@
       .final-size-row .size { gap: 7px; }
       .final-size-row .size img { width: var(--size); height: var(--size); }
       .final-callout { margin: 18px 0 0; color: #d7cfee; font-size: 13px; line-height: 1.6; }
+      .wordmark-ab { margin-top: 34px; padding: 28px; border: 1px solid rgba(224, 205, 255, .24); border-radius: 30px; background: rgba(17, 19, 42, .74); box-shadow: 0 20px 70px rgba(0,0,0,.2); }
+      .wordmark-ab h2 { margin: 0; }
+      .wordmark-ab-intro { margin: 8px 0 0; color: #bdb6d0; font-size: 13px; line-height: 1.6; }
+      .ab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+      .ab-option { min-width: 0; padding: 18px; border: 1px solid rgba(255,255,255,.12); border-radius: 20px; }
+      .ab-option.light { background: #f8f4ed; color: #202036; }
+      .ab-option.dark { background: #090b18; color: #f8f5ff; }
+      .ab-option-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+      .ab-option-head strong { font-size: 14px; }
+      .ab-option-head span { font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; opacity: .62; }
+      .ab-header-stack { display: grid; gap: 12px; }
+      .ab-header { display: flex; align-items: center; gap: 10px; min-height: 68px; padding: 12px 14px; border: 1px solid currentColor; border-radius: 16px; }
+      .ab-header.compact { min-height: 52px; padding: 8px 10px; gap: 8px; }
+      .ab-header-mark { width: 40px; height: 40px; flex: 0 0 auto; object-fit: contain; }
+      .ab-header.compact .ab-header-mark { width: 32px; height: 32px; }
+      .ab-header-copy { min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .ab-wordmark { display: block; color: transparent; background-image: linear-gradient(105deg, #6946a8 0%, #7568c0 42%, #4f8db2 100%); background-clip: text; -webkit-background-clip: text; font-family: system-ui, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 27px; font-weight: 700; line-height: 1; letter-spacing: -.045em; white-space: nowrap; }
+      .ab-wordmark.dm { font-family: 'DM Serif Display', Georgia, serif; font-size: 30px; font-weight: 400; font-style: normal; letter-spacing: -.015em; }
+      .ab-header.compact .ab-wordmark { font-size: 19px; }
+      .ab-header.compact .ab-wordmark.dm { font-size: 22px; }
+      .ab-wordmark.refined { display: inline-flex; gap: .18em; color: #171A2E; background-image: none; background-clip: initial; -webkit-background-clip: initial; }
+      .ab-wordmark.refined .ab-cxl { color: #171A2E; }
+      .ab-wordmark.refined .ab-studio { color: transparent; background-image: linear-gradient(105deg, #7A5CC7 0%, #A078D2 35%, #8296DF 68%, #59AFCC 100%); background-clip: text; -webkit-background-clip: text; }
+      .dark .ab-wordmark.refined .ab-cxl { color: #F2F0FF; }
+      .dark .ab-wordmark.refined .ab-studio { background-image: linear-gradient(105deg, #B78CFF 0%, #D3A5EA 34%, #AAB8FF 66%, #79D5EC 100%); }
+      .ab-badge { display: inline-flex; align-items: center; min-height: 18px; padding: 3px 6px; border: 1px solid rgba(117, 104, 170, .28); border-radius: 999px; color: #6d5f92; font-size: 8px; font-weight: 700; letter-spacing: .1em; line-height: 1; white-space: nowrap; }
+      .dark .ab-badge { border-color: rgba(164, 178, 240, .3); color: #c7d2ff; }
+      .ab-label { margin: 0 0 5px; color: inherit; font-size: 10px; font-weight: 750; letter-spacing: .11em; opacity: .58; text-transform: uppercase; }
+      .ab-footnote { margin: 18px 0 0; color: #bdb6d0; font-size: 12px; line-height: 1.6; }
       footer { margin-top: 36px; color: #8d879f; font-size: 12px; line-height: 1.6; }
-      @media (max-width: 760px) { main { width: min(100% - 24px, 620px); padding-top: 34px; } .concept, .final-production { padding: 16px; border-radius: 22px; } .stage-grid, .final-grid { grid-template-columns: 1fr; } .notes { grid-template-columns: 1fr; } .concept-head { display: block; } .badge { display: inline-block; margin-top: 12px; } .sample-large, .final-art { min-height: 220px; } }
+      @media (max-width: 760px) { main { width: min(100% - 24px, 620px); padding-top: 34px; } .concept, .final-production, .wordmark-ab { padding: 16px; border-radius: 22px; } .stage-grid, .final-grid, .ab-grid { grid-template-columns: 1fr; } .notes { grid-template-columns: 1fr; } .concept-head { display: block; } .badge { display: inline-block; margin-top: 12px; } .sample-large, .final-art { min-height: 220px; } .ab-option { padding: 14px; } .ab-header-copy { gap: 5px; } .ab-wordmark { font-size: 22px; } .ab-wordmark.dm { font-size: 25px; } }
     </style>
   </head>
   <body>
@@ -71,7 +103,7 @@
         <div class="final-grid">
           <div class="final-stage light">
             <div class="stage-label"><span>Primary mark / light</span><span>Full color</span></div>
-            <div class="final-art"><img src="src/assets/brand/brand-mark.svg" alt="" /></div>
+            <div class="final-art"><img src="src/assets/brand/brand-mark-light.svg" alt="" /></div>
           </div>
           <div class="final-stage dark">
             <div class="stage-label"><span>Primary mark / dark</span><span>Full color</span></div>
@@ -79,7 +111,7 @@
           </div>
           <div class="final-stage light">
             <div class="stage-label"><span>Lockup / light</span><span>Full color</span></div>
-            <div class="final-art"><img class="lockup" src="src/assets/brand/brand-lockup.svg" alt="" /></div>
+            <div class="final-art"><img class="lockup" src="src/assets/brand/brand-lockup-light.svg" alt="" /></div>
           </div>
           <div class="final-stage dark">
             <div class="stage-label"><span>Lockup / dark</span><span>Full color</span></div>
@@ -87,7 +119,7 @@
           </div>
           <div class="final-stage light">
             <div class="stage-label"><span>Primary mark / light</span><span>Monochrome</span></div>
-            <div class="final-art"><img class="mono" src="src/assets/brand/brand-mark.svg" alt="" /></div>
+            <div class="final-art"><img class="mono" src="src/assets/brand/brand-mark-light.svg" alt="" /></div>
           </div>
           <div class="final-stage dark">
             <div class="stage-label"><span>Primary mark / dark</span><span>Monochrome</span></div>
@@ -113,6 +145,55 @@
           </div>
         </div>
         <p class="final-callout"><strong>Reading notes:</strong> the hidden cat is only the ear-shaped cutout in the C/X counter; the katana cue is the rounded continuation from the L stem; the crescent frames the monogram and the lower orbit softens the base. The micro mark removes the orbit and sparkle so the crescent and X/L silhouette survive at favicon scale.</p>
+      </section>
+      <section class="wordmark-ab" aria-labelledby="wordmark-ab-title">
+        <h2 id="wordmark-ab-title">WORDMARK TYPOGRAPHY A/B</h2>
+        <p class="wordmark-ab-intro">Compare the same Final Brand Mark with the current system font and a DM Serif Display experiment. This section is preview-only; production CXL Studio typography remains unchanged.</p>
+        <div class="ab-grid">
+          <div class="ab-option light">
+            <div class="ab-option-head"><strong>OPTION A — Current Font + Gradient</strong><span>Header light</span></div>
+            <div class="ab-header-stack">
+              <div><p class="ab-label">Desktop</p><div class="ab-header"><img class="ab-header-mark" src="src/assets/brand/brand-mark-light.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+              <div><p class="ab-label">Compact / mobile</p><div class="ab-header compact"><img class="ab-header-mark" src="src/assets/brand/brand-mark-light.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+            </div>
+          </div>
+          <div class="ab-option dark">
+            <div class="ab-option-head"><strong>OPTION A — Current Font + Gradient</strong><span>Header dark</span></div>
+            <div class="ab-header-stack">
+              <div><p class="ab-label">Desktop</p><div class="ab-header"><img class="ab-header-mark" src="src/assets/brand/brand-mark.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+              <div><p class="ab-label">Compact / mobile</p><div class="ab-header compact"><img class="ab-header-mark" src="src/assets/brand/brand-mark.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+            </div>
+          </div>
+          <div class="ab-option light">
+            <div class="ab-option-head"><strong>OPTION B — Original Gradient</strong><span>Header light</span></div>
+            <div class="ab-header-stack">
+              <div><p class="ab-label">Desktop</p><div class="ab-header"><img class="ab-header-mark" src="src/assets/brand/brand-mark-light.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+              <div><p class="ab-label">Compact / mobile</p><div class="ab-header compact"><img class="ab-header-mark" src="src/assets/brand/brand-mark-light.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+            </div>
+          </div>
+          <div class="ab-option dark">
+            <div class="ab-option-head"><strong>OPTION B — Original Gradient</strong><span>Header dark</span></div>
+            <div class="ab-header-stack">
+              <div><p class="ab-label">Desktop</p><div class="ab-header"><img class="ab-header-mark" src="src/assets/brand/brand-mark.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+              <div><p class="ab-label">Compact / mobile</p><div class="ab-header compact"><img class="ab-header-mark" src="src/assets/brand/brand-mark.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm">CXL Studio</span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+            </div>
+          </div>
+          <div class="ab-option light">
+            <div class="ab-option-head"><strong>OPTION B REFINED — Split Color</strong><span>Header light</span></div>
+            <div class="ab-header-stack">
+              <div><p class="ab-label">Desktop</p><div class="ab-header"><img class="ab-header-mark" src="src/assets/brand/brand-mark-light.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm refined"><span class="ab-cxl">CXL</span><span class="ab-studio">Studio</span></span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+              <div><p class="ab-label">Compact / mobile</p><div class="ab-header compact"><img class="ab-header-mark" src="src/assets/brand/brand-mark-light.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm refined"><span class="ab-cxl">CXL</span><span class="ab-studio">Studio</span></span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+            </div>
+          </div>
+          <div class="ab-option dark">
+            <div class="ab-option-head"><strong>OPTION B REFINED — Split Color</strong><span>Header dark</span></div>
+            <div class="ab-header-stack">
+              <div><p class="ab-label">Desktop</p><div class="ab-header"><img class="ab-header-mark" src="src/assets/brand/brand-mark.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm refined"><span class="ab-cxl">CXL</span><span class="ab-studio">Studio</span></span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+              <div><p class="ab-label">Compact / mobile</p><div class="ab-header compact"><img class="ab-header-mark" src="src/assets/brand/brand-mark.svg" alt="" /><div class="ab-header-copy"><span class="ab-wordmark dm refined"><span class="ab-cxl">CXL</span><span class="ab-studio">Studio</span></span><span class="ab-badge">CREATOR VAULT</span></div></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="ab-footnote"><strong>Refined baseline:</strong> Light CXL <code>#171A2E</code>; Studio <code>#7A5CC7 → #A078D2 → #8296DF → #59AFCC</code>. Dark CXL <code>#F2F0FF</code>; Studio <code>#B78CFF → #D3A5EA → #AAB8FF → #79D5EC</code>. CREATOR VAULT stays in the current sans-serif treatment and remains secondary. Option B uses DM Serif Display only for CXL Studio and falls back to Georgia if the local preview cannot load Google Fonts.</p>
       </section>
       <section id="concepts" aria-label="Logo concepts"></section>
       <footer>This is an isolated evaluation page. It does not change the production application logo or application UI. Monochrome previews use a grayscale filter to test the underlying vector silhouette.</footer>

@@ -8,6 +8,7 @@ import { LoginForm } from './auth/LoginForm';
 import { SignupForm } from './auth/SignupForm';
 
 const brandMarkUrl = new URL('../assets/brand/brand-mark.svg', import.meta.url).href;
+const brandMarkLightUrl = new URL('../assets/brand/brand-mark-light.svg', import.meta.url).href;
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -107,8 +108,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         {/* Header */}
         <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="cv-brand-mark w-10 h-10 rounded-2xl text-white flex items-center justify-center">
-              <img src={brandMarkUrl} alt="" aria-hidden="true" className="w-8 h-8 object-contain" />
+            <div className="cv-brand-mark w-9 h-9 flex items-center justify-center">
+              <img src={brandMarkLightUrl} alt="" aria-hidden="true" className="w-8 h-8 object-contain dark:hidden" />
+              <img src={brandMarkUrl} alt="" aria-hidden="true" className="hidden w-8 h-8 object-contain dark:block" />
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
