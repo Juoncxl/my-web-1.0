@@ -57,12 +57,12 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const userAvatar = currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
-  const displayName = currentUser?.displayName || 'ผู้เยี่ยมชม';
-  const userEmail = currentUser?.email || 'อ่านฟีดสาธารณะได้ — เข้าสู่ระบบเพื่อบันทึกข้อมูล';
+  const hasAvatar = Boolean(isAuthenticated && currentUser?.avatarUrl);
+  const displayName = isAuthenticated ? (currentUser?.displayName || 'Creator') : 'ผู้เยี่ยมชม';
+  const userSubtitle = isAuthenticated ? (currentUser?.email || 'บัญชีที่เชื่อมต่อ') : 'สำรวจผลงานสาธารณะได้';
 
   return (
-    <header className="sticky top-0 z-30 bg-[#FAF8F5]/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-purple-100/70 dark:border-purple-950/70 transition-colors duration-200">
+    <header className="cv-shell-header sticky top-0 z-30 backdrop-blur-md transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-3 sm:gap-4">
           
@@ -100,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="ค้นหาตัวละคร, คำสั่ง Prompt, UI Code, Lore..."
-                className="w-full pl-10 pr-4 py-2 text-sm bg-white/90 dark:bg-slate-800/90 border border-purple-100/90 dark:border-purple-900/60 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-300/60 focus:border-purple-300 transition-all placeholder:text-slate-400 text-slate-700 dark:text-slate-200 shadow-xs"
+                className="cv-shell-input w-full pl-10 pr-4 py-2 text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-purple-300/60 focus:border-purple-300 transition-all placeholder:text-slate-400 text-slate-700 dark:text-slate-200"
               />
               {searchQuery && (
                 <button
@@ -146,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={toggleTheme}
               title={isDark ? "เปลี่ยนเป็นโหมดสว่าง (Light Mode)" : "เปลี่ยนเป็นโหมดมืด (Dark Mode)"}
-              className="p-2 rounded-full bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900 text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 transition-all hover:scale-105 shadow-xs cursor-pointer"
+              className="cv-shell-button p-2 rounded-full text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 transition-all hover:scale-105 cursor-pointer"
               aria-label="Toggle Theme"
             >
               {isDark ? (
@@ -169,34 +169,57 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="flex items-center gap-1.5 p-1 bg-white dark:bg-slate-800 border border-purple-100 dark:border-purple-900 rounded-full hover:border-purple-300 transition-all focus:outline-none focus:ring-2 focus:ring-purple-300/50 cursor-pointer"
+                className="cv-guest-trigger flex items-center gap-1.5 p-1 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-purple-300/50 cursor-pointer"
+                aria-label={isAuthenticated ? `เมนูบัญชีของ ${displayName}` : 'เมนูผู้เยี่ยมชม'}
+                aria-haspopup="menu"
+                aria-expanded={dropdownOpen}
               >
-                <img
-                  src={userAvatar}
-                  alt="Avatar"
-                  className="w-8 h-8 rounded-full object-cover ring-2 ring-purple-200/60 dark:ring-purple-800/60"
-                />
+                {hasAvatar ? (
+                  <img
+                    src={currentUser?.avatarUrl}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover ring-2 ring-purple-200/60 dark:ring-purple-800/60"
+                  />
+                ) : (
+                  <span className="cv-guest-avatar cv-guest-avatar-trigger" aria-hidden="true">
+                    <UserIcon className="w-4 h-4" />
+                  </span>
+                )}
+                <span className="hidden sm:inline max-w-28 truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  {isAuthenticated ? displayName : 'ผู้เยี่ยมชม'}
+                </span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 pr-0.5" />
               </button>
 
               {dropdownOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-purple-100 dark:border-purple-900/70 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="cv-shell-menu absolute right-0 mt-2 w-64 rounded-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150" role="menu">
                   
                   {/* User Profile Header in Dropdown */}
                   <div className="px-3 py-2.5 border-b border-purple-50 dark:border-purple-950 mb-1">
                     <div className="flex items-center gap-2.5">
-                      <img
-                        src={userAvatar}
-                        alt="Avatar"
-                        className="w-10 h-10 rounded-full object-cover ring-2 ring-purple-100 dark:ring-purple-900"
-                      />
+                      {hasAvatar ? (
+                        <img
+                          src={currentUser?.avatarUrl}
+                          alt=""
+                          className="w-10 h-10 rounded-full object-cover ring-2 ring-purple-100 dark:ring-purple-900"
+                        />
+                      ) : (
+                        <span className="cv-guest-avatar cv-guest-avatar-menu" aria-hidden="true">
+                          <UserIcon className="w-5 h-5" />
+                        </span>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
                           {displayName}
                         </p>
                         <p className="text-[11px] text-slate-400 truncate">
-                          {userEmail}
+                          {userSubtitle}
                         </p>
+                        {!isAuthenticated && (
+                          <p className="mt-1 text-[10px] leading-relaxed text-purple-600/80 dark:text-blue-200/75">
+                            เข้าสู่ระบบเพื่อบันทึกและจัดการคลังของคุณ
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -274,7 +297,7 @@ export const Header: React.FC<HeaderProps> = ({
                             onOpenAuthModal();
                             setDropdownOpen(false);
                           }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950 rounded-xl transition-colors text-left cursor-pointer"
+                          className="cv-menu-primary-action w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-200 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <LogIn className="w-4 h-4" />
                           <span>เข้าสู่ระบบ (Log In)</span>
@@ -285,7 +308,7 @@ export const Header: React.FC<HeaderProps> = ({
                             else onOpenAuthModal();
                             setDropdownOpen(false);
                           }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-pink-600 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-950 rounded-xl transition-colors text-left cursor-pointer"
+                          className="cv-menu-secondary-action w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-pink-600 dark:text-pink-300 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <Sparkles className="w-4 h-4" />
                           <span>สมัครสมาชิกใหม่ (Sign Up)</span>
