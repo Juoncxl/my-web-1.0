@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
 import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
 import { CategoryNav } from './CategoryNav';
@@ -21,7 +21,7 @@ interface AssetCollectionViewProps {
   bookmarkedAssetIds: string[];
   likedAssetIds: string[];
   currentUserId: string | undefined;
-  onSelectCategory: (category: AssetCategory) => void;
+  onSelectCategory: (category: AssetCategory | 'all') => void;
   onClearTag: () => void;
   onVisibilityFilterChange: (filter: 'all' | 'public' | 'private') => void;
   onOpenAsset: (asset: Asset) => void;
@@ -66,8 +66,23 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
   onOpenMoveToFolder,
   onCreateAsset
 }) => {
+  const [sortMode, setSortMode] = useState<'latest' | 'title'>('latest');
+
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>();
+    filteredAssets.forEach(asset => asset.tags?.forEach(tag => tags.add(tag)));
+    return Array.from(tags).sort((a, b) => a.localeCompare(b, 'th')).slice(0, 12);
+  }, [filteredAssets]);
+
+  const sortedAssets = useMemo(() => {
+    if (sortMode === 'title') {
+      return [...filteredAssets].sort((a, b) => a.title.localeCompare(b.title, 'th'));
+    }
+    return filteredAssets;
+  }, [filteredAssets, sortMode]);
+
   return (
-    <>
+    <div className="cv-collection-view">
       <CategoryNav
         selectedCategory={selectedCategory}
         onSelectCategory={onSelectCategory}
@@ -79,14 +94,51 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
         onVisibilityFilterChange={onVisibilityFilterChange}
       />
 
+      <div className="cv-feed-toolbar">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="cv-results-count">{sortedAssets.length} รายการ</span>
+          {selectedTag && (
+            <span className="cv-active-filter">#{selectedTag}</span>
+          )}
+        </div>
+        {activeView === 'feed' && (
+          <label className="cv-sort-control">
+            <span>เรียง</span>
+            <select value={sortMode} onChange={event => setSortMode(event.target.value as 'latest' | 'title')} aria-label="เรียงลำดับผลงาน">
+              <option value="latest">ล่าสุด</option>
+              <option value="title">ชื่อ A–Z</option>
+            </select>
+          </label>
+        )}
+      </div>
+
+      {activeView === 'feed' && availableTags.length > 0 && (
+        <div className="cv-tag-discovery" aria-label="ค้นหาจากแท็ก">
+          <span className="cv-tag-heading">แท็กน่าสนใจ</span>
+          <div className="cv-tag-list">
+            {availableTags.map(tag => (
+              <button
+                key={tag}
+                type="button"
+                aria-pressed={selectedTag === tag}
+                onClick={() => selectedTag === tag ? onClearTag() : onSelectTag(tag)}
+                className={`cv-tag-chip ${selectedTag === tag ? 'is-active' : ''}`}
+              >
+                #{tag}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {isLoadingAssets ? (
-        <div className="py-20 flex flex-col items-center justify-center text-center space-y-3">
+        <div className="cv-state-box">
           <RefreshCw className="w-8 h-8 text-purple-500 animate-spin" />
           <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">กำลังโหลดข้อมูลคลังผลงาน...</p>
         </div>
-      ) : filteredAssets.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 pt-2">
-          {filteredAssets.map(asset => {
+      ) : sortedAssets.length > 0 ? (
+        <div className="cv-asset-grid">
+          {sortedAssets.map(asset => {
             const folder = folders.find(item => item.id === asset.folderId);
             return (
               <AssetCard
@@ -113,8 +165,8 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
           })}
         </div>
       ) : (
-        <div className="py-16 px-4 bg-white/70 dark:bg-slate-900/70 rounded-3xl border border-purple-100 dark:border-slate-800 text-center max-w-md mx-auto my-8 space-y-3">
-          <div className="w-14 h-14 bg-purple-50 dark:bg-slate-800 rounded-2xl text-2xl flex items-center justify-center mx-auto shadow-xs">
+        <div className="cv-empty-state">
+          <div className="cv-empty-orbit">
             {activeView === 'vault'
               ? (activeVaultTab === 'trash' ? '🗑️' : activeVaultTab === 'bookmarks' ? '⭐' : activeVaultTab === 'recent' ? '🕒' : '🔒')
               : '🔍'}
@@ -156,6 +208,6 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
           )}
         </div>
       )}
-    </>
+    </div>
   );
 };
