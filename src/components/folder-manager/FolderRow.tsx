@@ -3,5 +3,29 @@ import { Edit3, Trash2 } from 'lucide-react';
 import type { Folder } from '../../types';
 import { FOLDER_COLOR_PRESETS } from '../../lib/constants';
 
-interface FolderRowProps { folder: Folder; onEdit: (folder: Folder) => void; onDelete: (folder: Folder) => void; }
-export const FolderRow: React.FC<FolderRowProps> = ({ folder, onEdit, onDelete }) => { const colorMeta = FOLDER_COLOR_PRESETS.find((color) => color.id === folder.color) || FOLDER_COLOR_PRESETS[0]; const isImage = Boolean(folder.icon && (folder.icon.startsWith('data:image') || folder.icon.startsWith('http'))); return <div className={`p-3 rounded-2xl border flex items-center justify-between gap-2 transition-all ${colorMeta.bg} ${colorMeta.border}`}><div className="flex items-center gap-2.5 min-w-0">{isImage ? <img src={folder.icon} alt={folder.name} className="w-7 h-7 rounded-lg object-cover shadow-xs shrink-0" referrerPolicy="no-referrer" /> : <span className="text-xl shrink-0">{folder.icon || '📁'}</span>}<div className="min-w-0"><p className={`text-xs font-bold truncate ${colorMeta.text}`}>{folder.name}</p><p className="text-[10px] text-slate-500 dark:text-slate-400">{folder.assetsCount || 0} ผลงาน</p></div></div><div className="flex items-center gap-1 shrink-0"><button onClick={() => onEdit(folder)} className="p-1.5 rounded-lg text-slate-500 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-white/60 dark:hover:bg-slate-800 transition-colors cursor-pointer" title="แก้ไขโฟลเดอร์"><Edit3 className="w-3.5 h-3.5" /></button><button onClick={() => onDelete(folder)} className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-white/60 dark:hover:bg-slate-800 transition-colors cursor-pointer" title="ลบโฟลเดอร์"><Trash2 className="w-3.5 h-3.5" /></button></div></div>; };
+interface FolderRowProps {
+  folder: Folder;
+  onEdit: (folder: Folder) => void;
+  onDelete: (folder: Folder) => void;
+}
+
+export const FolderRow: React.FC<FolderRowProps> = ({ folder, onEdit, onDelete }) => {
+  const colorMeta = FOLDER_COLOR_PRESETS.find(color => color.id === folder.color) || FOLDER_COLOR_PRESETS[0];
+  const isImage = Boolean(folder.icon && (folder.icon.startsWith('data:image') || folder.icon.startsWith('http')));
+
+  return (
+    <div className="cv-folder-row" style={{ '--cv-folder-accent': colorMeta.swatch } as React.CSSProperties}>
+      <div className="cv-folder-row-main">
+        {isImage ? <img src={folder.icon} alt="" className="cv-folder-row-icon" referrerPolicy="no-referrer" /> : <span className="cv-folder-row-icon" aria-hidden="true">{folder.icon || '📁'}</span>}
+        <div className="cv-folder-row-copy">
+          <p>{folder.name}</p>
+          <span>{folder.assetsCount || 0} ผลงาน</span>
+        </div>
+      </div>
+      <div className="cv-folder-row-actions">
+        <button type="button" onClick={() => onEdit(folder)} title="แก้ไขโฟลเดอร์" aria-label={`แก้ไขโฟลเดอร์ ${folder.name}`}><Edit3 className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => onDelete(folder)} title="ลบโฟลเดอร์" aria-label={`ลบโฟลเดอร์ ${folder.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+      </div>
+    </div>
+  );
+};

@@ -23,6 +23,8 @@ import confetti from 'canvas-confetti';
 interface AssetCardProps {
   asset: Asset;
   onClick: (asset: Asset) => void;
+  onEdit?: (asset: Asset) => void;
+  onDelete?: (asset: Asset) => void;
   onLike?: (assetId: string) => void;
   onBookmark?: (assetId: string) => void;
   onFork?: (asset: Asset) => void;
@@ -48,6 +50,8 @@ function getTitleMark(title: string) {
 export const AssetCard: React.FC<AssetCardProps> = ({
   asset,
   onClick,
+  onEdit,
+  onDelete,
   onLike,
   onBookmark,
   onFork,
@@ -153,7 +157,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
         <div className="cv-cover-actions">
           {galleryCount > 1 && <span className="cv-gallery-count"><Images className="w-3 h-3" />{galleryCount}</span>}
           {onBookmark && (
-            <button type="button" onClick={handleBookmark} title={isBookmarked ? 'ยกเลิกบุ๊กมาร์ก' : 'บันทึกเก็บไว้'} className={`cv-bookmark-button ${isBookmarked ? 'is-bookmarked' : ''}`}>
+            <button type="button" onClick={handleBookmark} title={isBookmarked ? 'ยกเลิกการบันทึก' : 'บันทึกเก็บไว้'} aria-label={isBookmarked ? 'ยกเลิกการบันทึก' : 'บันทึกเก็บไว้'} className={`cv-bookmark-button ${isBookmarked ? 'is-bookmarked' : ''}`}>
               <BookmarkIcon className={`w-4 h-4 ${isBookmarked ? 'fill-current' : ''}`} />
             </button>
           )}
@@ -207,8 +211,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                 <div className="cv-card-menu" onClick={event => event.stopPropagation()}>
                   {!isTrashMode && !isOwner && onFork && <button type="button" onClick={handleMenuAction(() => onFork(asset))}><GitFork className="w-3.5 h-3.5" />Fork เข้าคลังของฉัน</button>}
                   {!isTrashMode && !isOwner && onReport && <button type="button" onClick={handleMenuAction(() => onReport(asset))}><Flag className="w-3.5 h-3.5" />รายงานผลงาน</button>}
+                  {!isTrashMode && isOwner && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}
                   {!isTrashMode && isOwner && onOpenMoveToFolder && <button type="button" onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}><FolderInput className="w-3.5 h-3.5" />ย้ายไปยังโฟลเดอร์</button>}
                   {!isTrashMode && <button type="button" onClick={handleQuickCopy}>{copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}{copied ? 'คัดลอกแล้ว' : 'คัดลอกเนื้อหา'}</button>}
+                  {!isTrashMode && isOwner && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}
                   {isTrashMode && onRestore && <button type="button" onClick={handleMenuAction(() => onRestore(asset.id))}><RotateCcw className="w-3.5 h-3.5" />กู้คืนผลงาน</button>}
                   {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => onPermanentDelete(asset.id))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
                   {folderName && <span className="cv-card-menu-folder">{folderIcon || '📁'} {folderName}</span>}

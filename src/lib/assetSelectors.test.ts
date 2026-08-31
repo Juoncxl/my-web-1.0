@@ -112,6 +112,30 @@ describe('asset selectors', () => {
     }).map(asset => asset.id)).toEqual(['matching']);
   });
 
+  it('maps the folders tab to owned assets and opens the selected folder', () => {
+    const assets = [
+      makeAsset({ id: 'inside', folderId: 'folder-1' }),
+      makeAsset({ id: 'outside', folderId: 'folder-2' }),
+      makeAsset({ id: 'other-owner', userId: 'owner-2', folderId: 'folder-1' })
+    ];
+
+    const folderTabOptions = {
+      activeView: 'vault' as const,
+      activeVaultTab: 'folders' as const,
+      bookmarkedAssetIds: [],
+      recentlyViewedIds: [],
+      currentUserId: 'owner-1',
+      selectedCategory: 'all' as const,
+      selectedTag: null,
+      selectedFolderId: 'folder-1',
+      selectedStatusFilter: 'all' as const,
+      visibilityFilter: 'all' as const,
+      searchQuery: ''
+    };
+
+    expect(selectFilteredAssets(assets, folderTabOptions).map(asset => asset.id)).toEqual(['inside']);
+  });
+
   it('derives category counts, vault stats, and folder counts from canonical assets', () => {
     const assets = [
       makeAsset({ id: 'one', userId: 'owner-1', category: 'character', folderId: 'folder-1' }),

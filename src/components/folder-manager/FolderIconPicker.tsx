@@ -1,8 +1,8 @@
 import React from 'react';
-import { Check, Image as ImageIcon, Link as LinkIcon, RotateCcw, Sparkles, Smile, Upload } from 'lucide-react';
+import { Check, Image as ImageIcon, Link as LinkIcon, RotateCcw, Smile, Upload, WandSparkles } from 'lucide-react';
 
-export type FolderIconMode = 'presets' | 'upload' | 'url';
-export const FOLDER_ICON_PRESETS = ['📁','📂','🤖','🎨','📖','🔮','💡','🍓','🎀','🍵','🌙','🧸','⚡','🌸','✨','💎','🎮','🦄','🎧','🧁','🚀','🔥','📚','⭐'];
+export type FolderIconMode = 'presets' | 'custom' | 'media';
+export const FOLDER_ICON_PRESETS = ['📁', '📂', '🤖', '🎨', '📖', '🔮', '💡', '🍓', '🎀', '🍵', '🌙', '🧸', '⚡', '🌸', '✨', '💎', '🎮', '🦄', '🎧', '🧁', '🚀', '🔥', '📚', '⭐'];
 
 interface FolderIconPickerProps {
   selectedIcon: string;
@@ -21,13 +21,79 @@ interface FolderIconPickerProps {
   fileInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
-export const FolderIconPicker: React.FC<FolderIconPickerProps> = ({ selectedIcon, iconMode, customEmojiInput, imageUrlInput, onIconChange, onModeChange, onCustomEmojiChange, onImageUrlChange, onApplyEmoji, onApplyUrl, onFileUpload, onReset, fileInputRef }) => {
+export const FolderIconPicker: React.FC<FolderIconPickerProps> = ({
+  selectedIcon,
+  iconMode,
+  customEmojiInput,
+  imageUrlInput,
+  onIconChange,
+  onModeChange,
+  onCustomEmojiChange,
+  onImageUrlChange,
+  onApplyEmoji,
+  onApplyUrl,
+  onFileUpload,
+  onReset,
+  fileInputRef
+}) => {
   const isImageIcon = selectedIcon.startsWith('data:image') || selectedIcon.startsWith('http');
-  return <div className="space-y-2.5">
-    <div className="flex items-center justify-between"><label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" /><span>ไอคอนโฟลเดอร์ (Icon / Image / GIF):</span></label><div className="flex items-center gap-2"><span className="text-[11px] text-slate-400">ตัวอย่าง:</span><div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-700 shadow-xs flex items-center justify-center overflow-hidden">{isImageIcon ? <img src={selectedIcon} alt="Folder Icon Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <span className="text-base">{selectedIcon}</span>}</div>{isImageIcon && <button type="button" onClick={onReset} className="text-[10px] text-rose-500 hover:underline flex items-center gap-0.5 cursor-pointer" title="รีเซ็ตเป็นไอคอนปกติ"><RotateCcw className="w-2.5 h-2.5" /><span>รีเซ็ต</span></button>}</div></div>
-    <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1"><button type="button" onClick={() => onModeChange('presets')} className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${iconMode === 'presets' ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}><Smile className="w-3.5 h-3.5" /><span>อีโมจิ & พรีเซ็ต</span></button><button type="button" onClick={() => onModeChange('upload')} className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${iconMode === 'upload' ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}><Upload className="w-3.5 h-3.5" /><span>อัปโหลดรูปภาพ / GIF</span></button><button type="button" onClick={() => onModeChange('url')} className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${iconMode === 'url' ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}><LinkIcon className="w-3.5 h-3.5" /><span>วางลิงก์ URL</span></button></div>
-    {iconMode === 'presets' && <div className="space-y-2"><div className="flex flex-wrap gap-1.5 p-2 bg-white dark:bg-slate-800/80 rounded-xl border border-purple-100 dark:border-purple-900/50">{FOLDER_ICON_PRESETS.map((icon, index) => <button key={index} type="button" onClick={() => onIconChange(icon)} className={`w-8 h-8 rounded-xl text-base flex items-center justify-center transition-all cursor-pointer ${selectedIcon === icon ? 'bg-purple-600 text-white shadow-xs scale-105 ring-2 ring-purple-300 dark:ring-purple-700' : 'bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-purple-100 dark:hover:bg-purple-950'}`}>{icon}</button>)}</div><div className="flex gap-2"><input type="text" value={customEmojiInput} onChange={(event) => onCustomEmojiChange(event.target.value)} placeholder="พิมพ์หรือวางอีโมจิ / Kaomoji อื่นๆ ที่ต้องการ..." className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100" /><button type="button" onClick={onApplyEmoji} disabled={!customEmojiInput.trim()} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl cursor-pointer">นำไปใช้</button></div></div>}
-    {iconMode === 'upload' && <div className="space-y-2"><input type="file" ref={fileInputRef} onChange={onFileUpload} accept="image/*,.gif" className="hidden" /><div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-purple-200 dark:border-purple-800 hover:border-purple-400 bg-white dark:bg-slate-800/80 hover:bg-purple-50/50 rounded-2xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-1.5"><div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-300 flex items-center justify-center"><ImageIcon className="w-4 h-4" /></div><div><p className="text-xs font-bold text-purple-800 dark:text-purple-300">คลิกเพื่อเลือกไฟล์รูปภาพ หรือภาพ GIF เคลื่อนไหว</p><p className="text-[10.5px] text-slate-400">รองรับ PNG, JPG, WEBP, Animated GIF (ขนาดแนะนำสี่เหลี่ยมจัตุรัส ไม่เกิน 5MB)</p></div></div></div>}
-    {iconMode === 'url' && <div className="space-y-2"><div className="flex gap-2"><input type="url" value={imageUrlInput} onChange={(event) => onImageUrlChange(event.target.value)} placeholder="https://example.com/icon.gif หรือ .png..." className="flex-1 px-3.5 py-2 bg-white dark:bg-slate-800 border border-purple-100 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100" /><button type="button" onClick={onApplyUrl} disabled={!imageUrlInput.trim()} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1"><Check className="w-3.5 h-3.5" /><span>นำไปใช้</span></button></div><p className="text-[10.5px] text-slate-400">💡 สามารถคัดลอกลิงก์ตรงของรูปภาพหรือ GIF จาก Discord, Tenor, Giphy, Pinterest หรือเว็บไซต์อื่นมาวางได้ทันที</p></div>}
-  </div>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+          <WandSparkles className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+          <span>ไอคอนโฟลเดอร์</span>
+        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-400">ตัวอย่าง</span>
+          <div className="cv-folder-icon-preview">
+            {isImageIcon ? <img src={selectedIcon} alt="ตัวอย่างไอคอนโฟลเดอร์" referrerPolicy="no-referrer" /> : <span>{selectedIcon || '📁'}</span>}
+          </div>
+          {isImageIcon && <button type="button" onClick={onReset} className="text-[10px] font-semibold text-rose-500 hover:underline" title="รีเซ็ตไอคอน">รีเซ็ต</button>}
+        </div>
+      </div>
+
+      <div className="cv-folder-icon-tabs" role="tablist" aria-label="รูปแบบไอคอนโฟลเดอร์">
+        <button type="button" role="tab" aria-selected={iconMode === 'presets'} onClick={() => onModeChange('presets')} className={iconMode === 'presets' ? 'is-active' : ''}><Smile className="h-3.5 w-3.5" />Emoji แนะนำ</button>
+        <button type="button" role="tab" aria-selected={iconMode === 'custom'} onClick={() => onModeChange('custom')} className={iconMode === 'custom' ? 'is-active' : ''}><span className="text-sm">☺</span>Emoji ของฉัน</button>
+        <button type="button" role="tab" aria-selected={iconMode === 'media'} onClick={() => onModeChange('media')} className={iconMode === 'media' ? 'is-active' : ''}><ImageIcon className="h-3.5 w-3.5" />GIF / รูป</button>
+      </div>
+
+      {iconMode === 'presets' && (
+        <div className="cv-folder-icon-panel">
+          <div className="cv-folder-icon-grid">
+            {FOLDER_ICON_PRESETS.map(icon => <button key={icon} type="button" onClick={() => onIconChange(icon)} className={selectedIcon === icon ? 'is-selected' : ''} aria-label={`เลือกไอคอน ${icon}`}>{icon}</button>)}
+          </div>
+          <p className="text-[10px] text-slate-400">เลือกไอคอนแนะนำสำหรับคอลเลกชันของคุณ</p>
+        </div>
+      )}
+
+      {iconMode === 'custom' && (
+        <div className="cv-folder-icon-panel space-y-2">
+          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300" htmlFor="custom-folder-emoji">Emoji หรือสัญลักษณ์ของฉัน</label>
+          <div className="flex gap-2">
+            <input id="custom-folder-emoji" type="text" value={customEmojiInput} onChange={event => onCustomEmojiChange(event.target.value)} placeholder="วาง Emoji จาก keyboard หรือใส่ Kaomoji" className="min-w-0 flex-1 rounded-xl border border-purple-100 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
+            <button type="button" onClick={onApplyEmoji} disabled={!customEmojiInput.trim()} className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">ใช้ไอคอนนี้</button>
+          </div>
+          <p className="text-[10px] text-slate-400">รองรับ Emoji จากอุปกรณ์และข้อความสั้น ๆ ตาม behavior เดิม</p>
+        </div>
+      )}
+
+      {iconMode === 'media' && (
+        <div className="cv-folder-icon-panel space-y-3">
+          <input type="file" ref={fileInputRef} onChange={onFileUpload} accept="image/*,.gif" className="hidden" />
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="cv-folder-upload-zone">
+            <span className="cv-folder-upload-icon"><Upload className="h-4 w-4" /></span>
+            <span><strong>เลือก GIF หรือรูปจากเครื่อง</strong><small>PNG, JPG, WEBP, Animated GIF · ไม่เกิน 5MB</small></span>
+          </button>
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1"><LinkIcon className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" /><input type="url" value={imageUrlInput} onChange={event => onImageUrlChange(event.target.value)} placeholder="ลิงก์รูปหรือ GIF ที่มีอยู่แล้ว" className="w-full rounded-xl border border-purple-100 bg-white py-2 pl-8 pr-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" /></div>
+            <button type="button" onClick={onApplyUrl} disabled={!imageUrlInput.trim()} className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">ใช้ลิงก์</button>
+          </div>
+          <p className="text-[10px] text-slate-400">วิธีนี้คงการรองรับ URL image/GIF เดิมไว้ และไม่เปลี่ยน validation ของการอัปโหลด</p>
+        </div>
+      )}
+    </div>
+  );
 };

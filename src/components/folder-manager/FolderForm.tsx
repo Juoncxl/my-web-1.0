@@ -4,15 +4,93 @@ import { FOLDER_COLOR_PRESETS } from '../../lib/constants';
 import { FolderIconPicker, type FolderIconMode } from './FolderIconPicker';
 
 interface FolderFormProps {
-  editing: boolean; folderName: string; selectedIcon: string; selectedColor: string; iconMode: FolderIconMode; customEmojiInput: string; imageUrlInput: string; error: string; isSubmitting: boolean; fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onFolderNameChange: (value: string) => void; onIconChange: (value: string) => void; onColorChange: (value: string) => void; onIconModeChange: (mode: FolderIconMode) => void; onCustomEmojiChange: (value: string) => void; onImageUrlChange: (value: string) => void; onApplyEmoji: () => void; onApplyUrl: () => void; onFileUpload: (event: React.ChangeEvent<HTMLInputElement>) => void; onResetIcon: () => void; onCancel: () => void; onSubmit: (event: React.FormEvent) => void;
+  editing: boolean;
+  folderName: string;
+  selectedIcon: string;
+  selectedColor: string;
+  iconMode: FolderIconMode;
+  customEmojiInput: string;
+  imageUrlInput: string;
+  error: string;
+  isSubmitting: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onFolderNameChange: (value: string) => void;
+  onIconChange: (value: string) => void;
+  onColorChange: (value: string) => void;
+  onIconModeChange: (mode: FolderIconMode) => void;
+  onCustomEmojiChange: (value: string) => void;
+  onImageUrlChange: (value: string) => void;
+  onApplyEmoji: () => void;
+  onApplyUrl: () => void;
+  onFileUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onResetIcon: () => void;
+  onCancel: () => void;
+  onSubmit: (event: React.FormEvent) => void;
 }
 
-export const FolderForm: React.FC<FolderFormProps> = (props) => <form onSubmit={props.onSubmit} className="p-4 bg-purple-50/50 dark:bg-purple-950/30 rounded-2xl border border-purple-100 dark:border-purple-900/40 space-y-4">
-  <div className="flex items-center justify-between"><span className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><FolderPlus className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" /><span>{props.editing ? '✏️ แก้ไขข้อมูลโฟลเดอร์' : '➕ สร้างโฟลเดอร์ใหม่'}</span></span>{props.editing && <button type="button" onClick={props.onCancel} className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline font-semibold cursor-pointer">ยกเลิกการแก้ไข</button>}</div>
-  <div className="space-y-1.5"><label className="text-xs font-bold text-slate-700 dark:text-slate-300">ชื่อโฟลเดอร์:</label><input type="text" value={props.folderName} onChange={(event) => props.onFolderNameChange(event.target.value)} placeholder="เช่น: โปรเจกต์บอทแฟนตาซี, รวม System Prompts ลับ..." className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-800 rounded-xl text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-purple-400 font-medium" /></div>
-  <FolderIconPicker selectedIcon={props.selectedIcon} iconMode={props.iconMode} customEmojiInput={props.customEmojiInput} imageUrlInput={props.imageUrlInput} error={props.error} onIconChange={props.onIconChange} onModeChange={props.onIconModeChange} onCustomEmojiChange={props.onCustomEmojiChange} onImageUrlChange={props.onImageUrlChange} onApplyEmoji={props.onApplyEmoji} onApplyUrl={props.onApplyUrl} onFileUpload={props.onFileUpload} onReset={props.onResetIcon} fileInputRef={props.fileInputRef} />
-  <div className="space-y-1.5"><label className="text-xs font-bold text-slate-700 dark:text-slate-300">เลือกโทนสีกรอบโฟลเดอร์:</label><div className="flex flex-wrap gap-2">{FOLDER_COLOR_PRESETS.map((color) => <button key={color.id} type="button" onClick={() => props.onColorChange(color.id)} className={`px-3 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${color.bg} ${color.text} ${color.border} ${props.selectedColor === color.id ? 'ring-2 ring-purple-500 scale-105 font-bold shadow-xs' : 'opacity-80'}`}>{props.selectedColor === color.id && <Check className="w-3 h-3" />}<span>{color.name}</span></button>)}</div></div>
-  {props.error && <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">{props.error}</p>}
-  <div className="flex justify-end pt-1"><button type="submit" disabled={props.isSubmitting || !props.folderName.trim()} className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white rounded-xl text-xs font-bold transition-transform active:scale-95 disabled:opacity-50 shadow-sm cursor-pointer">{props.isSubmitting ? 'กำลังบันทึก...' : props.editing ? 'บันทึกการแก้ไข' : 'สร้างโฟลเดอร์'}</button></div>
-</form>;
+export const FolderForm: React.FC<FolderFormProps> = (props) => {
+  const selectedColorMeta = FOLDER_COLOR_PRESETS.find(color => color.id === props.selectedColor) || FOLDER_COLOR_PRESETS[0];
+
+  return (
+    <form onSubmit={props.onSubmit} className="cv-folder-form">
+      <div className="cv-folder-form-heading">
+        <span className="cv-folder-form-title"><FolderPlus className="h-3.5 w-3.5" /><span>{props.editing ? 'แก้ไขข้อมูลโฟลเดอร์' : 'สร้างโฟลเดอร์ใหม่'}</span></span>
+        {props.editing && <button type="button" onClick={props.onCancel} className="cv-folder-form-cancel">ยกเลิกการแก้ไข</button>}
+      </div>
+
+      <div className="cv-folder-form-field">
+        <label htmlFor="folder-name">ชื่อโฟลเดอร์</label>
+        <input id="folder-name" type="text" value={props.folderName} onChange={event => props.onFolderNameChange(event.target.value)} placeholder="เช่น โปรเจกต์บอทแฟนตาซี หรือ System Prompts" />
+      </div>
+
+      <FolderIconPicker
+        selectedIcon={props.selectedIcon}
+        iconMode={props.iconMode}
+        customEmojiInput={props.customEmojiInput}
+        imageUrlInput={props.imageUrlInput}
+        error={props.error}
+        onIconChange={props.onIconChange}
+        onModeChange={props.onIconModeChange}
+        onCustomEmojiChange={props.onCustomEmojiChange}
+        onImageUrlChange={props.onImageUrlChange}
+        onApplyEmoji={props.onApplyEmoji}
+        onApplyUrl={props.onApplyUrl}
+        onFileUpload={props.onFileUpload}
+        onReset={props.onResetIcon}
+        fileInputRef={props.fileInputRef}
+      />
+
+      <fieldset className="cv-folder-color-field">
+        <legend>สีประจำโฟลเดอร์</legend>
+        <div className="cv-folder-color-options">
+          {FOLDER_COLOR_PRESETS.map(color => {
+            const isSelected = props.selectedColor === color.id;
+            return (
+              <button
+                key={color.id}
+                type="button"
+                onClick={() => props.onColorChange(color.id)}
+                className={`cv-folder-color-swatch-button${isSelected ? ' is-selected' : ''}`}
+                aria-label={`เลือกสี${color.name}`}
+                aria-pressed={isSelected}
+                title={color.name}
+              >
+                <span className="cv-folder-color-swatch" style={{ backgroundColor: color.swatch }} />
+                {isSelected && <Check className="h-3.5 w-3.5" />}
+              </button>
+            );
+          })}
+        </div>
+        <p className="cv-folder-color-note"><span style={{ backgroundColor: selectedColorMeta.swatch }} />เลือกอยู่: {selectedColorMeta.name}</p>
+      </fieldset>
+
+      {props.error && <p className="cv-folder-form-error" role="alert">{props.error}</p>}
+
+      <div className="cv-folder-form-actions">
+        <button type="submit" disabled={props.isSubmitting || !props.folderName.trim()} className="cv-folder-submit">
+          {props.isSubmitting ? 'กำลังบันทึก...' : props.editing ? 'บันทึกการแก้ไข' : 'สร้างโฟลเดอร์'}
+        </button>
+      </div>
+    </form>
+  );
+};

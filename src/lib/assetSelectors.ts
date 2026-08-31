@@ -46,6 +46,9 @@ export function isInAssetCollection(asset: Asset, options: AssetCollectionOption
   if (options.activeVaultTab === 'my_assets') {
     return isOwnedActiveAsset(asset, options.currentUserId);
   }
+  if (options.activeVaultTab === 'folders') {
+    return isOwnedActiveAsset(asset, options.currentUserId);
+  }
   if (options.activeVaultTab === 'bookmarks') {
     return options.bookmarkedAssetIds.includes(asset.id) && !asset.deletedAt;
   }
@@ -83,7 +86,7 @@ export function selectFilteredAssets(
   options: AssetFilterOptions
 ): Asset[] {
   return selectCollectionAssets(assets, options).filter(asset => {
-    if (options.activeView === 'vault' && options.activeVaultTab === 'my_assets') {
+    if (options.activeView === 'vault' && (options.activeVaultTab === 'my_assets' || options.activeVaultTab === 'folders')) {
       if (options.selectedFolderId === 'unassigned' && asset.folderId) return false;
       if (
         options.selectedFolderId !== 'all' &&

@@ -143,6 +143,11 @@ function MainApp() {
     setSelectedTag(null);
   }, [currentUser, openAuthModal]);
 
+  const handleVaultTabChange = useCallback((tab: VaultTabType) => {
+    setActiveVaultTab(tab);
+    if (tab === 'folders') setSelectedFolderId('all');
+  }, []);
+
   // Persisted actions require a real Supabase account session.
   const handleOpenCreateModal = useCallback(() => {
     if (!canCreateOwnedAsset(currentUser)) {
@@ -160,6 +165,10 @@ function MainApp() {
   const handleOpenMoveToFolder = useCallback((asset: Asset) => {
     openMoveToFolder(asset.id);
   }, [openMoveToFolder]);
+
+  const handleEditVaultAsset = useCallback((asset: Asset) => {
+    openEditEditor(asset.id);
+  }, [openEditEditor]);
 
   const handleForkSuccess = useCallback(() => {
     setActiveView('vault');
@@ -208,6 +217,12 @@ function MainApp() {
     onForkSuccess: handleForkSuccess,
     onBookmarkSuccess: handleBookmarkSuccess
   });
+
+  const handleDeleteVaultAsset = useCallback((asset: Asset) => {
+    if (window.confirm(`ย้ายผลงาน "${asset.title}" ไปถังขยะใช่หรือไม่?`)) {
+      void handleSoftDeleteAsset(asset.id);
+    }
+  }, [handleSoftDeleteAsset]);
 
   // Folder CRUD
   const handleCreateFolder = async (name: string, icon = '📁', color = 'purple'): Promise<boolean> => {
@@ -309,7 +324,10 @@ function MainApp() {
     onSelectCategory: (category: AssetCategory) => setSelectedCategory(category),
     onClearTag: () => setSelectedTag(null),
     onVisibilityFilterChange: setVisibilityFilter,
+    onSelectStatusFilter: setSelectedStatusFilter,
     onOpenAsset: handleOpenAssetView,
+    onEditAsset: handleEditVaultAsset,
+    onDeleteAsset: handleDeleteVaultAsset,
     onLike: handleLikeAsset,
     onBookmark: handleToggleBookmark,
     onFork: handleForkAsset,
@@ -317,7 +335,9 @@ function MainApp() {
     onRestore: handleRestoreAsset,
     onPermanentDelete: handlePermanentDeleteAsset,
     onSelectTag: setSelectedTag,
+    onSelectFolder: setSelectedFolderId,
     onOpenMoveToFolder: handleOpenMoveToFolder,
+    onOpenFolderManager: () => setIsFolderManagerOpen(true),
     onCreateAsset: handleOpenCreateModal
   };
 
@@ -362,12 +382,8 @@ function MainApp() {
             bookmarksCount={vaultStats.bookmarksCount}
             trashCount={vaultStats.trashCount}
             folders={foldersWithCounts}
-            selectedFolderId={selectedFolderId}
             activeVaultTab={activeVaultTab}
-            selectedStatusFilter={selectedStatusFilter}
-            onSelectFolder={setSelectedFolderId}
-            onChangeVaultTab={setActiveVaultTab}
-            onSelectStatusFilter={setSelectedStatusFilter}
+            onChangeVaultTab={handleVaultTabChange}
             onOpenFolderManager={() => setIsFolderManagerOpen(true)}
             onEditProfile={() => setIsProfileOpen(true)}
             onCreateAsset={handleOpenCreateModal}

@@ -5,17 +5,159 @@ import { FolderForm } from './folder-manager/FolderForm';
 import type { FolderIconMode } from './folder-manager/FolderIconPicker';
 import { FolderList } from './folder-manager/FolderList';
 
-interface FolderManagerModalProps { isOpen: boolean; onClose: () => void; folders: Folder[]; onCreateFolder: (name: string, icon?: string, color?: string) => Promise<boolean>; onUpdateFolder: (id: string, name: string, icon?: string, color?: string) => Promise<boolean>; onDeleteFolder: (id: string) => Promise<boolean>; }
+interface FolderManagerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  folders: Folder[];
+  onCreateFolder: (name: string, icon?: string, color?: string) => Promise<boolean>;
+  onUpdateFolder: (id: string, name: string, icon?: string, color?: string) => Promise<boolean>;
+  onDeleteFolder: (id: string) => Promise<boolean>;
+}
 
-export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({ isOpen, onClose, folders, onCreateFolder, onUpdateFolder, onDeleteFolder }) => {
-  const [folderName, setFolderName] = useState(''); const [selectedIcon, setSelectedIcon] = useState('📁'); const [selectedColor, setSelectedColor] = useState('purple'); const [editingFolderId, setEditingFolderId] = useState<string | null>(null); const [isSubmitting, setIsSubmitting] = useState(false); const [error, setError] = useState(''); const [iconMode, setIconMode] = useState<FolderIconMode>('presets'); const [customEmojiInput, setCustomEmojiInput] = useState(''); const [imageUrlInput, setImageUrlInput] = useState(''); const fileInputRef = useRef<HTMLInputElement>(null);
+export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
+  isOpen,
+  onClose,
+  folders,
+  onCreateFolder,
+  onUpdateFolder,
+  onDeleteFolder
+}) => {
+  const [folderName, setFolderName] = useState('');
+  const [selectedIcon, setSelectedIcon] = useState('📁');
+  const [selectedColor, setSelectedColor] = useState('purple');
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [iconMode, setIconMode] = useState<FolderIconMode>('presets');
+  const [customEmojiInput, setCustomEmojiInput] = useState('');
+  const [imageUrlInput, setImageUrlInput] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!isOpen) return null;
-  const resetForm = () => { setFolderName(''); setSelectedIcon('📁'); setSelectedColor('purple'); setEditingFolderId(null); setIconMode('presets'); };
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 5 * 1024 * 1024) { setError('ขนาดไฟล์รูปภาพต้องไม่เกิน 5MB'); return; } const reader = new FileReader(); reader.onload = () => { if (typeof reader.result === 'string') { setSelectedIcon(reader.result); setError(''); } }; reader.onerror = () => setError('ไม่สามารถอ่านไฟล์รูปภาพได้'); reader.readAsDataURL(file); };
-  const handleApplyImageUrl = () => { const cleanUrl = imageUrlInput.trim(); if (!cleanUrl) { setError('กรุณาวางลิงก์รูปภาพหรือ GIF'); return; } setSelectedIcon(cleanUrl); setImageUrlInput(''); setError(''); };
-  const handleSubmit = async (event: React.FormEvent) => { event.preventDefault(); if (!folderName.trim()) { setError('กรุณากรอกชื่อโฟลเดอร์'); return; } setIsSubmitting(true); setError(''); const success = editingFolderId ? await onUpdateFolder(editingFolderId, folderName.trim(), selectedIcon, selectedColor) : await onCreateFolder(folderName.trim(), selectedIcon, selectedColor); setIsSubmitting(false); if (success) resetForm(); else setError('เกิดข้อผิดพลาดในการบันทึกโฟลเดอร์'); };
-  const handleStartEdit = (folder: Folder) => { setEditingFolderId(folder.id); setFolderName(folder.name); const icon = folder.icon || '📁'; setSelectedIcon(icon); setSelectedColor(folder.color || 'purple'); setError(''); setIconMode(icon.startsWith('data:image') || icon.startsWith('http') ? 'upload' : 'presets'); };
-  const handleCancelEdit = () => { resetForm(); setError(''); };
-  const handleDelete = (folder: Folder) => { if (window.confirm(`ต้องการลบโฟลเดอร์ "${folder.name}" ใช่หรือไม่? (ผลงานข้างในจะไม่ถูกลบ)`)) void onDeleteFolder(folder.id); };
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"><div className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-purple-100 dark:border-purple-900/60 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"><div className="flex items-center justify-between p-5 border-b border-purple-100 dark:border-purple-900/50 bg-gradient-to-r from-purple-50 via-pink-50 to-white dark:from-purple-950/40 dark:via-slate-900 dark:to-slate-900"><div className="flex items-center gap-2.5"><div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center text-lg shadow-sm shadow-purple-200 dark:shadow-purple-950"><FolderIcon className="w-5 h-5 text-white" /></div><div><h2 className="text-base font-bold text-slate-800 dark:text-white">จัดการโฟลเดอร์ผลงาน (Custom Folders)</h2><p className="text-xs text-slate-500 dark:text-slate-400">รองรับไอคอนรูปภาพ, ภาพ GIF เคลื่อนไหว, และอีโมจิ</p></div></div><button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full cursor-pointer transition-colors"><X className="w-4 h-4" /></button></div><div className="flex-1 overflow-y-auto p-5 space-y-6"><FolderForm editing={Boolean(editingFolderId)} folderName={folderName} selectedIcon={selectedIcon} selectedColor={selectedColor} iconMode={iconMode} customEmojiInput={customEmojiInput} imageUrlInput={imageUrlInput} error={error} isSubmitting={isSubmitting} fileInputRef={fileInputRef} onFolderNameChange={setFolderName} onIconChange={setSelectedIcon} onColorChange={setSelectedColor} onIconModeChange={setIconMode} onCustomEmojiChange={setCustomEmojiInput} onImageUrlChange={setImageUrlInput} onApplyEmoji={() => { if (customEmojiInput.trim()) { setSelectedIcon(customEmojiInput.trim()); setCustomEmojiInput(''); } }} onApplyUrl={handleApplyImageUrl} onFileUpload={handleFileUpload} onResetIcon={() => setSelectedIcon('📁')} onCancel={handleCancelEdit} onSubmit={handleSubmit} /><FolderList folders={folders} onEdit={handleStartEdit} onDelete={handleDelete} /></div></div></div>;
+
+  const resetForm = () => {
+    setFolderName('');
+    setSelectedIcon('📁');
+    setSelectedColor('purple');
+    setEditingFolderId(null);
+    setIconMode('presets');
+    setCustomEmojiInput('');
+    setImageUrlInput('');
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setError('ขนาดไฟล์รูปภาพต้องไม่เกิน 5MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setSelectedIcon(reader.result);
+        setError('');
+      }
+    };
+    reader.onerror = () => setError('ไม่สามารถอ่านไฟล์รูปภาพได้');
+    reader.readAsDataURL(file);
+  };
+
+  const handleApplyImageUrl = () => {
+    const cleanUrl = imageUrlInput.trim();
+    if (!cleanUrl) {
+      setError('กรุณาวางลิงก์รูปภาพหรือ GIF');
+      return;
+    }
+    setSelectedIcon(cleanUrl);
+    setImageUrlInput('');
+    setError('');
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!folderName.trim()) {
+      setError('กรุณากรอกชื่อโฟลเดอร์');
+      return;
+    }
+    setIsSubmitting(true);
+    setError('');
+    const success = editingFolderId
+      ? await onUpdateFolder(editingFolderId, folderName.trim(), selectedIcon, selectedColor)
+      : await onCreateFolder(folderName.trim(), selectedIcon, selectedColor);
+    setIsSubmitting(false);
+    if (success) resetForm();
+    else setError('เกิดข้อผิดพลาดในการบันทึกโฟลเดอร์');
+  };
+
+  const handleStartEdit = (folder: Folder) => {
+    setEditingFolderId(folder.id);
+    setFolderName(folder.name);
+    const icon = folder.icon || '📁';
+    setSelectedIcon(icon);
+    setSelectedColor(folder.color || 'purple');
+    setError('');
+    setIconMode(icon.startsWith('data:image') || icon.startsWith('http') ? 'media' : 'presets');
+  };
+
+  const handleCancelEdit = () => {
+    resetForm();
+    setError('');
+  };
+
+  const handleDelete = (folder: Folder) => {
+    if (window.confirm(`ต้องการลบโฟลเดอร์ "${folder.name}" ใช่หรือไม่? (ผลงานข้างในจะไม่ถูกลบ)`)) {
+      void onDeleteFolder(folder.id);
+    }
+  };
+
+  return (
+    <div className="cv-modal-backdrop fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-200" role="presentation">
+      <div className="cv-modal-panel relative flex max-h-[90vh] max-w-xl flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="folder-manager-title">
+        <div className="cv-modal-heading flex items-center justify-between p-4 sm:p-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="cv-modal-icon"><FolderIcon className="h-5 w-5" /></div>
+            <div className="min-w-0">
+              <h2 id="folder-manager-title" className="text-sm font-bold text-slate-800 dark:text-white">จัดการโฟลเดอร์</h2>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">สร้างและจัดระเบียบคอลเลกชันของคุณ</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="cv-modal-close" aria-label="ปิดหน้าต่างจัดการโฟลเดอร์"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-5">
+          <FolderForm
+            editing={Boolean(editingFolderId)}
+            folderName={folderName}
+            selectedIcon={selectedIcon}
+            selectedColor={selectedColor}
+            iconMode={iconMode}
+            customEmojiInput={customEmojiInput}
+            imageUrlInput={imageUrlInput}
+            error={error}
+            isSubmitting={isSubmitting}
+            fileInputRef={fileInputRef}
+            onFolderNameChange={setFolderName}
+            onIconChange={setSelectedIcon}
+            onColorChange={setSelectedColor}
+            onIconModeChange={setIconMode}
+            onCustomEmojiChange={setCustomEmojiInput}
+            onImageUrlChange={setImageUrlInput}
+            onApplyEmoji={() => {
+              if (customEmojiInput.trim()) {
+                setSelectedIcon(customEmojiInput.trim());
+                setCustomEmojiInput('');
+              }
+            }}
+            onApplyUrl={handleApplyImageUrl}
+            onFileUpload={handleFileUpload}
+            onResetIcon={() => setSelectedIcon('📁')}
+            onCancel={handleCancelEdit}
+            onSubmit={handleSubmit}
+          />
+          <FolderList folders={folders} onEdit={handleStartEdit} onDelete={handleDelete} />
+        </div>
+      </div>
+    </div>
+  );
 };

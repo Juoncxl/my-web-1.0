@@ -133,12 +133,12 @@ export const POPULAR_EMOJIS = [
 ];
 
 export const FOLDER_COLOR_PRESETS = [
-  { id: 'purple', name: 'Lavender Pastel', bg: 'bg-purple-100 dark:bg-purple-950/60', text: 'text-purple-700 dark:text-purple-300', border: 'border-purple-200 dark:border-purple-800' },
-  { id: 'pink', name: 'Sakura Pink', bg: 'bg-pink-100 dark:bg-pink-950/60', text: 'text-pink-700 dark:text-pink-300', border: 'border-pink-200 dark:border-pink-800' },
-  { id: 'indigo', name: 'Dreamy Indigo', bg: 'bg-indigo-100 dark:bg-indigo-950/60', text: 'text-indigo-700 dark:text-indigo-300', border: 'border-indigo-200 dark:border-indigo-800' },
-  { id: 'emerald', name: 'Matcha Green', bg: 'bg-emerald-100 dark:bg-emerald-950/60', text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-200 dark:border-emerald-800' },
-  { id: 'amber', name: 'Honey Warm', bg: 'bg-amber-100 dark:bg-amber-950/60', text: 'text-amber-700 dark:text-amber-300', border: 'border-amber-200 dark:border-amber-800' },
-  { id: 'rose', name: 'Ruby Rose', bg: 'bg-rose-100 dark:bg-rose-950/60', text: 'text-rose-700 dark:text-rose-300', border: 'border-rose-200 dark:border-rose-800' }
+  { id: 'purple', name: 'ม่วงกาแล็กซี', swatch: '#7A5CC7', bg: 'bg-purple-100 dark:bg-purple-950/60', text: 'text-purple-700 dark:text-purple-300', border: 'border-purple-200 dark:border-purple-800' },
+  { id: 'pink', name: 'ชมพูเนบิวลา', swatch: '#C982A7', bg: 'bg-pink-100 dark:bg-pink-950/60', text: 'text-pink-700 dark:text-pink-300', border: 'border-pink-200 dark:border-pink-800' },
+  { id: 'indigo', name: 'น้ำเงินมหาสมุทร', swatch: '#356FA8', bg: 'bg-indigo-100 dark:bg-indigo-950/60', text: 'text-indigo-700 dark:text-indigo-300', border: 'border-indigo-200 dark:border-indigo-800' },
+  { id: 'emerald', name: 'มิ้นต์อควา', swatch: '#67B8C7', bg: 'bg-emerald-100 dark:bg-emerald-950/60', text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-200 dark:border-emerald-800' },
+  { id: 'amber', name: 'แสงจันทร์', swatch: '#A9B2D8', bg: 'bg-amber-100 dark:bg-amber-950/60', text: 'text-amber-700 dark:text-amber-300', border: 'border-amber-200 dark:border-amber-800' },
+  { id: 'rose', name: 'ชมพูคอสมิก', swatch: '#D08AAE', bg: 'bg-rose-100 dark:bg-rose-950/60', text: 'text-rose-700 dark:text-rose-300', border: 'border-rose-200 dark:border-rose-800' }
 ];
 
 export const STATUS_PRESETS = {
