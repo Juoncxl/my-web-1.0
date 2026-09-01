@@ -5,7 +5,7 @@ import { supabaseService } from '../lib/supabaseService';
 type ReportError = (message: string) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
 
-export function useAssetData(currentUser: User | null, reportError: ReportError) {
+export function useAssetData(currentUser: User | null, reportError: ReportError, enabled = true) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoadingAssets, setIsLoadingAssets] = useState(true);
   const requestSequence = useRef(0);
@@ -14,6 +14,8 @@ export function useAssetData(currentUser: User | null, reportError: ReportError)
   const hasLoadedAssets = useRef(false);
 
   const refreshAssets = useCallback(async () => {
+    if (!enabled) return;
+
     const requestId = ++requestSequence.current;
     const requestScope = scopeSequence.current;
     const isInitialLoad = !hasLoadedAssets.current;
@@ -41,9 +43,11 @@ export function useAssetData(currentUser: User | null, reportError: ReportError)
         setIsLoadingAssets(false);
       }
     }
-  }, [currentUser?.id, reportError]);
+  }, [currentUser?.id, enabled, reportError]);
 
   useEffect(() => {
+    if (!enabled) return;
+
     const userId = currentUser?.id;
     if (previousUserId.current !== userId) {
       previousUserId.current = userId;
@@ -52,7 +56,7 @@ export function useAssetData(currentUser: User | null, reportError: ReportError)
       setAssets([]);
     }
     void refreshAssets();
-  }, [currentUser?.id, refreshAssets]);
+  }, [currentUser?.id, enabled, refreshAssets]);
 
   const createAsset = useCallback(async (assetData: NewAssetData) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };

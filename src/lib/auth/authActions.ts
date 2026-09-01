@@ -1,7 +1,6 @@
 import type { AuthResponse } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
 import { getSupabaseClient, isLocalRuntime, supabaseConfigStatus } from '../supabaseClient';
-import { supabaseService } from '../supabaseService';
 import { mapSupabaseAuthUser } from './authUserMapper';
 
 function logAuthFailure(operation: string, error: unknown) {
@@ -22,14 +21,6 @@ function logAuthConfigUnavailable(operation: string) {
     url: supabaseConfigStatus.urlConfigured ? 'configured' : 'missing',
     anonKey: supabaseConfigStatus.anonKeyConfigured ? 'configured' : 'missing'
   });
-}
-
-function profileProvisioningError(operation: string): string {
-  logAuthFailure(`${operation}:profile-provisioning`, {
-    code: 'PROFILE_PROVISIONING_FAILED',
-    message: 'Auth succeeded but the profile record could not be read after authentication.'
-  });
-  return 'บัญชีถูกสร้างแล้ว แต่สร้างข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า Profile provisioning';
 }
 
 function safeAuthMessage(error: unknown, fallback: string): string {
@@ -65,9 +56,6 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
     }
     if (!data.user) return { success: false, error: 'ไม่พบข้อมูลผู้ใช้จากการลงทะเบียน' };
 
-    const profile = await supabaseService.getProfile(data.user.id);
-    if (!profile) return { success: false, error: profileProvisioningError('signup') };
-
     if (!data.session) {
       return {
         success: true,
@@ -78,7 +66,7 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
 
     return {
       success: true,
-      user: mapSupabaseAuthUser(data.user, profile),
+      user: mapSupabaseAuthUser(data.user, null),
       isNewUser: true
     };
   } catch (error) {
@@ -112,11 +100,9 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
       return { success: false, error: 'ไม่พบ session ที่ใช้งานได้ กรุณาลองเข้าสู่ระบบอีกครั้ง' };
     }
 
-    const profile = await supabaseService.getProfile(data.user.id);
-    if (!profile) return { success: false, error: profileProvisioningError('login') };
     return {
       success: true,
-      user: mapSupabaseAuthUser(data.user, profile),
+      user: mapSupabaseAuthUser(data.user, null),
       isNewUser: false
     };
   } catch (error) {

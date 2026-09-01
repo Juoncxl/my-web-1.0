@@ -16,7 +16,7 @@ import { useAuthSession } from '../lib/auth/useAuthSession';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, isLoading, setCurrentUser, setIsLoading } = useAuthSession();
+  const { currentUser, isLoading, setCurrentUser } = useAuthSession();
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -28,43 +28,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signUpWithEmail = async (email: string, pass: string) => {
-    setIsLoading(true);
-    try {
-      const result = await signUpWithEmailAction(email, pass);
-      if (result.requiresEmailConfirmation) {
-        setCurrentUser(null);
-      } else if (result.success && result.user) {
-        setCurrentUser(result.user);
-        setIsAuthOpen(false);
-        setIsOnboardingOpen(true);
-      }
-      return result;
-    } finally {
-      setIsLoading(false);
+    const result = await signUpWithEmailAction(email, pass);
+    if (result.requiresEmailConfirmation) {
+      setCurrentUser(null);
+    } else if (result.success && result.user) {
+      setCurrentUser(result.user);
+      setIsAuthOpen(false);
+      setIsOnboardingOpen(true);
     }
+    return result;
   };
 
   const loginWithEmail = async (email: string, pass: string) => {
-    setIsLoading(true);
-    try {
-      const result = await loginWithEmailAction(email, pass);
-      if (result.success && result.user) {
-        setCurrentUser(result.user);
-        setIsAuthOpen(false);
-      }
-      return result;
-    } finally {
-      setIsLoading(false);
+    const result = await loginWithEmailAction(email, pass);
+    if (result.success && result.user) {
+      setCurrentUser(result.user);
+      setIsAuthOpen(false);
     }
+    return result;
   };
 
   const loginWithGoogle = async () => {
-    setIsLoading(true);
-    try {
-      return await loginWithGoogleAction();
-    } finally {
-      setIsLoading(false);
-    }
+    return loginWithGoogleAction();
   };
 
   const logout = async (): Promise<void> => {

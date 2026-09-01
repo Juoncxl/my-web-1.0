@@ -64,6 +64,7 @@ function MainApp() {
   const reportOperationError = useCallback((message: string) => {
     setOperationError(message);
   }, []);
+  const resolvedUserId = authLoading ? undefined : currentUser?.id;
 
   const {
     assets,
@@ -78,20 +79,20 @@ function MainApp() {
     moveAsset,
     updateAssetLikeCount,
     clearFolderAssignments
-  } = useAssetData(currentUser, reportOperationError);
+  } = useAssetData(currentUser, reportOperationError, !authLoading);
   const {
     folders,
     refreshFolders,
     createFolder,
     updateFolder,
     deleteFolder
-  } = useFolderData(currentUser?.id, reportOperationError);
+  } = useFolderData(resolvedUserId, reportOperationError);
   const {
     bookmarkedAssetIds,
     likedAssetIds,
     toggleBookmark,
     toggleLike
-  } = useEngagementData(currentUser?.id, reportOperationError);
+  } = useEngagementData(resolvedUserId, reportOperationError);
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
 
   const {
