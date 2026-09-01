@@ -5,6 +5,7 @@ import type { ProfileSocialLink, User as ProfileUser } from '../types';
 import { supabaseService } from '../lib/supabaseService';
 import { ProfileAvatarPicker } from './profile/ProfileAvatarPicker';
 import { ProfileFields } from './profile/ProfileFields';
+import { getProfileUsernameValidationError, normalizeProfileUsername } from '../lib/profileIdentity';
 
 interface ProfileEditModalProps {
   isOpen: boolean;
@@ -113,9 +114,10 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!currentUser) return;
-    const cleanUsername = username.trim().replace(/^@+/, '').toLowerCase();
-    if (cleanUsername && !/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(cleanUsername)) {
-      setErrorMsg('ชื่อผู้ใช้ต้องมี 3–32 ตัวอักษร และใช้ a-z, 0-9, จุด, ขีดกลาง หรือขีดล่าง');
+    const cleanUsername = normalizeProfileUsername(username) || '';
+    const usernameError = getProfileUsernameValidationError(username);
+    if (usernameError) {
+      setErrorMsg(usernameError);
       return;
     }
     const socialError = validateSocialLinks(socialLinks);
@@ -163,15 +165,11 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
         setErrorMsg(result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ');
         return;
       }
-      onSaved?.({
-        ...currentUser,
-        displayName: displayName.trim() || 'Creator',
-        username: cleanUsername || undefined,
-        bio: bio.trim(),
-        avatarUrl: nextAvatarUrl,
-        coverUrl: nextCoverUrl,
-        socialLinks
-      });
+      if (!result.user) {
+        setErrorMsg('บันทึกโปรไฟล์สำเร็จแต่ไม่สามารถอ่านข้อมูลที่อัปเดตได้ กรุณาลองใหม่');
+        return;
+      }
+      onSaved?.(result.user);
       onClose();
     } catch (error: unknown) {
       setErrorMsg(getErrorMessage(error) || 'บันทึกโปรไฟล์ไม่สำเร็จ');

@@ -3,6 +3,7 @@ import type { User } from '../types';
 import {
   getCanonicalProfilePath,
   getCanonicalProfileSlug,
+  getProfileUsernameValidationError,
   isGenuineProfileNotFound,
   normalizeProfileUsername,
   resolveProfileBySlug
@@ -25,6 +26,13 @@ describe('canonical Profile identity', () => {
   it('normalizes the public username independently from display name', () => {
     expect(normalizeProfileUsername('  @JuonCXL ')).toBe('juoncxl');
     expect(getCanonicalProfileSlug(makeProfile())).toBe('juoncxl');
+  });
+
+  it('accepts juoncxl and rejects whitespace or stale invalid handle shapes', () => {
+    expect(getProfileUsernameValidationError('juoncxl')).toBeNull();
+    expect(getProfileUsernameValidationError('@JuonCXL')).toBeNull();
+    expect(getProfileUsernameValidationError('juon cxl')).toContain('3–32');
+    expect(getProfileUsernameValidationError('-juoncxl')).toContain('3–32');
   });
 
   it('uses the canonical username for every owner Profile path', () => {

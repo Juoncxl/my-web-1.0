@@ -81,12 +81,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     avatarUrl?: string;
     coverUrl?: string;
     socialLinks?: ProfileSocialLink[];
-  }): Promise<{ success: boolean; error?: string }> => {
+  }): Promise<{ success: boolean; user?: NonNullable<AuthContextType['currentUser']>; error?: string }> => {
     const result = await updateProfileAction(currentUser, data);
     if (!result.success) return { success: false, error: result.error };
 
     if (result.user) setCurrentUser(result.user);
-    return { success: true };
+    return { success: true, user: result.user };
   };
 
   const changePassword = async (currentPass: string, newPass: string) => {

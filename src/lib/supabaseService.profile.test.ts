@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { User } from '../types';
 
+const supabaseClientMocks = vi.hoisted(() => ({
+  getSupabaseClient: vi.fn(() => null)
+}));
+
 vi.mock('./persistenceMode', () => ({
   isMockPersistence: true,
   persistenceMode: 'mock',
@@ -8,10 +12,10 @@ vi.mock('./persistenceMode', () => ({
 }));
 
 vi.mock('./supabaseClient', () => ({
-  getSupabaseClient: () => null
+  getSupabaseClient: supabaseClientMocks.getSupabaseClient
 }));
 
-import { resetCreatorSandbox, writeMockProfile } from './creatorPersistence';
+import { readMockProfile, resetCreatorSandbox, writeMockProfile } from './creatorPersistence';
 import { supabaseService } from './supabaseService';
 
 function makeProfile(overrides: Partial<User> = {}): User {
@@ -31,6 +35,7 @@ describe('Profile identity service in the QA persistence boundary', () => {
   const storage = new Map<string, string>();
 
   beforeEach(() => {
+    supabaseClientMocks.getSupabaseClient.mockClear();
     (globalThis as { window: Window }).window = {
       localStorage: {
         getItem: key => storage.get(key) ?? null,
@@ -53,7 +58,7 @@ describe('Profile identity service in the QA persistence boundary', () => {
 
   it('resolves a visitor route by canonical username without owner-session input', async () => {
     const profile = makeProfile();
-    expect(writeMockProfile(profile)).toBe(true);
+    expect(writeMockProfile(profile).success).toBe(true);
 
     const result = await supabaseService.getCreatorProfile('JUONCXL');
 
@@ -66,12 +71,37 @@ describe('Profile identity service in the QA persistence boundary', () => {
         getItem: () => null,
         setItem: () => { throw new Error('quota exceeded'); }
       } as unknown as Storage,
+      sessionStorage: {
+        getItem: () => null,
+        setItem: () => { throw new Error('session storage unavailable'); }
+      } as unknown as Storage,
       dispatchEvent: () => true
     } as unknown as Window;
 
     const result = await supabaseService.upsertProfile(makeProfile());
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('QA Sandbox');
+    expect(result.error).toContain('พื้นที่จัดเก็บ');
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it('saves a complete QA Profile through the local adapter without constructing a Supabase client', async () => {
+    const result = await supabaseService.upsertProfile(makeProfile({
+      displayName: 'Juon CXL',
+      bio: 'Local creator bio',
+      avatarUrl: 'data:image/png;base64,avatar',
+      coverUrl: 'data:image/png;base64,cover',
+      socialLinks: [{ platform: 'website', label: 'Website', url: 'https://example.com', visible: true }]
+    }));
+
+    expect(result).toEqual({ success: true, error: null });
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+    expect(readMockProfile('owner-uuid', null)).toMatchObject({
+      displayName: 'Juon CXL',
+      username: 'juoncxl',
+      bio: 'Local creator bio',
+      avatarUrl: 'data:image/png;base64,avatar',
+      coverUrl: 'data:image/png;base64,cover'
+    });
   });
 });

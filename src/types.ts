@@ -135,7 +135,7 @@ export interface AuthContextType {
   loginWithEmail: (email: string, pass: string, name?: string) => Promise<AuthResponse>;
   loginWithGoogle: () => Promise<AuthResponse>;
   logout: () => Promise<void>;
-  updateProfile: (data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; socialLinks?: ProfileSocialLink[] }) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; socialLinks?: ProfileSocialLink[] }) => Promise<{ success: boolean; user?: User; error?: string }>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   isOnboardingOpen: boolean;
   setIsOnboardingOpen: (open: boolean) => void;

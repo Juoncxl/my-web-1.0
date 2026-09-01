@@ -1,6 +1,13 @@
 import type { Asset, Folder, User } from '../types';
 
 const STORAGE_KEY = 'cxl_creator_space_qa_sandbox_v1';
+const PROFILE_STORAGE_KEY = 'cxl_creator_space_qa_profiles_v1';
+
+export interface MockProfileWriteResult {
+  success: boolean;
+  storage: 'localStorage' | 'sessionStorage' | null;
+  error: string | null;
+}
 
 export interface CreatorSpaceSettings {
   layout?: 'locked' | 'free';
@@ -37,18 +44,79 @@ const emptyState = (): CreatorSandboxState => ({
 
 let memoryState = emptyState();
 
+function parseStoredProfiles(raw: string | null): Record<string, User> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, User> : {};
+  } catch {
+    return {};
+  }
+}
+
+function readProfilesFrom(storage: Storage | undefined): Record<string, User> {
+  if (!storage) return {};
+  try {
+    return parseStoredProfiles(storage.getItem(PROFILE_STORAGE_KEY));
+  } catch {
+    return {};
+  }
+}
+
+function getBrowserStorage(kind: 'localStorage' | 'sessionStorage'): Storage | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    return window[kind];
+  } catch {
+    return undefined;
+  }
+}
+
+function readStoredProfiles(): Record<string, User> {
+  if (typeof window === 'undefined') return {};
+  const localProfiles = readProfilesFrom(getBrowserStorage('localStorage'));
+  const sessionProfiles = readProfilesFrom(getBrowserStorage('sessionStorage'));
+  // A session fallback represents the newest accepted write when localStorage
+  // was unavailable, so it intentionally wins for the lifetime of this tab.
+  return { ...localProfiles, ...sessionProfiles };
+}
+
+function notifyQaDataListeners(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new Event('creator-vault-qa-data-changed'));
+  } catch (error) {
+    // Notification failure must not turn an already-persisted Profile save
+    // into a false failure. Auth/Profile state updates still render instantly.
+    console.warn('[creatorPersistence] QA data notification failed', error);
+  }
+}
+
+function isQuotaError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return /quota/i.test(String(error));
+  const record = error as Record<string, unknown>;
+  return record.name === 'QuotaExceededError' || record.code === 22 || record.code === 1014 || /quota/i.test(String(record.message || ''));
+}
+
 function readState(): CreatorSandboxState {
   if (typeof window === 'undefined') return memoryState;
+  const storedProfiles = readStoredProfiles();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return memoryState;
+    if (!raw) {
+      memoryState = { ...memoryState, profiles: { ...memoryState.profiles, ...storedProfiles } };
+      return memoryState;
+    }
     const parsed = JSON.parse(raw) as Partial<CreatorSandboxState>;
     memoryState = {
       assets: Array.isArray(parsed.assets) ? parsed.assets : [],
       folders: Array.isArray(parsed.folders) ? parsed.folders : [],
       removedAssetIds: Array.isArray(parsed.removedAssetIds) ? parsed.removedAssetIds : [],
       removedFolderIds: Array.isArray(parsed.removedFolderIds) ? parsed.removedFolderIds : [],
-      profiles: parsed.profiles && typeof parsed.profiles === 'object' ? parsed.profiles : {},
+      profiles: {
+        ...(parsed.profiles && typeof parsed.profiles === 'object' ? parsed.profiles : {}),
+        ...storedProfiles
+      },
       settings: parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {},
       bookmarks: parsed.bookmarks && typeof parsed.bookmarks === 'object' ? parsed.bookmarks : {},
       likes: parsed.likes && typeof parsed.likes === 'object' ? parsed.likes : {}
@@ -67,15 +135,12 @@ function writeState(next: CreatorSandboxState, notifyDataListeners = true): bool
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     memoryState = next;
-    if (notifyDataListeners) {
-      window.dispatchEvent(new Event('creator-vault-qa-data-changed'));
-      window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
-    }
-    return true;
   } catch (error) {
     console.warn('[creatorPersistence] local sandbox write failed', error);
     return false;
   }
+  if (notifyDataListeners) notifyQaDataListeners();
+  return true;
 }
 
 export function readMockAssets(userId?: string): Asset[] {
@@ -130,9 +195,57 @@ export function readMockProfiles(): User[] {
   return Object.values(readState().profiles);
 }
 
-export function writeMockProfile(user: User): boolean {
+export function writeMockProfile(user: User): MockProfileWriteResult {
   const state = readState();
-  return writeState({ ...state, profiles: { ...state.profiles, [user.id]: user } });
+  const profiles = { ...state.profiles, [user.id]: user };
+  let serialized = '';
+  try {
+    serialized = JSON.stringify(profiles);
+  } catch (error) {
+    console.warn('[creatorPersistence] QA Profile serialization failed', error);
+    return {
+      success: false,
+      storage: null,
+      error: 'ข้อมูลโปรไฟล์ไม่สามารถบันทึกใน QA Sandbox ได้ กรุณาตรวจสอบข้อมูลแล้วลองใหม่'
+    };
+  }
+
+  let localError: unknown;
+  try {
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, serialized);
+  } catch (error) {
+    localError = error;
+  }
+
+  if (!localError) {
+    try { window.sessionStorage?.removeItem(PROFILE_STORAGE_KEY); } catch { /* stale fallback cannot override this tab after memory update */ }
+    memoryState = { ...state, profiles };
+    notifyQaDataListeners();
+    return { success: true, storage: 'localStorage', error: null };
+  }
+
+  let sessionError: unknown;
+  try {
+    window.sessionStorage.setItem(PROFILE_STORAGE_KEY, serialized);
+  } catch (error) {
+    sessionError = error;
+  }
+
+  if (!sessionError) {
+    memoryState = { ...state, profiles };
+    console.warn('[creatorPersistence] QA Profile is using the same-tab session fallback because localStorage was unavailable', localError);
+    notifyQaDataListeners();
+    return { success: true, storage: 'sessionStorage', error: null };
+  }
+
+  console.warn('[creatorPersistence] QA Profile persistence failed', { localError, sessionError });
+  return {
+    success: false,
+    storage: null,
+    error: isQuotaError(localError) || isQuotaError(sessionError)
+      ? 'พื้นที่จัดเก็บของเบราว์เซอร์ไม่เพียงพอสำหรับบันทึกโปรไฟล์ QA กรุณาลดขนาดรูปภาพแล้วลองใหม่'
+      : 'บันทึกโปรไฟล์ใน QA Sandbox ไม่สำเร็จ เบราว์เซอร์ไม่อนุญาตให้ใช้พื้นที่จัดเก็บภายในเครื่อง'
+  };
 }
 
 export function readCreatorSpaceSettings(userId: string): CreatorSpaceSettings | null {
@@ -166,5 +279,9 @@ export function writeMockLikes(userId: string, assetIds: string[]): void {
 }
 
 export function resetCreatorSandbox(): void {
+  if (typeof window !== 'undefined') {
+    try { window.localStorage.removeItem(PROFILE_STORAGE_KEY); } catch { /* memory reset still applies */ }
+    try { window.sessionStorage?.removeItem(PROFILE_STORAGE_KEY); } catch { /* memory reset still applies */ }
+  }
   writeState(emptyState());
 }

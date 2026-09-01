@@ -14,6 +14,14 @@ export function normalizeProfileUsername(value?: string | null): string | undefi
   return normalized || undefined;
 }
 
+export function getProfileUsernameValidationError(value?: string | null): string | null {
+  const normalized = normalizeProfileUsername(value);
+  if (!normalized) return null;
+  return /^[a-z0-9][a-z0-9_.-]{2,31}$/.test(normalized)
+    ? null
+    : 'ชื่อผู้ใช้ต้องมี 3–32 ตัวอักษร และใช้ a-z, 0-9, จุด, ขีดกลาง หรือขีดล่าง';
+}
+
 export function getCanonicalProfileSlug(profile: ProfileIdentity): string {
   return normalizeProfileUsername(profile.username) || profile.id;
 }

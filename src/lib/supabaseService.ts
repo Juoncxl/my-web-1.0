@@ -1310,9 +1310,9 @@ export const supabaseService = {
   async upsertProfile(user: User): Promise<{ success: boolean; error: string | null }> {
     if (isMockPersistence) {
       const persisted = writeMockProfile({ ...user, username: normalizeProfileUsername(user.username), socialLinks: user.socialLinks || [] });
-      return persisted
+      return persisted.success
         ? { success: true, error: null }
-        : { success: false, error: 'บันทึกโปรไฟล์ใน QA Sandbox ไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกเปลี่ยน' };
+        : { success: false, error: persisted.error || 'บันทึกโปรไฟล์ใน QA Sandbox ไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกเปลี่ยน' };
     }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(user.id);
