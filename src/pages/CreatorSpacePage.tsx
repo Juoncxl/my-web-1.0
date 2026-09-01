@@ -15,18 +15,23 @@ import { isMockPersistence } from '../lib/persistenceMode';
 import { readCreatorSpaceSettings, writeCreatorSpaceSettings } from '../lib/creatorPersistence';
 
 interface CreatorSpacePageProps {
-  // The owner profile is the canonical home for profile identity editing.
+  // The canonical profile is the home for profile identity editing.
   onCreateAsset: () => void;
   onEditAsset?: (asset: Asset) => void;
   slug: string;
   onOpenAuth: () => void;
   onOpenFolderManager?: () => void;
   onOpenSettingsModal?: () => void;
+  allKnownAssets?: Asset[];
+  bookmarkedAssetIds?: string[];
+  recentlyViewedIds?: string[];
+  onDeleteAsset?: (asset: Asset) => void;
+  onRestoreAsset?: (assetId: string) => void;
 }
 
 const CATEGORY_ORDER: Array<AssetCategory | 'all'> = ['all', 'character', 'lore', 'ui_code', 'prompts', 'collab', 'app_data'];
 const DEFAULT_WIDGETS: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'goal', 'gallery', 'clock'];
-const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right', calendar: 'left', single_image: 'right', decoration: 'left', featured_work: 'right' };
+const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right', calendar: 'left', single_image: 'right', decoration: 'left' };
 const DEFAULT_SPANS: Record<string, number> = { portfolio: 9, folder: 3, playlist: 4, todo: 4, note: 4, status: 4, links: 4, goal: 6, gallery: 6, clock: 3 };
 
 function getInitial(displayName: string): string { return displayName.trim().slice(0, 1).toUpperCase() || 'C'; }
@@ -82,7 +87,10 @@ interface WidgetCardProps {
 
 const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile, isOwner, editing, layout, lockedPreset, title, span, rail, onMove, onRemove, onRail, onSpan, onEdit, config, onToggleTodo, onDrop }) => {
   const publicAssets = assets.filter(isPublicFeedVisibility);
-  const visibleFolders = folders.slice(0, 4);
+  // Folder visibility is not persisted yet. Never infer that an owner folder
+  // is public: omit it from visitor/preview presentation until the deferred
+  // persistence boundary introduces an explicit public-folder field.
+  const visibleFolders = isOwner ? folders.slice(0, 4) : [];
   const content: Record<CreatorWidgetType, React.ReactNode> = {
     folder: <>{visibleFolders.length ? <div className="csp-folder-list">{visibleFolders.map(folder => <div className="csp-folder-row" key={folder.id}><span>{folder.icon || '📁'} {folder.name}</span>{config.showCount !== false && <small>{folderAssetCount(folder, assets)}</small>}</div>)}</div> : <div className="csp-widget-empty">ยังไม่มีโฟลเดอร์ที่เลือก</div>}</>,
     status: <div className="csp-status-widget"><strong>{config.status || 'กำลังสร้างสิ่งใหม่'}</strong><span>{config.description || 'สถานะของ Creator ในตอนนี้'}</span></div>,
@@ -96,7 +104,6 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
     calendar: <div className="csp-calendar-widget"><strong>{new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long' }).format(new Date())}</strong><span>{config.description || 'กำหนดการสร้างงานของฉัน'}</span></div>,
     single_image: config.imageUrl ? <img className="csp-single-image" src={config.imageUrl} alt={title || 'รูปภาพเดี่ยว'} /> : <div className="csp-widget-empty">เพิ่ม URL รูปภาพใน editor</div>,
     decoration: <div className="csp-decoration-widget" aria-hidden="true">{config.text || '✦  ✧  ✦'}</div>,
-    featured_work: publicAssets[0] ? <div className="csp-featured-work"><strong>{publicAssets[0].title}</strong><span>{config.description || 'ผลงานที่อยากให้คนเห็นเป็นพิเศษ'}</span></div> : <div className="csp-widget-empty">ยังไม่มีผลงานสาธารณะ</div>,
   };
   return <article draggable={editing} onDragOver={event => { if (editing) event.preventDefault(); }} onDrop={event => { event.preventDefault(); if (editing) onDrop(type); }} onDragStart={event => event.dataTransfer.setData('text/plain', type)} className={`csp-widget ${layout === 'free' ? 'csp-layout-block' : ''}`} style={layout === 'free' ? { gridColumn: `span ${span}` } : undefined}>
     {editing && <CreatorWidgetControls type={type} layout={layout} lockedPreset={lockedPreset} span={span} rail={rail} onMove={onMove} onEdit={onEdit} onRemove={onRemove} onRail={onRail} onSpan={onSpan} />}
@@ -105,7 +112,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
   </article>;
 };
 
-export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenSettingsModal }) => {
+export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenSettingsModal, allKnownAssets = [], bookmarkedAssetIds = [], recentlyViewedIds = [], onDeleteAsset, onRestoreAsset }) => {
   const { currentUser, openAuthModal } = useAuth();
   const [activeSlug, setActiveSlug] = useState(slug);
   const { profile, assets, folders, isLoading, error, refresh } = useCreatorSpaceData(activeSlug, currentUser?.id, currentUser);
@@ -115,7 +122,10 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
   const [visibility, setVisibility] = useState<'all' | 'public' | 'private'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'folders' | 'saved'>('portfolio');
+  const [activeTab, setActiveTab] = useState<'profile' | 'works' | 'folders' | 'drafts' | 'saved' | 'recent' | 'trash'>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    return requested === 'works' || requested === 'folders' || requested === 'drafts' || requested === 'saved' || requested === 'recent' || requested === 'trash' ? requested : 'profile';
+  });
   const [layout, setLayout] = useState<CreatorLayout>('locked');
   const [lockedPreset, setLockedPreset] = useState<LockedPreset>('left');
   const [widgets, setWidgets] = useState<CreatorWidgetType[]>(DEFAULT_WIDGETS);
@@ -125,13 +135,25 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [widgetTitles, setWidgetTitles] = useState<Partial<Record<CreatorWidgetType, string>>>({});
   const [editingWidget, setEditingWidget] = useState<CreatorWidgetType | null>(null);
   const [widgetConfigs, setWidgetConfigs] = useState<Partial<Record<CreatorWidgetType, CreatorWidgetConfig>>>({ todo: { items: [{ label: 'เตรียมโครงสร้างผลงาน', done: false }, { label: 'ตรวจ reference', done: true }], showCompleted: true }, goal: { goal: 35 }, gallery: { goal: 3 } });
-  const [previewViewer, setPreviewViewer] = useState<'owner' | 'public'>('owner');
+  const [previewViewer, setPreviewViewer] = useState<'owner' | 'public'>(() => new URLSearchParams(window.location.search).get('preview') === 'public' ? 'public' : 'owner');
   const [folderView, setFolderView] = useState<'grid' | 'compact' | 'list'>('grid');
   const [folderSort, setFolderSort] = useState<'recent' | 'name' | 'count'>('recent');
 
   const isOwner = Boolean(profile && currentUser?.id === profile.id);
   const isEditing = isOwner && previewViewer === 'owner';
   const [settingsHydrated, setSettingsHydrated] = useState(false);
+
+  useEffect(() => {
+    // Query parameters are not authority. A visitor who manually supplies an
+    // owner tab must receive the public presentation, without a blank state or
+    // any owner-only metadata.
+    if (profile && !isOwner && activeTab !== 'profile') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('tab');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+      setActiveTab('profile');
+    }
+  }, [activeTab, isOwner, profile]);
 
   useEffect(() => {
     if (!isMockPersistence || !profile || !isOwner) return;
@@ -157,6 +179,15 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const visibleAssets = useMemo(() => getCreatorVisibleAssets(assets, isEditing), [assets, isEditing]);
   const filteredAssets = useMemo(() => filterAssets(visibleAssets, selectedCategory, isEditing ? visibility : 'all', searchQuery), [isEditing, searchQuery, selectedCategory, visibility, visibleAssets]);
   const publicAssets = useMemo(() => visibleAssets.filter(isPublicFeedVisibility), [visibleAssets]);
+  const visibleFolderCount = isEditing ? folders.length : 0;
+  const managementAssets = useMemo(() => {
+    if (activeTab === 'works') return visibleAssets.filter(asset => !asset.deletedAt);
+    if (activeTab === 'drafts') return visibleAssets.filter(asset => asset.status === 'draft' && !asset.deletedAt);
+    if (activeTab === 'trash') return assets.filter(asset => Boolean(asset.deletedAt));
+    if (activeTab === 'saved') return allKnownAssets.filter(asset => bookmarkedAssetIds.includes(asset.id) && asset.userId !== currentUser?.id && !asset.deletedAt && isPublicFeedVisibility(asset));
+    if (activeTab === 'recent') return [...visibleAssets].filter(asset => recentlyViewedIds.includes(asset.id) && !asset.deletedAt).sort((a, b) => recentlyViewedIds.indexOf(a.id) - recentlyViewedIds.indexOf(b.id));
+    return [];
+  }, [activeTab, allKnownAssets, assets, bookmarkedAssetIds, currentUser?.id, recentlyViewedIds, visibleAssets]);
   const displayFolders = useMemo(() => [...folders].sort((a, b) => folderSort === 'name' ? a.name.localeCompare(b.name, 'th') : folderSort === 'count' ? folderAssetCount(b, visibleAssets) - folderAssetCount(a, visibleAssets) : new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()), [folderSort, folders, visibleAssets]);
   const socialLinks = (profile?.socialLinks || []).filter(link => link.visible && getSafeHref(link.url));
   const displayName = profile?.displayName || 'Creator';
@@ -164,6 +195,21 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const handleCreateAsset = () => {
     if (!isEditing) { openAuthModal('signup'); return; }
     onCreateAsset();
+  };
+  const selectTab = (tab: typeof activeTab) => {
+    const url = new URL(window.location.href);
+    if (tab === 'profile') url.searchParams.delete('tab'); else url.searchParams.set('tab', tab);
+    if (previewViewer === 'public') url.searchParams.set('preview', 'public');
+    window.history.pushState({}, '', `${url.pathname}${url.search}`);
+    setActiveTab(tab);
+  };
+  const setPublicPreview = (enabled: boolean) => {
+    const url = new URL(window.location.href);
+    if (enabled) url.searchParams.set('preview', 'public'); else url.searchParams.delete('preview');
+    if (enabled) url.searchParams.delete('tab');
+    window.history.pushState({}, '', `${url.pathname}${url.search}`);
+    setPreviewViewer(enabled ? 'public' : 'owner');
+    if (enabled) { setActiveTab('profile'); setIsCustomizeOpen(false); setEditingWidget(null); }
   };
 
   const moveWidget = (type: CreatorWidgetType, direction: -1 | 1) => {
@@ -191,7 +237,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
 
   const renderWidget = (type: CreatorWidgetType) => {
     const config = widgetConfigs[type] || {};
-    if (previewViewer === 'public' && config.visibility === 'private') return null;
+    if (previewViewer === 'public' && (config.visibility === 'private' || type === 'todo' || type === 'folder')) return null;
     return <WidgetCard key={type} type={type} folders={folders} assets={visibleAssets} profile={{ displayName }} isOwner={isEditing} editing={isCustomizeOpen} layout={layout} lockedPreset={lockedPreset} title={widgetTitles[type] || config.title} span={spans[type] || 4} rail={widgetRail[type]} config={config} onToggleTodo={index => { if (type !== 'todo') return; const items = widgetConfigs.todo?.items || []; setWidgetConfigs(previous => ({ ...previous, todo: { ...previous.todo, items: items.map((item, itemIndex) => itemIndex === index ? { ...item, done: !item.done } : item) } })); }} onDrop={target => { if (layout !== 'free') return; setFreeOrder(previous => { const from = previous.indexOf(type); const to = previous.indexOf(target); if (from < 0 || to < 0 || from === to) return previous; const next = [...previous]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next; }); }} onMove={direction => layout === 'free' ? moveFreeBlock(type, direction) : moveWidget(type, direction)} onEdit={() => setEditingWidget(type)} onRemove={() => { setWidgets(previous => previous.filter(item => item !== type)); setFreeOrder(previous => previous.filter(item => item !== type)); }} onRail={rail => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpan={span => setSpans(previous => ({ ...previous, [type]: span }))} />;
   };
 
@@ -211,20 +257,20 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       {isLoading && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
       {!isLoading && !profile && <section className="csp-empty csp-route-state" role="alert"><div className="csp-empty-icon"><UserRound className="h-6 w-6" /></div><h1>ไม่พบโปรไฟล์ครีเอเตอร์</h1><p>{error || 'โปรไฟล์นี้อาจยังไม่มีอยู่ หรือ URL ไม่ถูกต้อง'}</p><div className="csp-state-actions"><button type="button" onClick={() => void refresh()} className="csp-secondary-button"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</button><a href="/" className="csp-primary-button">กลับหน้าแรก</a></div></section>}
       {!isLoading && profile && <>
-        {isCustomizeOpen && isEditing && <CreatorCustomizePanel layout={layout} lockedPreset={lockedPreset} widgets={widgets} widgetRail={widgetRail} spans={spans} onLayoutChange={setLayout} onLockedPresetChange={setLockedPreset} onAddWidget={(type, rail) => { if (!widgets.includes(type)) { setWidgets(previous => [...previous, type]); setFreeOrder(previous => previous.includes(type) ? previous : [...previous, type]); if (rail) setWidgetRail(previous => ({ ...previous, [type]: rail })); } }} onRemoveWidget={type => { setWidgets(previous => previous.filter(item => item !== type)); setFreeOrder(previous => previous.filter(item => item !== type)); }} onMoveWidget={moveWidget} onMoveRail={(type, rail) => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpanChange={(type, span) => setSpans(previous => ({ ...previous, [type]: span }))} onClose={() => setIsCustomizeOpen(false)} />}
+       {isCustomizeOpen && isEditing && activeTab === 'profile' && <CreatorCustomizePanel layout={layout} lockedPreset={lockedPreset} widgets={widgets} widgetRail={widgetRail} spans={spans} onLayoutChange={setLayout} onLockedPresetChange={setLockedPreset} onAddWidget={(type, rail) => { if (!widgets.includes(type)) { setWidgets(previous => [...previous, type]); setFreeOrder(previous => previous.includes(type) ? previous : [...previous, type]); if (rail) setWidgetRail(previous => ({ ...previous, [type]: rail })); } }} onRemoveWidget={type => { setWidgets(previous => previous.filter(item => item !== type)); setFreeOrder(previous => previous.filter(item => item !== type)); }} onMoveWidget={moveWidget} onMoveRail={(type, rail) => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpanChange={(type, span) => setSpans(previous => ({ ...previous, [type]: span }))} onClose={() => setIsCustomizeOpen(false)} />}
         {isCustomizeOpen && isEditing && editingWidget && <CreatorWidgetEditor type={editingWidget} config={widgetConfigs[editingWidget] || {}} onChange={config => setWidgetConfigs(previous => ({ ...previous, [editingWidget]: config }))} onClose={() => setEditingWidget(null)} />}
         <section className="csp-profile-header" aria-labelledby="csp-profile-title">
-          <div className="csp-cover">{profile.coverUrl ? <img src={profile.coverUrl} alt="ภาพปก Creator Space" referrerPolicy="no-referrer" /> : <div className="csp-cover-fallback" aria-hidden="true" />}<span>CREATOR SPACE</span>{isEditing && <button type="button" onClick={() => setIsProfileOpen(true)}>🖼 เปลี่ยนภาพปก</button>}</div>
-          <div className="csp-profile-surface"><div className="csp-profile-identity"><div className="csp-avatar-column"><div className="csp-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="รูปโปรไฟล์" referrerPolicy="no-referrer" /> : <span>{getInitial(displayName)}</span>}</div><div className="csp-desktop-stats"><span><strong>{visibleAssets.length}</strong> ผลงาน</span><span><strong>{folders.length}</strong> โฟลเดอร์</span><span><strong>{publicAssets.length}</strong> สาธารณะ</span></div></div><div className="csp-identity-copy"><div className="csp-name-row"><h1 id="csp-profile-title">{displayName}</h1>{isEditing && <><span className="csp-owner-badge">พื้นที่ส่วนตัว</span><button type="button" className="csp-edit-icon" onClick={() => setIsProfileOpen(true)} aria-label="แก้ไขข้อมูลโปรไฟล์" title="แก้ไขโปรไฟล์"><Edit3 className="h-3.5 w-3.5" /></button></>}</div><p className="csp-username">@{profile.username || 'ยังไม่ได้ตั้งชื่อผู้ใช้'}</p><p className="csp-bio">{profile.bio || (isEditing ? 'ยังไม่ได้เพิ่มคำแนะนำตัว' : 'Creator คนนี้ยังไม่ได้เพิ่มคำแนะนำตัว')}</p>{socialLinks.length > 0 && <div className="csp-social-links" aria-label="ช่องทางหลักของโปรไฟล์">{socialLinks.map(link => { const Icon = getSocialIcon(link.platform); const href = getSafeHref(link.url); return href ? <a href={href} target="_blank" rel="noreferrer" key={link.id || `${link.platform}-${link.label}`}><Icon className="h-3.5 w-3.5" />{link.label}</a> : null; })}</div>}</div></div><div className="csp-mobile-stats"><span><strong>{visibleAssets.length}</strong> ผลงาน</span><span><strong>{folders.length}</strong> โฟลเดอร์</span><span><strong>{publicAssets.length}</strong> สาธารณะ</span></div><div className="csp-profile-actions">{isEditing ? <><span>เฉพาะคุณเท่านั้น</span><button type="button" className="csp-secondary-button" onClick={() => setIsCustomizeOpen(value => !value)}><Settings2 className="h-3.5 w-3.5" />{isCustomizeOpen ? 'ปิดการตกแต่ง' : 'ตกแต่งโปรไฟล์'}</button><button type="button" className="csp-primary-button" onClick={handleCreateAsset}><Plus className="h-4 w-4" />สร้างผลงาน</button></> : <><button type="button" className="csp-secondary-button" onClick={() => { void navigator.clipboard?.writeText(window.location.href); }}><Share2 className="h-3.5 w-3.5" />แชร์โปรไฟล์</button>{!isOwner && <button type="button" className="csp-secondary-button" onClick={() => onOpenAuth()}><Link2 className="h-3.5 w-3.5" />เข้าสู่ระบบ</button>}</>}</div>{isCustomizeOpen && isEditing && <span className="csp-core-lock">🔒 ส่วนหลัก</span>}</div>
-          <nav className="csp-tabs" aria-label="เมนู Creator Space">{([['portfolio', '▦ ผลงาน'], ['folders', '📁 โฟลเดอร์'], ['saved', '☆ บันทึกไว้']] as const).map(([value, label]) => <button type="button" key={value} className={activeTab === value ? 'is-active' : ''} onClick={() => setActiveTab(value)}>{label}</button>)}<span>{isEditing ? 'พื้นที่ส่วนตัว' : 'โปรไฟล์สาธารณะ'}</span></nav>
+           <div className="csp-cover">{profile.coverUrl ? <img src={profile.coverUrl} alt="ภาพปกโปรไฟล์" referrerPolicy="no-referrer" /> : <div className="csp-cover-fallback" aria-hidden="true" />}<span>PROFILE</span>{isEditing && <button type="button" onClick={() => setIsProfileOpen(true)}>🖼 เปลี่ยนภาพปก</button>}</div>
+           <div className="csp-profile-surface"><div className="csp-profile-identity"><div className="csp-avatar-column"><div className="csp-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="รูปโปรไฟล์" referrerPolicy="no-referrer" /> : <span>{getInitial(displayName)}</span>}</div><div className="csp-desktop-stats"><span><strong>{visibleAssets.length}</strong> ผลงาน</span>{isEditing && <span><strong>{visibleFolderCount}</strong> โฟลเดอร์</span>}<span><strong>{publicAssets.length}</strong> สาธารณะ</span></div></div><div className="csp-identity-copy"><div className="csp-name-row"><h1 id="csp-profile-title">{displayName}</h1>{isEditing && <><span className="csp-owner-badge">พื้นที่ส่วนตัว</span><button type="button" className="csp-edit-icon" onClick={() => setIsProfileOpen(true)} aria-label="แก้ไขข้อมูลโปรไฟล์" title="แก้ไขโปรไฟล์"><Edit3 className="h-3.5 w-3.5" /></button></>}</div><p className="csp-username">@{profile.username || 'ยังไม่ได้ตั้งชื่อผู้ใช้'}</p><p className="csp-bio">{profile.bio || (isEditing ? 'ยังไม่ได้เพิ่มคำแนะนำตัว' : 'Creator คนนี้ยังไม่ได้เพิ่มคำแนะนำตัว')}</p>{socialLinks.length > 0 && <div className="csp-social-links" aria-label="ช่องทางหลักของโปรไฟล์">{socialLinks.map(link => { const Icon = getSocialIcon(link.platform); const href = getSafeHref(link.url); return href ? <a href={href} target="_blank" rel="noreferrer" key={link.id || `${link.platform}-${link.label}`}><Icon className="h-3.5 w-3.5" />{link.label}</a> : null; })}</div>}</div></div><div className="csp-mobile-stats"><span><strong>{visibleAssets.length}</strong> ผลงาน</span>{isEditing && <span><strong>{visibleFolderCount}</strong> โฟลเดอร์</span>}<span><strong>{publicAssets.length}</strong> สาธารณะ</span></div><div className="csp-profile-actions">{isEditing ? <><span>เฉพาะคุณเท่านั้น</span><button type="button" className="csp-secondary-button" onClick={() => setIsCustomizeOpen(value => !value)}><Settings2 className="h-3.5 w-3.5" />{isCustomizeOpen ? 'ปิดการตกแต่ง' : 'ตกแต่งโปรไฟล์'}</button><button type="button" className="csp-primary-button" onClick={handleCreateAsset}><Plus className="h-4 w-4" />สร้างผลงาน</button></> : <><button type="button" className="csp-secondary-button" onClick={() => { void navigator.clipboard?.writeText(window.location.href); }}><Share2 className="h-3.5 w-3.5" />แชร์โปรไฟล์</button>{!isOwner && <button type="button" className="csp-secondary-button" onClick={() => onOpenAuth()}><Link2 className="h-3.5 w-3.5" />เข้าสู่ระบบ</button>}</>}</div>{isCustomizeOpen && isEditing && <span className="csp-core-lock">🔒 ส่วนหลัก</span>}</div>
+           {isOwner && previewViewer === 'owner' && <nav className="csp-tabs" aria-label="เมนูจัดการโปรไฟล์">{([['profile', 'หน้าโปรไฟล์'], ['works', 'ผลงาน'], ['folders', 'โฟลเดอร์'], ['drafts', 'แบบร่าง'], ['saved', 'บันทึกไว้'], ['recent', 'ล่าสุด'], ['trash', 'ถังขยะ']] as const).map(([value, label]) => <button type="button" key={value} className={activeTab === value ? 'is-active' : ''} onClick={() => selectTab(value)}>{label}</button>)}<span>พื้นที่ส่วนตัว</span></nav>}
         </section>
-        {isOwner && <section className="csp-viewer-toolbar" aria-label="จำลองมุมมอง Creator Space"><span>ดูตัวอย่างในฐานะ</span><button type="button" className={previewViewer === 'owner' ? 'is-active' : ''} onClick={() => setPreviewViewer('owner')}>Owner</button><button type="button" className={previewViewer === 'public' ? 'is-active' : ''} onClick={() => { setPreviewViewer('public'); setIsCustomizeOpen(false); setEditingWidget(null); }}>Public</button><small>{previewViewer === 'public' ? 'กำลังตรวจสิ่งที่ผู้ชมทั่วไปเห็น' : 'กำลังแก้ไขพื้นที่ส่วนตัว'}</small></section>}
-        {activeTab === 'portfolio' && (layout === 'free' ? <section className="csp-free-canvas" aria-label="Free layout 12-column canvas">{freeOrder.map(type => type === 'portfolio' ? renderPortfolio(true) : widgets.includes(type) ? renderWidget(type) : null)}{renderAddBlock('เพิ่มบล็อก')}</section> : renderComposition())}
-        {activeTab === 'folders' && <section className="csp-portfolio"><div className="csp-section-heading"><div><p className="csp-eyebrow">COLLECTIONS</p><h2>โฟลเดอร์</h2><p>คอลเลกชันจาก Vault ของ Creator</p></div><div className="csp-heading-actions"><span>{folders.length} รายการ</span>{isEditing && onOpenFolderManager && <button type="button" className="csp-secondary-button" onClick={onOpenFolderManager}><Settings2 className="h-3.5 w-3.5" />จัดการโฟลเดอร์</button>}</div></div>{folders.length ? <><div className="csp-folder-page-toolbar"><div className="csp-folder-view-switcher" aria-label="รูปแบบการแสดงโฟลเดอร์">{(['grid', 'compact', 'list'] as const).map(value => <button type="button" key={value} className={folderView === value ? 'is-active' : ''} onClick={() => setFolderView(value)}>{value === 'grid' ? '▦ Grid' : value === 'compact' ? '▦ Compact' : '☷ List'}</button>)}</div><label className="csp-folder-sort-label">เรียงตาม<select value={folderSort} onChange={event => setFolderSort(event.target.value as typeof folderSort)}><option value="recent">อัปเดตล่าสุด</option><option value="name">ชื่อ A–Z</option><option value="count">จำนวนผลงานมากไปน้อย</option></select></label></div><div className={`csp-folder-directory ${folderView === 'compact' ? 'is-compact' : ''} ${folderView === 'list' ? 'is-list' : ''}`}>{displayFolders.map(folder => <button type="button" key={folder.id} className="csp-folder-card"><span>{folder.icon || '📁'}</span><strong>{folder.name}</strong><small>{folderAssetCount(folder, visibleAssets)} ผลงาน · อัปเดต {new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short' }).format(new Date(folder.updatedAt))}</small></button>)}</div></> : <div className="csp-empty"><div className="csp-empty-icon">📁</div><h3>ยังไม่มีโฟลเดอร์</h3><p>สร้างคอลเลกชันแรกจาก Vault ของคุณ</p>{isEditing && onOpenFolderManager && <button type="button" className="csp-primary-button" onClick={onOpenFolderManager}>สร้างโฟลเดอร์แรก</button>}</div>}</section>}
-        {activeTab === 'saved' && <section className="csp-empty csp-saved-empty"><div className="csp-empty-icon">☆</div><h3>บันทึกไว้</h3><p>รายการที่บันทึกไว้จะแสดงในพื้นที่นี้เมื่อเชื่อมข้อมูล bookmark ของ Creator</p></section>}
+       {isOwner && <section className="csp-viewer-toolbar" aria-label="ดูแบบผู้เยี่ยมชม"><span>มุมมองโปรไฟล์</span><button type="button" className={previewViewer === 'owner' ? 'is-active' : ''} onClick={() => setPublicPreview(false)}>Owner</button><button type="button" className={previewViewer === 'public' ? 'is-active' : ''} onClick={() => setPublicPreview(true)}>ดูแบบผู้เยี่ยมชม</button><small>{previewViewer === 'public' ? 'กำลังแสดงผลแบบผู้เยี่ยมชม — เนื้อหาส่วนตัวและเครื่องมือจัดการถูกซ่อนแล้ว' : 'กำลังจัดการโปรไฟล์ของคุณ'}</small></section>}
+       {activeTab === 'profile' && (layout === 'free' ? <section className="csp-free-canvas" aria-label="Free layout 12-column canvas">{freeOrder.map(type => type === 'portfolio' ? renderPortfolio(true) : widgets.includes(type) ? renderWidget(type) : null)}{renderAddBlock('เพิ่มรายการ')}</section> : renderComposition())}
+       {activeTab === 'folders' && isEditing && <section className="csp-portfolio"><div className="csp-section-heading"><div><p className="csp-eyebrow">FOLDERS</p><h2>โฟลเดอร์</h2><p>จัดการโฟลเดอร์ทั้งหมดของคุณ</p></div><div className="csp-heading-actions"><span>{folders.length} รายการ</span>{onOpenFolderManager && <button type="button" className="csp-secondary-button" onClick={onOpenFolderManager}><Settings2 className="h-3.5 w-3.5" />จัดการโฟลเดอร์</button>}</div></div>{folders.length ? <div className={`csp-folder-directory ${folderView === 'compact' ? 'is-compact' : ''} ${folderView === 'list' ? 'is-list' : ''}`}>{displayFolders.map(folder => <button type="button" key={folder.id} className="csp-folder-card"><span>{folder.icon || '📁'}</span><strong>{folder.name}</strong><small>{folderAssetCount(folder, visibleAssets)} ผลงาน</small></button>)}</div> : <div className="csp-empty"><h3>ยังไม่มีโฟลเดอร์</h3></div>}</section>}
+       {(['works', 'drafts', 'saved', 'recent', 'trash'] as const).includes(activeTab as 'works' | 'drafts' | 'saved' | 'recent' | 'trash') && isEditing && <section className="csp-portfolio"><div className="csp-section-heading"><div><p className="csp-eyebrow">MANAGE</p><h2>{activeTab === 'works' ? 'ผลงาน' : activeTab === 'drafts' ? 'แบบร่าง' : activeTab === 'saved' ? 'บันทึกไว้' : activeTab === 'recent' ? 'ล่าสุด' : 'ถังขยะ'}</h2><p>{activeTab === 'saved' ? 'ผลงานสาธารณะจาก Creator คนอื่นที่คุณบันทึกไว้' : activeTab === 'recent' ? 'ผลงานที่คุณเปิดล่าสุด' : activeTab === 'trash' ? 'ผลงานที่ลบแล้วของคุณ' : 'จัดการผลงานของคุณ'}</p></div><span>{managementAssets.length} รายการ</span></div>{managementAssets.length ? <div className="csp-asset-grid">{managementAssets.map(asset => <AssetCard key={asset.id} asset={asset} onClick={setSelectedAsset} onEdit={activeTab === 'works' || activeTab === 'drafts' ? onEditAsset : undefined} isOwner={asset.userId === currentUser?.id} />)}</div> : <div className="csp-empty"><h3>ยังไม่มีรายการ</h3><p>{activeTab === 'saved' ? 'ผลงานที่บันทึกไว้จะแสดงที่นี่' : activeTab === 'recent' ? 'ผลงานที่เปิดล่าสุดจะแสดงที่นี่' : 'ไม่มีผลงานในส่วนนี้'}</p></div>}</section>}
       </>}
     </main>
     <AssetViewModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} onEdit={isEditing ? onEditAsset : undefined} allAssets={visibleAssets} isOwner={isEditing} />
-    <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = savedUser.username || savedUser.id; setActiveSlug(nextSlug); window.history.replaceState({}, '', `/creator/${encodeURIComponent(nextSlug)}`); void refresh(); }} />
+    <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = savedUser.username || savedUser.id; setActiveSlug(nextSlug); window.history.replaceState({}, '', `/@${encodeURIComponent(nextSlug)}`); void refresh(); }} />
   </div>;
 };

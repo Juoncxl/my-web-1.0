@@ -28,7 +28,6 @@ import { useAssetFilters } from './hooks/useAssetFilters';
 import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
 import { DiscoverPage } from './pages/DiscoverPage';
-import { VaultPage } from './pages/VaultPage';
 import { CreatorSpacePage } from './pages/CreatorSpacePage';
 import { getCreatorSlug } from './hooks/useCreatorSpaceData';
 import { CreatorWorkWorkspace, type CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
@@ -46,6 +45,10 @@ function MainApp() {
     isLoading: authLoading
   } = useAuth();
   const creatorSlug = getCreatorSlug(window.location.pathname);
+  const legacyCreatorSlug = window.location.pathname.match(/^\/creator\/([^/]+)\/?$/i)?.[1] || null;
+  const isLegacyVaultRoute = /^\/vault\/?$/i.test(window.location.pathname);
+  const isLegacyCreatorSpaceRoute = /^\/creator-space\/?$/i.test(window.location.pathname);
+  const workRoute = window.location.pathname.match(/^\/work\/([^/]+)(?:\/(edit))?\/?$/i);
 
   // Navigation State
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
@@ -130,6 +133,20 @@ function MainApp() {
     }
   }, [activeView, currentUser]);
 
+  // Compatibility routes retain useful old bookmarks without leaving Vault or
+  // Creator Space as user-facing destinations.
+  useEffect(() => {
+    if (legacyCreatorSlug) {
+      window.location.replace(`/@${encodeURIComponent(legacyCreatorSlug)}${window.location.search}`);
+      return;
+    }
+    if ((isLegacyVaultRoute || isLegacyCreatorSpaceRoute) && currentUser) {
+      const username = currentUser.username || currentUser.id;
+      const suffix = isLegacyVaultRoute ? '?tab=works' : '';
+      window.location.replace(`/@${encodeURIComponent(username)}${suffix}`);
+    }
+  }, [currentUser, isLegacyCreatorSpaceRoute, isLegacyVaultRoute, legacyCreatorSlug]);
+
   // Track recently viewed items while keeping the selected asset canonical.
   const handleOpenAssetView = useCallback((asset: Asset) => {
     openAssetView(asset.id);
@@ -180,8 +197,7 @@ function MainApp() {
         tags: draft.tags
       });
       if (result.data) {
-        setActiveView('vault');
-        setActiveVaultTab('my_assets');
+        window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}?tab=works`);
         return { success: true };
       }
       return { success: false, error: result.error || 'แก้ไขผลงานไม่สำเร็จ' };
@@ -209,8 +225,7 @@ function MainApp() {
       versions: []
     });
     if (result.data) {
-      setActiveView('vault');
-      setActiveVaultTab('my_assets');
+      window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}?tab=works`);
       return { success: true };
     }
     return { success: false, error: result.error || 'สร้างผลงานไม่สำเร็จ' };
@@ -231,14 +246,30 @@ function MainApp() {
 
   const handleOpenCreatorProfile = useCallback(() => {
     if (!currentUser) return;
-    window.location.assign(`/creator/${encodeURIComponent(currentUser.username || currentUser.id)}`);
+    window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}`);
   }, [currentUser]);
 
+  // Work create, detail, and edit continue to share the existing canonical
+  // workspace/modal implementations. Routes simply select the correct mode.
+  useEffect(() => {
+    if (!workRoute || authLoading) return;
+    const [, workId, mode] = workRoute;
+    if (workId === 'new') {
+      handleOpenCreateModal();
+      return;
+    }
+    if (mode === 'edit') {
+      if (!currentUser) { openAuthModal('login'); return; }
+      if (assets.some(asset => asset.id === workId)) openEditEditor(workId);
+      return;
+    }
+    if (assets.some(asset => asset.id === workId)) openAssetView(workId);
+  }, [assets, authLoading, currentUser, handleOpenCreateModal, openAssetView, openAuthModal, openEditEditor, workRoute?.[1], workRoute?.[2]]);
+
   const handleForkSuccess = useCallback(() => {
-    setActiveView('vault');
-    setActiveVaultTab('my_assets');
+    if (currentUser) window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}?tab=works`);
     confetti({ particleCount: 35, spread: 55, origin: { y: 0.6 } });
-  }, []);
+  }, [currentUser]);
 
   const handleBookmarkSuccess = useCallback(() => {
     confetti({
@@ -425,6 +456,11 @@ function MainApp() {
           onOpenAuth={() => openAuthModal('login')}
           onOpenFolderManager={() => setIsFolderManagerOpen(true)}
           onOpenSettingsModal={() => setIsSettingsOpen(true)}
+          allKnownAssets={assets}
+          bookmarkedAssetIds={bookmarkedAssetIds}
+          recentlyViewedIds={recentlyViewedIds}
+          onDeleteAsset={handleDeleteVaultAsset}
+          onRestoreAsset={handleRestoreAsset}
         />
       ) : (
         <>
@@ -451,22 +487,7 @@ function MainApp() {
                 </button>
               </div>
             )}
-            {activeView === 'feed' ? <DiscoverPage collectionProps={collectionProps} /> : (
-              <VaultPage
-                collectionProps={collectionProps}
-                totalAssetsCount={vaultStats.total}
-                publicCount={vaultStats.publicCount}
-                privateCount={vaultStats.privateCount}
-                bookmarksCount={vaultStats.bookmarksCount}
-                trashCount={vaultStats.trashCount}
-                folders={foldersWithCounts}
-                activeVaultTab={activeVaultTab}
-                onChangeVaultTab={handleVaultTabChange}
-                onOpenFolderManager={() => setIsFolderManagerOpen(true)}
-                onOpenCreatorProfile={handleOpenCreatorProfile}
-                onCreateAsset={handleOpenCreateModal}
-              />
-            )}
+            <DiscoverPage collectionProps={collectionProps} />
           </main>
 
           <footer className="cv-footer border-t py-6 mt-12">

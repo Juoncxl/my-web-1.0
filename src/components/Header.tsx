@@ -4,7 +4,6 @@ import {
   Plus, 
   Sparkles, 
   User as UserIcon, 
-  Lock, 
   Globe, 
   LogOut, 
   LogIn, 
@@ -83,9 +82,6 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="cv-brand-wordmark-cxl">CXL</span>
                     <span className="cv-brand-wordmark-studio">Studio</span>
                   </span>
-                  <span className="cv-brand-badge hidden sm:inline-flex text-[9px] font-semibold tracking-wide px-1 py-0.5 rounded-full">
-                    CREATOR VAULT
-                  </span>
                 </div>
                 <p className="hidden md:block text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0">
                   คลังไอเดียสำหรับนักเขียนและครีเอเตอร์
@@ -119,7 +115,6 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Right Action Controls */}
           <div className="flex items-center gap-2 shrink-0">
             
-            {/* View Switcher: Public Feed vs My Vault */}
             {!creatorMode && <div className="cv-view-switcher hidden md:flex items-center p-1 rounded-full">
               <button
                 onClick={() => onViewChange('feed')}
@@ -130,18 +125,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Globe className="w-3.5 h-3.5 text-purple-500" />
-                <span>ฟีดสาธารณะ</span>
-              </button>
-              <button
-                onClick={() => isAuthenticated ? onViewChange('vault') : onOpenAuthModal()}
-                className={`cv-view-tab flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                  activeView === 'vault'
-                    ? 'is-active text-purple-700 dark:text-purple-200 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-purple-700 dark:hover:text-purple-300'
-                }`}
-              >
-                <Lock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300" />
-                <span>คลังผลงาน</span>
+                <span>ฟีด</span>
               </button>
             </div>}
 
@@ -228,13 +212,13 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="space-y-0.5">
                     {isAuthenticated && currentUser && (
                       <a
-                        href={`/creator/${encodeURIComponent(currentUser.username || currentUser.id)}`}
+                        href={`/@${encodeURIComponent(currentUser.username || currentUser.id)}`}
                         onClick={() => setDropdownOpen(false)}
                         className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
                         role="menuitem"
                       >
                         <UserIcon className="w-4 h-4 text-cyan-600 dark:text-cyan-300" />
-                        <span>โปรไฟล์ครีเอเตอร์ของฉัน</span>
+                        <span>โปรไฟล์ของฉัน</span>
                       </a>
                     )}
 

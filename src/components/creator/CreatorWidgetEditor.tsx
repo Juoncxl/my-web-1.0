@@ -46,7 +46,6 @@ export const CreatorWidgetEditor: React.FC<CreatorWidgetEditorProps> = ({ type, 
         {type === 'gallery' && <label className="csp-field">จำนวนภาพที่แสดง<select value={String(config.goal || 3)} onChange={event => set({ goal: Number(event.target.value) })}><option value="2">2 ภาพ</option><option value="3">3 ภาพ</option><option value="4">4 ภาพ</option></select></label>}
         {type === 'calendar' && <label className="csp-field">คำอธิบายปฏิทิน<input value={config.description || ''} onChange={event => set({ description: event.target.value })} placeholder="กำหนดการสร้างงาน" /></label>}
         {type === 'single_image' && <label className="csp-field">URL รูปภาพ<input type="url" value={config.imageUrl || ''} onChange={event => set({ imageUrl: event.target.value })} placeholder="https://..." /></label>}
-        {type === 'featured_work' && <label className="csp-field">คำอธิบายผลงานเด่น<input value={config.description || ''} onChange={event => set({ description: event.target.value })} /></label>}
         {type === 'decoration' && <label className="csp-field">ข้อความตกแต่ง<input value={config.text || ''} onChange={event => set({ text: event.target.value })} placeholder="✦" /></label>}
         {type === 'clock' && <label className="csp-field">คำอธิบายเวลา<input value={config.description || 'เวลาท้องถิ่น · Asia/Bangkok'} onChange={event => set({ description: event.target.value })} /></label>}
       </div>

@@ -188,7 +188,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
             <div className="cv-modal-icon"><User className="h-5 w-5" /></div>
             <div className="min-w-0">
               <h2 id="profile-edit-title" className="text-sm font-bold text-slate-800 dark:text-white">แก้ไขข้อมูลโปรไฟล์</h2>
-              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">ข้อมูลตัวตนที่แสดงบน Creator Space</p>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">ข้อมูลตัวตนที่แสดงบนโปรไฟล์</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="cv-modal-close" aria-label="ปิดหน้าต่างแก้ไขโปรไฟล์"><X className="h-4 w-4" /></button>
@@ -206,7 +206,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
             />
             <div className="space-y-3">
               <div className="cv-profile-cover-editor">
-                {coverUrl ? <img src={coverUrl} alt="ตัวอย่างภาพปก" referrerPolicy="no-referrer" /> : <span>ภาพปกของ Creator Space</span>}
+                {coverUrl ? <img src={coverUrl} alt="ตัวอย่างภาพปก" referrerPolicy="no-referrer" /> : <span>ภาพปกโปรไฟล์</span>}
               </div>
               <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleCoverUpload} className="hidden" />
               <div className="flex flex-wrap items-center gap-2">
@@ -227,7 +227,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
             <div className="space-y-1">
               <label htmlFor="profile-username" className="block text-xs font-bold text-slate-700 dark:text-slate-300">ชื่อผู้ใช้ (Username)</label>
               <input id="profile-username" type="text" value={username} onChange={event => setUsername(event.target.value)} placeholder="เช่น creator_name" autoCapitalize="none" className="w-full rounded-xl border border-purple-100 bg-slate-50 px-3.5 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
-              <p className="text-[10px] text-slate-400">ใช้เป็นลิงก์ Creator Space เช่น /creator/ชื่อผู้ใช้</p>
+              <p className="text-[10px] text-slate-400">ใช้เป็นลิงก์โปรไฟล์ เช่น /@ชื่อผู้ใช้</p>
             </div>
           </div>
 

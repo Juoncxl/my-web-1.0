@@ -133,7 +133,7 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
 }
 
 export function getCreatorSlug(pathname: string): string | null {
-  const match = pathname.match(/^\/creator\/([^/]+)\/?$/i);
+  const match = pathname.match(/^\/@([^/]+)\/?$/i);
   return match ? match[1] : null;
 }
 

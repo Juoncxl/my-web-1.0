@@ -60,7 +60,7 @@ export const OnboardingModal: React.FC = () => {
         <div className="p-6 pb-5 bg-gradient-to-r from-purple-600 via-pink-600 to-purple-800 text-white text-center relative">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold mb-2">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>ยินดีต้อนรับสู่ Creator Vault</span>
+            <span>ยินดีต้อนรับสู่ CXL Studio</span>
           </div>
           <h2 className="text-xl font-bold">ตั้งค่าโปรไฟล์ผู้สร้าง (Profile Setup)</h2>
           <p className="text-xs text-purple-100 mt-1 max-w-sm mx-auto">
@@ -154,7 +154,7 @@ export const OnboardingModal: React.FC = () => {
             disabled={isSaving}
             className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-2xl text-xs font-bold transition-all shadow-lg shadow-purple-200 dark:shadow-purple-950/50 active:scale-98 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
           >
-            <span>{isSaving ? 'กำลังบันทึกโปรไฟล์...' : 'เริ่มสร้างผลงานใน Creator Vault'}</span>
+            <span>{isSaving ? 'กำลังบันทึกโปรไฟล์...' : 'เริ่มสร้างผลงานใน CXL Studio'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

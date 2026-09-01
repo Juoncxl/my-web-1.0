@@ -1,5 +1,5 @@
 {
-  "name": "Creator Vault",
+  "name": "CXL Studio",
   "description": "คลังเก็บความรู้และแอสเซทสำหรับนักสร้างแชทบอทและนักเขียน (Knowledge Base & Asset Hub for Chatbot Creators & Writers)",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
