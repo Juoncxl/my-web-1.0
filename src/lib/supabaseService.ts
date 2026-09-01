@@ -1174,11 +1174,21 @@ export const supabaseService = {
   },
 
   // 14. Profiles
+  getProfileSnapshot(userId: string): User | null {
+    if (!userId || !isMockPersistence) return null;
+    const profile = readMockProfile(userId, null);
+    return profile?.id === userId ? profile : null;
+  },
+
   async getProfile(userId: string): Promise<Partial<User> | null> {
-    const supabase = getSupabaseClient();
     if (!userId) return null;
     const localProfile = isMockPersistence ? readMockProfile(userId, null) : null;
-    if (!supabase && isMockPersistence) return localProfile;
+    // QA Profile is the highest-priority presentation source for its owner.
+    // Returning it before constructing/querying Supabase prevents a known
+    // canonical identity from regressing behind a slower cloud lookup.
+    if (localProfile?.id === userId) return localProfile;
+
+    const supabase = getSupabaseClient();
     if (!supabase) return null;
 
     try {

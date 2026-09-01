@@ -16,7 +16,7 @@ import { useAuthSession } from '../lib/auth/useAuthSession';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, isLoading, setCurrentUser } = useAuthSession();
+  const { currentUser, isLoading, setCurrentUser, transitionToGuest } = useAuthSession();
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -30,7 +30,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUpWithEmail = async (email: string, pass: string) => {
     const result = await signUpWithEmailAction(email, pass);
     if (result.requiresEmailConfirmation) {
-      setCurrentUser(null);
+      transitionToGuest();
     } else if (result.success && result.user) {
       setCurrentUser(result.user);
       setIsAuthOpen(false);
@@ -53,8 +53,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async (): Promise<void> => {
-    // Disable account-only UI immediately, even if the network sign-out is slow.
-    setCurrentUser(null);
+    // Disable account-only UI and invalidate stale Profile hydration
+    // immediately, even if the network sign-out is slow.
+    transitionToGuest();
     setIsSettingsOpen(false);
     await logoutAction();
   };

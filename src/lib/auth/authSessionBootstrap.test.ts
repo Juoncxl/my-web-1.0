@@ -87,6 +87,79 @@ async function flushPromises() {
 }
 
 describe('Auth session bootstrap regression coverage', () => {
+  it('renders a same-user local Profile snapshot before async hydration and never regresses it', async () => {
+    const session = makeSession(makeAuthUser({
+      email: 'fahmemomusic@example.com',
+      user_metadata: {}
+    }));
+    const client = createAuthClient(session);
+    const profile = deferred<Partial<User> | null>();
+    const scheduler = createScheduler();
+    const users: Array<User | null> = [];
+    const canonicalProfile: Partial<User> = {
+      id: 'user-1',
+      displayName: 'Juon',
+      username: 'juoncxl',
+      avatarUrl: 'data:image/png;base64,real-avatar'
+    };
+
+    const bootstrap = startAuthSessionBootstrap({
+      auth: client.auth,
+      getProfileSnapshot: () => canonicalProfile,
+      loadProfile: () => profile.promise,
+      setCurrentUser: user => users.push(user),
+      setLoading: vi.fn(),
+      schedule: scheduler.schedule,
+      cancelScheduled: scheduler.cancel
+    });
+
+    await bootstrap.ready;
+
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({
+      displayName: 'Juon',
+      username: 'juoncxl',
+      avatarUrl: 'data:image/png;base64,real-avatar'
+    });
+
+    scheduler.work.shift()?.();
+    profile.resolve({ id: 'user-1', displayName: 'Lower quality persisted value' });
+    await flushPromises();
+
+    expect(users.at(-1)).toMatchObject({
+      displayName: 'Juon',
+      username: 'juoncxl',
+      avatarUrl: 'data:image/png;base64,real-avatar'
+    });
+    bootstrap.dispose();
+  });
+
+  it('never renders a cached Profile that belongs to another authenticated user', async () => {
+    const client = createAuthClient(makeSession());
+    const scheduler = createScheduler();
+    const users: Array<User | null> = [];
+
+    const bootstrap = startAuthSessionBootstrap({
+      auth: client.auth,
+      getProfileSnapshot: () => ({
+        id: 'different-user',
+        displayName: 'Wrong account',
+        username: 'wrong-account'
+      }),
+      loadProfile: vi.fn(async () => null),
+      setCurrentUser: user => users.push(user),
+      setLoading: vi.fn(),
+      schedule: scheduler.schedule,
+      cancelScheduled: scheduler.cancel
+    });
+
+    await bootstrap.ready;
+
+    expect(users.at(-1)).toMatchObject({ id: 'user-1', displayName: 'creator' });
+    expect(users.at(-1)?.username).toBeUndefined();
+    bootstrap.dispose();
+  });
+
   it('recognizes a persisted Auth user and ends loading without waiting for Profile', async () => {
     const session = makeSession();
     const client = createAuthClient(session);
@@ -266,6 +339,37 @@ describe('Auth session bootstrap regression coverage', () => {
     profile.resolve({ displayName: 'Late profile' });
     await flushPromises();
     expect(users.at(-1)).toBeNull();
+    bootstrap.dispose();
+  });
+
+  it('invalidates stale Profile hydration as soon as an optimistic logout starts', async () => {
+    const client = createAuthClient(makeSession());
+    const scheduler = createScheduler();
+    const profile = deferred<Partial<User> | null>();
+    const users: Array<User | null> = [];
+
+    const bootstrap = startAuthSessionBootstrap({
+      auth: client.auth,
+      loadProfile: () => profile.promise,
+      setCurrentUser: user => users.push(user),
+      setLoading: vi.fn(),
+      schedule: scheduler.schedule,
+      cancelScheduled: scheduler.cancel
+    });
+
+    await bootstrap.ready;
+    scheduler.work.shift()?.();
+
+    // AuthContext invokes this before the remote /logout request resolves.
+    bootstrap.transitionToGuest();
+    expect(users.at(-1)).toBeNull();
+
+    profile.resolve({ id: 'user-1', displayName: 'Late old profile' });
+    await flushPromises();
+    expect(users.at(-1)).toBeNull();
+
+    client.emit('SIGNED_IN', makeSession());
+    expect(users.at(-1)).toMatchObject({ id: 'user-1' });
     bootstrap.dispose();
   });
 

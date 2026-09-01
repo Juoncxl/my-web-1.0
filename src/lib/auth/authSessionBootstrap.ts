@@ -17,6 +17,7 @@ export interface AuthClientForBootstrap {
 
 interface StartAuthSessionBootstrapOptions {
   auth: AuthClientForBootstrap;
+  getProfileSnapshot?: (userId: string) => Partial<User> | null;
   loadProfile: (userId: string) => Promise<Partial<User> | null>;
   setCurrentUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
@@ -27,6 +28,7 @@ interface StartAuthSessionBootstrapOptions {
 
 export interface AuthSessionBootstrap {
   ready: Promise<void>;
+  transitionToGuest: () => void;
   dispose: () => void;
 }
 
@@ -59,6 +61,7 @@ function restoreSessionOnce(auth: AuthClientForBootstrap): Promise<SessionRestor
  */
 export function startAuthSessionBootstrap({
   auth,
+  getProfileSnapshot = () => null,
   loadProfile,
   setCurrentUser,
   setLoading,
@@ -94,15 +97,25 @@ export function startAuthSessionBootstrap({
       return;
     }
 
-    // Auth identity is sufficient for account state. Profile/username is an
-    // optional enhancement and must never hold the startup screen open.
-    setCurrentUser(mapSupabaseAuthUser(authUser, null));
+    const profileSnapshot = getProfileSnapshot(authUser.id);
+    const sameUserSnapshot = profileSnapshot?.id === authUser.id ? profileSnapshot : null;
+
+    // Auth identity is sufficient for account state. When a canonical QA
+    // Profile already exists for this exact user ID, render that snapshot
+    // immediately instead of visually regressing to an email-based fallback.
+    setCurrentUser(mapSupabaseAuthUser(authUser, sameUserSnapshot));
 
     defer(() => {
       void loadProfile(authUser.id)
         .then(profile => {
           if (disposed || requestRevision !== userRevision || activeUserId !== authUser.id) return;
-          if (profile) setCurrentUser(mapSupabaseAuthUser(authUser, profile));
+          const latestSnapshot = getProfileSnapshot(authUser.id);
+          const preferredProfile = latestSnapshot?.id === authUser.id
+            ? latestSnapshot
+            : profile && (!profile.id || profile.id === authUser.id)
+              ? profile
+              : null;
+          if (preferredProfile) setCurrentUser(mapSupabaseAuthUser(authUser, preferredProfile));
         })
         .catch(error => {
           logWarning('Optional Profile hydration failed; keeping the Auth user.', error);
@@ -146,6 +159,9 @@ export function startAuthSessionBootstrap({
 
   return {
     ready,
+    transitionToGuest: () => {
+      applyAuthUser(null, true);
+    },
     dispose: () => {
       disposed = true;
       userRevision += 1;

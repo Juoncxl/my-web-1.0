@@ -104,4 +104,23 @@ describe('Profile identity service in the QA persistence boundary', () => {
       coverUrl: 'data:image/png;base64,cover'
     });
   });
+
+  it('returns an immediate Profile snapshot only for the matching owner ID', () => {
+    const profile = makeProfile({ displayName: 'Juon', avatarUrl: 'data:image/png;base64,avatar' });
+    expect(writeMockProfile(profile).success).toBe(true);
+
+    expect(supabaseService.getProfileSnapshot('owner-uuid')).toEqual(profile);
+    expect(supabaseService.getProfileSnapshot('different-owner')).toBeNull();
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it('resolves an existing QA Profile without waiting for or constructing Supabase', async () => {
+    const profile = makeProfile({ displayName: 'Juon', username: 'juoncxl' });
+    expect(writeMockProfile(profile).success).toBe(true);
+
+    const result = await supabaseService.getProfile('owner-uuid');
+
+    expect(result).toEqual(profile);
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
 });

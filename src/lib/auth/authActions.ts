@@ -1,7 +1,10 @@
 import type { AuthResponse } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
 import { getSupabaseClient, isLocalRuntime, supabaseConfigStatus } from '../supabaseClient';
+import { supabaseService } from '../supabaseService';
 import { mapSupabaseAuthUser } from './authUserMapper';
+
+let logoutInFlight: Promise<void> | null = null;
 
 function logAuthFailure(operation: string, error: unknown) {
   if (!isLocalRuntime()) return;
@@ -24,13 +27,31 @@ function logAuthConfigUnavailable(operation: string) {
 }
 
 function safeAuthMessage(error: unknown, fallback: string): string {
+  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  const status = typeof record.status === 'number' ? record.status : Number(record.status || 0);
+  const code = typeof record.code === 'string' ? record.code : '';
+  if (status >= 500 || code === 'request_timeout' || code === 'unexpected_failure') {
+    const suffix = status ? ` (HTTP ${status})` : '';
+    return `ระบบยืนยันตัวตนไม่พร้อมใช้งานชั่วคราว${suffix} กรุณารอสักครู่แล้วลองใหม่อีกครั้ง`;
+  }
+
   const message = formatFriendlyErrorMessage(error).trim();
   if (!message || message.length > 300 || /stack|\bat\s+[a-z]:\\|\bat\s+\/|node_modules/i.test(message)) return fallback;
   return message;
 }
 
+function mapAuthenticatedUser(authUser: Parameters<typeof mapSupabaseAuthUser>[0]) {
+  const profileSnapshot = supabaseService.getProfileSnapshot(authUser.id);
+  return mapSupabaseAuthUser(authUser, profileSnapshot?.id === authUser.id ? profileSnapshot : null);
+}
+
+async function waitForLogoutCompletion(): Promise<void> {
+  if (logoutInFlight) await logoutInFlight;
+}
+
 export async function signUpWithEmail(email: string, pass: string): Promise<AuthResponse> {
   try {
+    await waitForLogoutCompletion();
     const cleanEmail = email.toLowerCase().trim();
     const supabase = getSupabaseClient();
     if (!supabase) {
@@ -66,7 +87,7 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
 
     return {
       success: true,
-      user: mapSupabaseAuthUser(data.user, null),
+      user: mapAuthenticatedUser(data.user),
       isNewUser: true
     };
   } catch (error) {
@@ -77,6 +98,7 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
 
 export async function loginWithEmail(email: string, pass: string): Promise<AuthResponse> {
   try {
+    await waitForLogoutCompletion();
     const cleanEmail = email.toLowerCase().trim();
     const supabase = getSupabaseClient();
     if (!supabase) {
@@ -102,7 +124,7 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
 
     return {
       success: true,
-      user: mapSupabaseAuthUser(data.user, null),
+      user: mapAuthenticatedUser(data.user),
       isNewUser: false
     };
   } catch (error) {
@@ -113,6 +135,7 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
 
 export async function loginWithGoogle(): Promise<AuthResponse> {
   try {
+    await waitForLogoutCompletion();
     const supabase = getSupabaseClient();
     if (!supabase) {
       logAuthConfigUnavailable('google-login');
@@ -134,13 +157,26 @@ export async function loginWithGoogle(): Promise<AuthResponse> {
 }
 
 export async function logout(): Promise<void> {
-  const supabase = getSupabaseClient();
-  try {
-    if (supabase) {
-      const { error } = await supabase.auth.signOut();
-      if (error) console.warn('Supabase signout failed:', error);
+  if (logoutInFlight) return logoutInFlight;
+
+  const operation = (async () => {
+    const supabase = getSupabaseClient();
+    try {
+      if (supabase) {
+        // The app's Logout button ends only this browser session. Using the
+        // explicit local scope avoids revoking unrelated devices and narrows
+        // the server-side cleanup before a fresh login.
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+        if (error) console.warn('Supabase signout failed:', error);
+      }
+    } catch (error) {
+      console.warn('Supabase signout exception:', error);
     }
-  } catch (error) {
-    console.warn('Supabase signout exception:', error);
-  }
+  })();
+
+  const trackedOperation = operation.finally(() => {
+    if (logoutInFlight === trackedOperation) logoutInFlight = null;
+  });
+  logoutInFlight = trackedOperation;
+  return trackedOperation;
 }

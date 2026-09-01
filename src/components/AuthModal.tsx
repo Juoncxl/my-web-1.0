@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { formatFriendlyErrorMessage } from '../lib/apiHelper';
@@ -25,6 +25,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const loginInFlight = useRef(false);
 
   // Sync mode with authDefaultTab when modal opens
   useEffect(() => {
@@ -44,10 +45,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   const handleLoginSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (loginInFlight.current) return;
     if (!email || !password) {
       setError('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน');
       return;
     }
+    loginInFlight.current = true;
     setIsLoading(true);
     setError('');
     try {
@@ -60,6 +63,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     } catch (error: unknown) {
       setError(formatFriendlyErrorMessage(error));
     } finally {
+      loginInFlight.current = false;
       setIsLoading(false);
     }
   };
