@@ -6,7 +6,7 @@ import {
   canCreateOwnedAsset
 } from './lib/accessPolicy';
 import { Header } from './components/Header';
-import { AssetViewModal } from './components/AssetViewModal';
+import { WorkDetailModal } from './components/WorkDetailModal';
 import { AIAssistantModal } from './components/AIAssistantModal';
 import { AuthModal } from './components/AuthModal';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -59,6 +59,23 @@ function MainApp() {
   const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'public' | 'private'>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<AssetStatus | 'all'>('all');
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all' | 'unassigned'>('all');
+  const [, setRouteVersion] = useState(0);
+
+  const navigate = useCallback((path: string) => {
+    const next = new URL(path, window.location.origin);
+    const nextPath = `${next.pathname}${next.search}${next.hash}`;
+    const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextPath === currentPath) return;
+    window.history.pushState({}, '', nextPath);
+    setRouteVersion(version => version + 1);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, []);
+
+  useEffect(() => {
+    const rerenderForRoute = () => setRouteVersion(version => version + 1);
+    window.addEventListener('popstate', rerenderForRoute);
+    return () => window.removeEventListener('popstate', rerenderForRoute);
+  }, []);
 
   const [operationError, setOperationError] = useState<string | null>(null);
   const reportOperationError = useCallback((message: string) => {
@@ -191,7 +208,7 @@ function MainApp() {
         tags: draft.tags
       });
       if (result.data) {
-        window.location.assign(getCanonicalProfilePath(currentUser, '?tab=works'));
+        navigate(getCanonicalProfilePath(currentUser, '?tab=works'));
         return { success: true };
       }
       return { success: false, error: result.error || 'แก้ไขผลงานไม่สำเร็จ' };
@@ -219,11 +236,11 @@ function MainApp() {
       versions: []
     });
     if (result.data) {
-      window.location.assign(getCanonicalProfilePath(currentUser, '?tab=works'));
+      navigate(getCanonicalProfilePath(currentUser, '?tab=works'));
       return { success: true };
     }
     return { success: false, error: result.error || 'สร้างผลงานไม่สำเร็จ' };
-  }, [createAsset, currentUser, editingAssetId, updateAsset]);
+  }, [createAsset, currentUser, editingAssetId, navigate, updateAsset]);
 
   const handleOpenAIModal = useCallback(() => {
     setAiContext(null);
@@ -240,8 +257,8 @@ function MainApp() {
 
   const handleOpenCreatorProfile = useCallback(() => {
     if (!currentUser) return;
-    window.location.assign(getCanonicalProfilePath(currentUser));
-  }, [currentUser]);
+    navigate(getCanonicalProfilePath(currentUser));
+  }, [currentUser, navigate]);
 
   // Work create, detail, and edit continue to share the existing canonical
   // workspace/modal implementations. Routes simply select the correct mode.
@@ -261,9 +278,9 @@ function MainApp() {
   }, [assets, authLoading, currentUser, handleOpenCreateModal, openAssetView, openAuthModal, openEditEditor, workRoute?.[1], workRoute?.[2]]);
 
   const handleForkSuccess = useCallback(() => {
-    if (currentUser) window.location.assign(getCanonicalProfilePath(currentUser, '?tab=works'));
+    if (currentUser) navigate(getCanonicalProfilePath(currentUser, '?tab=works'));
     confetti({ particleCount: 35, spread: 55, origin: { y: 0.6 } });
-  }, [currentUser]);
+  }, [currentUser, navigate]);
 
   const handleBookmarkSuccess = useCallback(() => {
     confetti({
@@ -409,6 +426,7 @@ function MainApp() {
     bookmarkedAssetIds,
     likedAssetIds,
     currentUserId: currentUser?.id,
+    currentUser,
     onSelectCategory: (category: AssetCategory) => setSelectedCategory(category),
     onClearTag: () => setSelectedTag(null),
     onVisibilityFilterChange: setVisibilityFilter,
@@ -490,7 +508,7 @@ function MainApp() {
       )}
 
       {/* Modals */}
-      <AssetViewModal
+      <WorkDetailModal
         asset={viewingAsset}
         isOpen={!!viewingAsset}
         onClose={closeAssetView}
@@ -507,6 +525,7 @@ function MainApp() {
         }}
         allAssets={assets}
         isOwner={viewingAsset?.userId === currentUser?.id}
+        creatorProfile={viewingAsset && viewingAsset.userId === currentUser?.id ? currentUser : null}
         isBookmarked={viewingAsset ? bookmarkedAssetIds.includes(viewingAsset.id) : false}
         isTrashMode={activeVaultTab === 'trash'}
       />
@@ -561,6 +580,7 @@ function MainApp() {
         isOpen={isEditorOpen}
         onClose={closeEditor}
         initialData={editingAsset}
+        creatorProfile={currentUser}
         onSave={handleSaveCreatorWork}
       />
     </div>

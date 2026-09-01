@@ -5,7 +5,7 @@ import type { Asset, AssetCategory, Folder, ProfileSocialLink } from '../types';
 import { CATEGORIES } from '../lib/constants';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
 import { AssetCard } from '../components/AssetCard';
-import { AssetViewModal } from '../components/AssetViewModal';
+import { WorkDetailModal } from '../components/WorkDetailModal';
 import { Header } from '../components/Header';
 import { ProfileEditModal } from '../components/ProfileEditModal';
 import { CreatorCustomizePanel, CreatorWidgetControls, type CreatorLayout, type CreatorWidgetType, type LockedPreset, CREATOR_WIDGET_ICONS, CREATOR_WIDGET_LABELS } from '../components/creator/CreatorCustomizePanel';
@@ -162,6 +162,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const resolvedView = resolveProfileView({ requestedTab, previewPublic: previewViewer === 'public' }, isOwner);
   const activeTab = resolvedView.activeTab;
   const isEditing = isOwner && !resolvedView.isPublicView;
+  const presentationProfile = isOwner && currentUser ? currentUser : profile;
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   useEffect(() => {
@@ -262,7 +263,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     {isCustomizeOpen && <div className="csp-portfolio-edit-bar"><span>▦ Portfolio · ส่วนหลัก</span><div>{layout === 'free' && <><select value={spans.portfolio} onChange={event => setSpans(previous => ({ ...previous, portfolio: Number(event.target.value) }))} aria-label="ความกว้าง Portfolio">{[3, 4, 6, 8, 9, 12].map(value => <option value={value} key={value}>{value} / 12 คอลัมน์</option>)}</select><button type="button" onClick={() => moveFreeBlock('portfolio', -1)} aria-label="เลื่อน Portfolio ขึ้น">↑</button><button type="button" onClick={() => moveFreeBlock('portfolio', 1)} aria-label="เลื่อน Portfolio ลง">↓</button></>}</div></div>}
     <div className="csp-section-heading"><div><p className="csp-eyebrow">PORTFOLIO</p><h2>ผลงานของ {displayName}</h2><p>ผลงานที่จัดแสดงจากคลังจริงของ Creator</p></div><span>{filteredAssets.length} รายการ</span></div>
     <div className="csp-creator-filters"><div className="csp-filter-row" aria-label="กรองตามหมวดหมู่">{CATEGORY_ORDER.map(category => <button key={category} type="button" onClick={() => setSelectedCategory(category)} className={selectedCategory === category ? 'is-active' : ''}>{category === 'all' ? 'ทั้งหมด' : CATEGORIES[category].name}</button>)}</div>{isEditing && <div className="csp-filter-row" aria-label="กรองตามการมองเห็น">{(['all', 'public', 'private'] as const).map(value => <button key={value} type="button" onClick={() => setVisibility(value)} className={visibility === value ? 'is-active' : ''}>{value === 'all' ? 'ทั้งหมด' : value === 'public' ? 'สาธารณะ' : 'ส่วนตัว'}</button>)}</div>}</div>
-    {isProfileAssetsLoading ? <div className="csp-empty" aria-busy="true"><h3>กำลังโหลดผลงาน...</h3></div> : filteredAssets.length > 0 ? <div className="csp-asset-grid">{filteredAssets.map(asset => <AssetCard key={asset.id} asset={asset} onClick={setSelectedAsset} onEdit={isEditing ? onEditAsset : undefined} isOwner={isEditing} />)}</div> : <div className="csp-empty"><div className="csp-empty-icon"><Edit3 className="h-5 w-5" /></div><h3>{searchQuery ? `ไม่พบผลงานที่ตรงกับ “${searchQuery}”` : isEditing ? 'ยังไม่มีผลงานในพื้นที่ของคุณ' : 'Creator คนนี้ยังไม่มีผลงานสาธารณะ'}</h3><p>{isEditing ? 'เริ่มจากผลงานที่มีอยู่ในคลัง หรือเปิด workspace เพื่อเตรียมผลงานใหม่' : 'ผลงานสาธารณะที่ Creator เลือกแสดงจะปรากฏที่นี่'}</p>{isEditing && !searchQuery && <button type="button" onClick={handleCreateAsset} className="csp-primary-button"><Plus className="h-4 w-4" />สร้างผลงาน</button>}</div>}
+    {isProfileAssetsLoading ? <div className="csp-empty" aria-busy="true"><h3>กำลังโหลดผลงาน...</h3></div> : filteredAssets.length > 0 ? <div className="csp-asset-grid">{filteredAssets.map(asset => <AssetCard key={asset.id} asset={asset} onClick={setSelectedAsset} onEdit={isEditing ? onEditAsset : undefined} isOwner={isEditing} creatorProfile={presentationProfile} />)}</div> : <div className="csp-empty"><div className="csp-empty-icon"><Edit3 className="h-5 w-5" /></div><h3>{searchQuery ? `ไม่พบผลงานที่ตรงกับ “${searchQuery}”` : isEditing ? 'ยังไม่มีผลงานในพื้นที่ของคุณ' : 'Creator คนนี้ยังไม่มีผลงานสาธารณะ'}</h3><p>{isEditing ? 'เริ่มจากผลงานที่มีอยู่ในคลัง หรือเปิด workspace เพื่อเตรียมผลงานใหม่' : 'ผลงานสาธารณะที่ Creator เลือกแสดงจะปรากฏที่นี่'}</p>{isEditing && !searchQuery && <button type="button" onClick={handleCreateAsset} className="csp-primary-button"><Plus className="h-4 w-4" />สร้างผลงาน</button>}</div>}
   </section>;
 
   const renderWidget = (type: CreatorWidgetType) => {
@@ -281,7 +282,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   };
 
   return <div className="csp-route min-h-screen">
-    <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} activeView="feed" onViewChange={() => window.location.assign('/')} onOpenCreateModal={handleCreateAsset} onOpenAuthModal={onOpenAuth} onOpenSignUpModal={() => openAuthModal('signup')} onOpenSettingsModal={onOpenSettingsModal} creatorMode />
+    <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} activeView="feed" onViewChange={() => { window.history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }} onOpenCreateModal={handleCreateAsset} onOpenAuthModal={onOpenAuth} onOpenSignUpModal={() => openAuthModal('signup')} onOpenSettingsModal={onOpenSettingsModal} creatorMode />
     <main className="csp-main mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
       <div className="csp-breadcrumb"><a href="/">CXL Studio</a><span aria-hidden="true">/</span><span>โปรไฟล์ครีเอเตอร์</span></div>
       {isProfileLoading && !profile && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
@@ -300,7 +301,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
        {(['works', 'drafts', 'saved', 'recent', 'trash'] as const).includes(activeTab as 'works' | 'drafts' | 'saved' | 'recent' | 'trash') && isEditing && <section className="csp-portfolio"><div className="csp-section-heading"><div><p className="csp-eyebrow">MANAGE</p><h2>{activeTab === 'works' ? 'ผลงาน' : activeTab === 'drafts' ? 'แบบร่าง' : activeTab === 'saved' ? 'บันทึกไว้' : activeTab === 'recent' ? 'ล่าสุด' : 'ถังขยะ'}</h2><p>{activeTab === 'saved' ? 'ผลงานสาธารณะจาก Creator คนอื่นที่คุณบันทึกไว้' : activeTab === 'recent' ? 'ผลงานที่คุณเปิดล่าสุด' : activeTab === 'trash' ? 'ผลงานที่ลบแล้วของคุณ' : 'จัดการผลงานของคุณ'}</p></div><span>{managementAssets.length} รายการ</span></div>{isProfileAssetsLoading ? <div className="csp-empty" aria-busy="true"><h3>กำลังโหลดผลงาน...</h3></div> : managementAssets.length ? <div className="csp-asset-grid">{managementAssets.map(asset => <AssetCard key={asset.id} asset={asset} onClick={setSelectedAsset} onEdit={activeTab === 'works' || activeTab === 'drafts' ? onEditAsset : undefined} isOwner={asset.userId === currentUser?.id} />)}</div> : <div className="csp-empty"><h3>ยังไม่มีรายการ</h3><p>{activeTab === 'saved' ? 'ผลงานที่บันทึกไว้จะแสดงที่นี่' : activeTab === 'recent' ? 'ผลงานที่เปิดล่าสุดจะแสดงที่นี่' : 'ไม่มีผลงานในส่วนนี้'}</p></div>}</section>}
       </>}
     </main>
-    <AssetViewModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} onEdit={isEditing ? onEditAsset : undefined} allAssets={visibleAssets} isOwner={isEditing} />
+    <WorkDetailModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} onEdit={isEditing ? onEditAsset : undefined} allAssets={visibleAssets} isOwner={isEditing} creatorProfile={presentationProfile} />
     <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = getCanonicalProfileSlug(savedUser); if (nextSlug === activeSlug) void refresh(); setActiveSlug(nextSlug); window.history.replaceState({}, '', getCanonicalProfilePath(savedUser)); }} />
   </div>;
 };

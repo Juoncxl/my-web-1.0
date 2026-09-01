@@ -1,5 +1,6 @@
 import React from 'react';
-import { Asset } from '../../types';
+import { Asset, User } from '../../types';
+import { resolveWorkCreator } from '../../lib/workPresentation';
 import { Clock, History, ShieldCheck } from 'lucide-react';
 import { formatShortDate, formatThaiDate } from '../../lib/dateUtils';
 
@@ -7,28 +8,31 @@ interface AssetViewAttributionProps {
   asset: Asset;
   showVersionHistory: boolean;
   onToggleVersionHistory: () => void;
+  creatorProfile?: User | null;
 }
 
 export const AssetViewAttribution: React.FC<AssetViewAttributionProps> = ({
   asset,
   showVersionHistory,
-  onToggleVersionHistory
+  onToggleVersionHistory,
+  creatorProfile = null
 }) => (
   <>
     <div className="p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div className="flex items-center gap-3">
         <img
-          src={asset.authorAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-          alt={asset.authorName}
+          src={resolveWorkCreator(asset, creatorProfile).avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
+          alt={resolveWorkCreator(asset, creatorProfile).displayName}
           className="w-10 h-10 rounded-full object-cover ring-2 ring-purple-300 dark:ring-purple-700"
         />
         <div>
           <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-            {asset.authorName}
+            {resolveWorkCreator(asset, creatorProfile).displayName}
+            {resolveWorkCreator(asset, creatorProfile).username && <span className="ml-1 font-normal text-slate-500">@{resolveWorkCreator(asset, creatorProfile).username}</span>}
           </p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <Clock className="w-3 h-3 text-purple-500" />
-            <span>สร้างเมื่อ: {formatThaiDate(asset.createdAt)}</span>
+            <span>สร้างเมื่อ: {formatThaiDate(asset.createdAt)}{asset.updatedAt && asset.updatedAt !== asset.createdAt ? ` · แก้ไขล่าสุด: ${formatThaiDate(asset.updatedAt)}` : ''}</span>
           </p>
         </div>
       </div>

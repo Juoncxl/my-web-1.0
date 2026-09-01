@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, Clock3, Folder as FolderIcon, LockKeyhole, MoreHorizontal, Plus, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
+import type { Asset, AssetCategory, AssetStatus, Folder, User } from '../types';
 import { CATEGORIES, FOLDER_COLOR_PRESETS, STATUS_PRESETS } from '../lib/constants';
 import { CategoryNav } from './CategoryNav';
 import { AssetCard } from './AssetCard';
@@ -23,6 +23,7 @@ interface AssetCollectionViewProps {
   bookmarkedAssetIds: string[];
   likedAssetIds: string[];
   currentUserId: string | undefined;
+  currentUser?: User | null;
   onSelectCategory: (category: AssetCategory | 'all') => void;
   onClearTag: () => void;
   onVisibilityFilterChange: (filter: 'all' | 'public' | 'private') => void;
@@ -70,6 +71,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
   bookmarkedAssetIds,
   likedAssetIds,
   currentUserId,
+  currentUser = null,
   onSelectCategory,
   onClearTag,
   onVisibilityFilterChange,
@@ -344,6 +346,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                     isBookmarked={bookmarkedAssetIds.includes(asset.id)}
                     isLiked={likedAssetIds.includes(asset.id)}
                     isTrashMode={activeVaultTab === 'trash'}
+                    creatorProfile={currentUser && currentUser.id === asset.userId ? currentUser : null}
                   />
                 );
               })}

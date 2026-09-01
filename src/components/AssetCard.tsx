@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import type { Asset, AssetCategory } from '../types';
+import type { Asset, AssetCategory, User } from '../types';
+import { resolveWorkCreator } from '../lib/workPresentation';
+import { useAuth } from '../context/AuthContext';
 import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
 import { formatShortDate } from '../lib/dateUtils';
 import {
@@ -40,6 +42,7 @@ interface AssetCardProps {
   isBookmarked?: boolean;
   isLiked?: boolean;
   isTrashMode?: boolean;
+  creatorProfile?: User | null;
 }
 
 function getTitleMark(title: string) {
@@ -66,8 +69,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   isOwner = false,
   isBookmarked = false,
   isLiked = false,
-  isTrashMode = false
+  isTrashMode = false,
+  creatorProfile = null
 }) => {
+  const { currentUser } = useAuth();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -76,6 +81,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const galleryCount = asset.previewImages?.length || (asset.previewImage ? 1 : 0);
   const mainImage = asset.previewImages?.[0] || asset.previewImage;
   const snippet = asset.content.replace(/[#*`_]/g, '').trim();
+  const creator = resolveWorkCreator(asset, creatorProfile || (currentUser?.id === asset.userId ? currentUser : null));
 
   const handleQuickCopy = (event: React.MouseEvent) => {
     event.stopPropagation();
@@ -191,9 +197,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({
 
         <footer className="cv-card-footer">
           <div className="cv-card-author">
-            <img src={asset.authorAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'} alt="" referrerPolicy="no-referrer" />
+            <img src={creator.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'} alt="" referrerPolicy="no-referrer" />
             <div className="min-w-0">
-              <p>{asset.authorName}</p>
+              <p>{creator.displayName}</p>
               <small>{formatShortDate(asset.createdAt)}</small>
             </div>
           </div>
