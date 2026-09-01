@@ -29,7 +29,7 @@ import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { CreatorSpacePage } from './pages/CreatorSpacePage';
-import { getCreatorSlug } from './hooks/useCreatorSpaceData';
+import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
 import { CreatorWorkWorkspace, type CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 
 function MainApp() {
@@ -44,10 +44,9 @@ function MainApp() {
     setIsSettingsOpen,
     isLoading: authLoading
   } = useAuth();
-  const creatorSlug = getCreatorSlug(window.location.pathname);
-  const legacyCreatorSlug = window.location.pathname.match(/^\/creator\/([^/]+)\/?$/i)?.[1] || null;
-  const isLegacyVaultRoute = /^\/vault\/?$/i.test(window.location.pathname);
-  const isLegacyCreatorSpaceRoute = /^\/creator-space\/?$/i.test(window.location.pathname);
+  const profileRoute = parseCanonicalProfileLocation(window.location.pathname, window.location.search);
+  const creatorSlug = profileRoute?.slug || null;
+  const legacyProfileRedirect = getLegacyProfileRedirect(window.location.pathname, window.location.search, currentUser);
   const workRoute = window.location.pathname.match(/^\/work\/([^/]+)(?:\/(edit))?\/?$/i);
 
   // Navigation State
@@ -136,16 +135,8 @@ function MainApp() {
   // Compatibility routes retain useful old bookmarks without leaving Vault or
   // Creator Space as user-facing destinations.
   useEffect(() => {
-    if (legacyCreatorSlug) {
-      window.location.replace(`/@${encodeURIComponent(legacyCreatorSlug)}${window.location.search}`);
-      return;
-    }
-    if ((isLegacyVaultRoute || isLegacyCreatorSpaceRoute) && currentUser) {
-      const username = currentUser.username || currentUser.id;
-      const suffix = isLegacyVaultRoute ? '?tab=works' : '';
-      window.location.replace(`/@${encodeURIComponent(username)}${suffix}`);
-    }
-  }, [currentUser, isLegacyCreatorSpaceRoute, isLegacyVaultRoute, legacyCreatorSlug]);
+    if (legacyProfileRedirect) window.location.replace(legacyProfileRedirect);
+  }, [legacyProfileRedirect]);
 
   // Track recently viewed items while keeping the selected asset canonical.
   const handleOpenAssetView = useCallback((asset: Asset) => {

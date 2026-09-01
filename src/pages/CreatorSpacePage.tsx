@@ -13,6 +13,7 @@ import { CreatorWidgetEditor, type CreatorWidgetConfig } from '../components/cre
 import { getCreatorVisibleAssets, useCreatorSpaceData } from '../hooks/useCreatorSpaceData';
 import { isMockPersistence } from '../lib/persistenceMode';
 import { readCreatorSpaceSettings, writeCreatorSpaceSettings } from '../lib/creatorPersistence';
+import { parseCanonicalProfileLocation, resolveProfileView, type ProfileTab } from '../lib/profileRouting';
 
 interface CreatorSpacePageProps {
   // The canonical profile is the home for profile identity editing.
@@ -122,10 +123,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
   const [visibility, setVisibility] = useState<'all' | 'public' | 'private'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'profile' | 'works' | 'folders' | 'drafts' | 'saved' | 'recent' | 'trash'>(() => {
-    const requested = new URLSearchParams(window.location.search).get('tab');
-    return requested === 'works' || requested === 'folders' || requested === 'drafts' || requested === 'saved' || requested === 'recent' || requested === 'trash' ? requested : 'profile';
-  });
+  const [requestedTab, setRequestedTab] = useState<ProfileTab>(() => parseCanonicalProfileLocation(window.location.pathname, window.location.search)?.requestedTab || 'profile');
   const [layout, setLayout] = useState<CreatorLayout>('locked');
   const [lockedPreset, setLockedPreset] = useState<LockedPreset>('left');
   const [widgets, setWidgets] = useState<CreatorWidgetType[]>(DEFAULT_WIDGETS);
@@ -135,25 +133,39 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [widgetTitles, setWidgetTitles] = useState<Partial<Record<CreatorWidgetType, string>>>({});
   const [editingWidget, setEditingWidget] = useState<CreatorWidgetType | null>(null);
   const [widgetConfigs, setWidgetConfigs] = useState<Partial<Record<CreatorWidgetType, CreatorWidgetConfig>>>({ todo: { items: [{ label: 'เตรียมโครงสร้างผลงาน', done: false }, { label: 'ตรวจ reference', done: true }], showCompleted: true }, goal: { goal: 35 }, gallery: { goal: 3 } });
-  const [previewViewer, setPreviewViewer] = useState<'owner' | 'public'>(() => new URLSearchParams(window.location.search).get('preview') === 'public' ? 'public' : 'owner');
+  const [previewViewer, setPreviewViewer] = useState<'owner' | 'public'>(() => parseCanonicalProfileLocation(window.location.pathname, window.location.search)?.previewPublic ? 'public' : 'owner');
   const [folderView, setFolderView] = useState<'grid' | 'compact' | 'list'>('grid');
   const [folderSort, setFolderSort] = useState<'recent' | 'name' | 'count'>('recent');
 
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const route = parseCanonicalProfileLocation(window.location.pathname, window.location.search);
+      if (!route) return;
+      setActiveSlug(route.slug);
+      setRequestedTab(route.requestedTab);
+      setPreviewViewer(route.previewPublic ? 'public' : 'owner');
+    };
+    window.addEventListener('popstate', syncFromLocation);
+    return () => window.removeEventListener('popstate', syncFromLocation);
+  }, []);
+
   const isOwner = Boolean(profile && currentUser?.id === profile.id);
-  const isEditing = isOwner && previewViewer === 'owner';
+  const resolvedView = resolveProfileView({ requestedTab, previewPublic: previewViewer === 'public' }, isOwner);
+  const activeTab = resolvedView.activeTab;
+  const isEditing = isOwner && !resolvedView.isPublicView;
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   useEffect(() => {
     // Query parameters are not authority. A visitor who manually supplies an
     // owner tab must receive the public presentation, without a blank state or
     // any owner-only metadata.
-    if (profile && !isOwner && activeTab !== 'profile') {
+    if (profile && resolvedView.isPublicView && requestedTab !== 'profile') {
       const url = new URL(window.location.href);
       url.searchParams.delete('tab');
       window.history.replaceState({}, '', `${url.pathname}${url.search}`);
-      setActiveTab('profile');
+      setRequestedTab('profile');
     }
-  }, [activeTab, isOwner, profile]);
+  }, [profile, requestedTab, resolvedView.isPublicView]);
 
   useEffect(() => {
     if (!isMockPersistence || !profile || !isOwner) return;
@@ -196,12 +208,12 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     if (!isEditing) { openAuthModal('signup'); return; }
     onCreateAsset();
   };
-  const selectTab = (tab: typeof activeTab) => {
+  const selectTab = (tab: ProfileTab) => {
     const url = new URL(window.location.href);
     if (tab === 'profile') url.searchParams.delete('tab'); else url.searchParams.set('tab', tab);
     if (previewViewer === 'public') url.searchParams.set('preview', 'public');
     window.history.pushState({}, '', `${url.pathname}${url.search}`);
-    setActiveTab(tab);
+    setRequestedTab(tab);
   };
   const setPublicPreview = (enabled: boolean) => {
     const url = new URL(window.location.href);
@@ -209,7 +221,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     if (enabled) url.searchParams.delete('tab');
     window.history.pushState({}, '', `${url.pathname}${url.search}`);
     setPreviewViewer(enabled ? 'public' : 'owner');
-    if (enabled) { setActiveTab('profile'); setIsCustomizeOpen(false); setEditingWidget(null); }
+    if (enabled) { setRequestedTab('profile'); setIsCustomizeOpen(false); setEditingWidget(null); }
   };
 
   const moveWidget = (type: CreatorWidgetType, direction: -1 | 1) => {
@@ -254,9 +266,9 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} activeView="feed" onViewChange={() => window.location.assign('/')} onOpenCreateModal={handleCreateAsset} onOpenAuthModal={onOpenAuth} onOpenSignUpModal={() => openAuthModal('signup')} onOpenSettingsModal={onOpenSettingsModal} creatorMode />
     <main className="csp-main mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
       <div className="csp-breadcrumb"><a href="/">CXL Studio</a><span aria-hidden="true">/</span><span>โปรไฟล์ครีเอเตอร์</span></div>
-      {isLoading && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
+      {isLoading && !profile && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
       {!isLoading && !profile && <section className="csp-empty csp-route-state" role="alert"><div className="csp-empty-icon"><UserRound className="h-6 w-6" /></div><h1>ไม่พบโปรไฟล์ครีเอเตอร์</h1><p>{error || 'โปรไฟล์นี้อาจยังไม่มีอยู่ หรือ URL ไม่ถูกต้อง'}</p><div className="csp-state-actions"><button type="button" onClick={() => void refresh()} className="csp-secondary-button"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</button><a href="/" className="csp-primary-button">กลับหน้าแรก</a></div></section>}
-      {!isLoading && profile && <>
+      {profile && <>
        {isCustomizeOpen && isEditing && activeTab === 'profile' && <CreatorCustomizePanel layout={layout} lockedPreset={lockedPreset} widgets={widgets} widgetRail={widgetRail} spans={spans} onLayoutChange={setLayout} onLockedPresetChange={setLockedPreset} onAddWidget={(type, rail) => { if (!widgets.includes(type)) { setWidgets(previous => [...previous, type]); setFreeOrder(previous => previous.includes(type) ? previous : [...previous, type]); if (rail) setWidgetRail(previous => ({ ...previous, [type]: rail })); } }} onRemoveWidget={type => { setWidgets(previous => previous.filter(item => item !== type)); setFreeOrder(previous => previous.filter(item => item !== type)); }} onMoveWidget={moveWidget} onMoveRail={(type, rail) => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpanChange={(type, span) => setSpans(previous => ({ ...previous, [type]: span }))} onClose={() => setIsCustomizeOpen(false)} />}
         {isCustomizeOpen && isEditing && editingWidget && <CreatorWidgetEditor type={editingWidget} config={widgetConfigs[editingWidget] || {}} onChange={config => setWidgetConfigs(previous => ({ ...previous, [editingWidget]: config }))} onClose={() => setEditingWidget(null)} />}
         <section className="csp-profile-header" aria-labelledby="csp-profile-title">
@@ -271,6 +283,6 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       </>}
     </main>
     <AssetViewModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} onEdit={isEditing ? onEditAsset : undefined} allAssets={visibleAssets} isOwner={isEditing} />
-    <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = savedUser.username || savedUser.id; setActiveSlug(nextSlug); window.history.replaceState({}, '', `/@${encodeURIComponent(nextSlug)}`); void refresh(); }} />
+    <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = savedUser.username || savedUser.id; setActiveSlug(nextSlug); window.history.replaceState({}, '', `/@${encodeURIComponent(nextSlug)}`); }} />
   </div>;
 };

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Asset, Folder, User } from '../types';
 import { supabaseService } from '../lib/supabaseService';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
+import { isMockPersistence } from '../lib/persistenceMode';
 
 const CREATOR_PROFILE_LOAD_TIMEOUT_MS = 10000;
 
@@ -21,7 +22,7 @@ export interface CreatorSpaceData {
   folders: Folder[];
   isLoading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (options?: { background?: boolean }) => Promise<void>;
 }
 
 export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerFallback?: User | null): CreatorSpaceData {
@@ -31,6 +32,8 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const initializedSlug = useRef<string | null>(null);
+  const blockingLoadActive = useRef(false);
 
   const decodedSlug = (() => {
     try {
@@ -47,10 +50,18 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
   );
   const ownerProfileFallback = isOwnerSlug && ownerFallback?.id === currentUserId ? ownerFallback : null;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
+    const background = options.background === true;
+    if (background && blockingLoadActive.current) return;
     const requestId = ++requestSequence.current;
-    setIsLoading(true);
-    setError(null);
+    if (!background) {
+      blockingLoadActive.current = true;
+      setIsLoading(true);
+      setError(null);
+    }
+    if (ownerProfileFallback) {
+      setProfile(current => current || ownerProfileFallback);
+    }
 
     try {
       const profileResult = await withTimeout(
@@ -63,9 +74,11 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
       // is being provisioned or temporarily unavailable.
       const resolvedProfile = profileResult.data || ownerProfileFallback;
       if (!resolvedProfile) {
-        setProfile(null);
-        setAssets([]);
-        setFolders([]);
+        if (!background) {
+          setProfile(null);
+          setAssets([]);
+          setFolders([]);
+        }
         setError(isOwnerSlug
           ? 'บัญชีของคุณยังไม่มี Creator Profile กรุณาลองใหม่หลังการ provision โปรไฟล์'
           : profileResult.error || 'ไม่พบ Creator ที่ต้องการ');
@@ -88,8 +101,10 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
       if (requestId !== requestSequence.current) return;
 
       if (assetResult.error) {
-        setAssets([]);
-        setFolders([]);
+        if (!background) {
+          setAssets([]);
+          setFolders([]);
+        }
         setError(assetResult.error);
         return;
       }
@@ -101,40 +116,49 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
       console.error('Creator profile load error:', caughtError);
       if (ownerProfileFallback) {
         setProfile(ownerProfileFallback);
-        setAssets([]);
-        setFolders([]);
+        if (!background) {
+          setAssets([]);
+          setFolders([]);
+        }
         setError('โหลดผลงานของคุณไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-      } else {
+      } else if (!background) {
         setProfile(null);
         setAssets([]);
         setFolders([]);
         setError('โหลดโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      } else {
+        setError('อัปเดตข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
       }
     } finally {
-      if (requestId === requestSequence.current) setIsLoading(false);
+      if (requestId === requestSequence.current && !background) {
+        blockingLoadActive.current = false;
+        setIsLoading(false);
+      }
     }
   }, [currentUserId, isOwnerSlug, ownerProfileFallback, slug]);
 
   useEffect(() => {
+    if (initializedSlug.current === slug) return;
+    const identityChanged = initializedSlug.current !== null;
+    initializedSlug.current = slug;
+    if (identityChanged) {
+      setProfile(null);
+      setAssets([]);
+      setFolders([]);
+    }
     void refresh();
-  }, [refresh]);
+  }, [refresh, slug]);
 
   useEffect(() => {
-    const handleDataChanged = () => { void refresh(); };
-    window.addEventListener('creator-vault-qa-data-changed', handleDataChanged);
-    window.addEventListener('creator-vault-cloud-data-changed', handleDataChanged);
+    const handleDataChanged = () => { void refresh({ background: true }); };
+    const eventName = isMockPersistence ? 'creator-vault-qa-data-changed' : 'creator-vault-cloud-data-changed';
+    window.addEventListener(eventName, handleDataChanged);
     return () => {
-      window.removeEventListener('creator-vault-qa-data-changed', handleDataChanged);
-      window.removeEventListener('creator-vault-cloud-data-changed', handleDataChanged);
+      window.removeEventListener(eventName, handleDataChanged);
     };
   }, [refresh]);
 
   return { profile, assets, folders, isLoading, error, refresh };
-}
-
-export function getCreatorSlug(pathname: string): string | null {
-  const match = pathname.match(/^\/@([^/]+)\/?$/i);
-  return match ? match[1] : null;
 }
 
 export function getCreatorVisibleAssets(assets: Asset[], isOwner: boolean): Asset[] {
