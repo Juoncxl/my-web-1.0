@@ -33,6 +33,7 @@ import { DiscoverPage } from './pages/DiscoverPage';
 import { VaultPage } from './pages/VaultPage';
 import { CreatorSpacePage } from './pages/CreatorSpacePage';
 import { getCreatorSlug } from './hooks/useCreatorSpaceData';
+import { CreatorWorkWorkspace, type CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 
 function MainApp() {
   const { 
@@ -101,7 +102,6 @@ function MainApp() {
     movingAsset,
     openAssetView,
     closeAssetView,
-    openCreateEditor,
     openEditEditor,
     closeEditor,
     openReport,
@@ -115,6 +115,7 @@ function MainApp() {
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
+  const [isCreatorWorkOpen, setIsCreatorWorkOpen] = useState(false);
   const [aiContext, setAiContext] = useState<{ type: string; context: string } | null>(null);
 
   useEffect(() => {
@@ -153,15 +154,47 @@ function MainApp() {
     if (tab === 'folders') setSelectedFolderId('all');
   }, []);
 
-  // Persisted actions require a real Supabase account session.
+  // All new Create Work entry points open the one canonical workspace. The
+  // repository decides whether the resulting mutation is local QA or cloud.
   const handleOpenCreateModal = useCallback(() => {
     if (authLoading) return;
     if (!canCreateOwnedAsset(currentUser)) {
       openAuthModal('signup');
       return;
     }
-    openCreateEditor();
-  }, [authLoading, currentUser, openAuthModal, openCreateEditor]);
+    setIsCreatorWorkOpen(true);
+  }, [authLoading, currentUser, openAuthModal]);
+
+  const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft) => {
+    if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนสร้างผลงาน' };
+    const result = await createAsset({
+      title: draft.title,
+      icon: draft.icon,
+      category: draft.category,
+      content: draft.content,
+      uiCodeSnippet: draft.uiCodeSnippet,
+      previewImage: draft.previewImages[0],
+      previewImages: draft.previewImages,
+      folderId: null,
+      isPublic: draft.visibility === 'public',
+      visibility: draft.visibility,
+      status: draft.status,
+      tags: draft.tags,
+      deletedAt: null,
+      likesCount: 0,
+      forkCount: 0,
+      forkedFromId: null,
+      forkedFromAuthor: null,
+      linkedAssetIds: [],
+      versions: []
+    });
+    if (result.data) {
+      setActiveView('vault');
+      setActiveVaultTab('my_assets');
+      return { success: true };
+    }
+    return { success: false, error: result.error || 'สร้างผลงานไม่สำเร็จ' };
+  }, [createAsset, currentUser]);
 
   const handleOpenAIModal = useCallback(() => {
     setAiContext(null);
@@ -508,6 +541,12 @@ function MainApp() {
       <ProfileEditModal
         isOpen={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
+      />
+
+      <CreatorWorkWorkspace
+        isOpen={isCreatorWorkOpen}
+        onClose={() => setIsCreatorWorkOpen(false)}
+        onSave={handleSaveCreatorWork}
       />
     </div>
   );

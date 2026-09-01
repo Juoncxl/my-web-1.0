@@ -3,6 +3,24 @@ import { getSupabaseClient } from './supabaseClient';
 import { formatFriendlyErrorMessage } from './apiHelper';
 import { isLegacyGuestUserId } from './accessPolicy';
 import { normalizeAssetVisibility } from './assetVisibility';
+import { isMockPersistence } from './persistenceMode';
+import {
+  readMockAssets,
+  readMockBookmarks,
+  readMockFolders,
+  readMockLikes,
+  readMockProfiles,
+  isMockAssetRemoved,
+  isMockFolderRemoved,
+  removeMockAsset,
+  removeMockFolder,
+  writeMockAsset,
+  writeMockBookmarks,
+  writeMockFolder,
+  writeMockLikes,
+  readMockProfile,
+  writeMockProfile
+} from './creatorPersistence';
 
 // Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
@@ -223,6 +241,97 @@ function createClientId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function buildMockAsset(assetData: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>): Asset {
+  const now = new Date().toISOString();
+  const visibility = assetData.visibility || (assetData.isPublic === false ? 'private' : 'public');
+  return {
+    ...assetData,
+    id: createClientId('qa_asset'),
+    visibility,
+    isPublic: visibility === 'public',
+    status: assetData.status || 'finished',
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+    likesCount: 0,
+    forkCount: 0,
+    forkedFromId: assetData.forkedFromId || null,
+    forkedFromAuthor: assetData.forkedFromAuthor || null,
+    linkedAssetIds: assetData.linkedAssetIds || [],
+    versions: [{ version: 1, updatedAt: now, title: assetData.title || 'Untitled Asset', summary: 'สร้างผลงานใน QA Sandbox' }],
+    previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : [])
+  };
+}
+
+async function getSessionUserId(): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.user.id || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAssetsFromMock(options?: {
+  userId?: string;
+  currentUserId?: string;
+  category?: string;
+  folderId?: string | null;
+  search?: string;
+  includeDeleted?: boolean;
+  onlyDeleted?: boolean;
+}): Promise<{ data: Asset[]; error: string | null }> {
+  let cloudAssets: Asset[] = [];
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase.from('assets').select('*').order('created_at', { ascending: false });
+      cloudAssets = (data || []).map(mapDbToAsset);
+    } catch (error) {
+      logServiceError('mock read assets', error);
+    }
+  }
+
+  const merged = new Map<string, Asset>();
+  cloudAssets.filter(asset => !isMockAssetRemoved(asset.id)).forEach(asset => merged.set(asset.id, asset));
+  readMockAssets().filter(asset => !isMockAssetRemoved(asset.id)).forEach(asset => merged.set(asset.id, asset));
+  let list = [...merged.values()];
+
+  if (options?.userId) list = list.filter(asset => asset.userId === options.userId);
+  else if (options?.currentUserId) list = list.filter(asset => asset.userId === options.currentUserId || (asset.visibility === 'public' && asset.isPublic));
+  else list = list.filter(asset => asset.visibility === 'public' && asset.isPublic);
+
+  if (options?.userId && options.currentUserId !== options.userId) list = list.filter(asset => asset.visibility === 'public' && asset.isPublic);
+  if (options?.onlyDeleted) list = list.filter(asset => Boolean(asset.deletedAt));
+  else if (!options?.includeDeleted) list = list.filter(asset => !asset.deletedAt);
+  if (options?.category && options.category !== 'all') list = list.filter(asset => asset.category === options.category);
+  if (options?.userId && options.folderId !== undefined) list = list.filter(asset => options.folderId === null ? !asset.folderId : asset.folderId === options.folderId);
+  if (options?.search?.trim()) {
+    const search = options.search.toLowerCase().trim();
+    list = list.filter(asset => asset.title.toLowerCase().includes(search) || asset.content.toLowerCase().includes(search) || asset.tags?.some(tag => tag.toLowerCase().includes(search)));
+  }
+  return { data: list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), error: null };
+}
+
+async function fetchFoldersFromMock(userId: string): Promise<{ data: Folder[]; error: string | null }> {
+  let cloudFolders: Folder[] = [];
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase.from('folders').select('*').eq('user_id', userId).order('created_at', { ascending: true });
+      cloudFolders = (data || []).map(mapDbToFolder);
+    } catch (error) {
+      logServiceError('mock read folders', error);
+    }
+  }
+  const merged = new Map<string, Folder>();
+  cloudFolders.filter(folder => !isMockFolderRemoved(folder.id)).forEach(folder => merged.set(folder.id, folder));
+  readMockFolders(userId).filter(folder => !isMockFolderRemoved(folder.id)).forEach(folder => merged.set(folder.id, folder));
+  return { data: [...merged.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()), error: null };
+}
+
 function isSafeProfileLink(value: string): boolean {
   try {
     const url = new URL(value);
@@ -262,6 +371,7 @@ export const supabaseService = {
     includeDeleted?: boolean;
     onlyDeleted?: boolean;
   }): Promise<{ data: Asset[]; error: string | null }> {
+    if (isMockPersistence) return fetchAssetsFromMock(options);
     const supabase = getSupabaseClient();
     if (!supabase) {
       return { data: [], error: 'ยังโหลดผลงานไม่ได้ กรุณาลองใหม่อีกครั้ง' };
@@ -335,6 +445,11 @@ export const supabaseService = {
   async createAsset(
     assetData: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<{ data: Asset | null; error: string | null }> {
+    if (isMockPersistence) {
+      const asset = buildMockAsset(assetData);
+      writeMockAsset(asset);
+      return { data: asset, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(assetData.userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -412,6 +527,28 @@ export const supabaseService = {
     id: string,
     updates: Partial<Asset>
   ): Promise<{ data: Asset | null; error: string | null }> {
+    if (isMockPersistence) {
+      const userId = await getSessionUserId();
+      if (!userId) return { data: null, error: 'กรุณาเข้าสู่ระบบอีกครั้งก่อนบันทึกข้อมูล' };
+      const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true });
+      const existing = result.data.find(asset => asset.id === id);
+      if (!existing) return { data: null, error: 'ไม่พบผลงานของคุณที่ต้องการแก้ไข' };
+      const now = new Date().toISOString();
+      const next: Asset = {
+        ...existing,
+        ...updates,
+        id: existing.id,
+        userId: existing.userId,
+        updatedAt: now,
+        isPublic: updates.visibility ? updates.visibility === 'public' : updates.isPublic ?? existing.isPublic,
+        visibility: updates.visibility || (updates.isPublic !== undefined ? (updates.isPublic ? 'public' : 'private') : existing.visibility),
+        versions: updates.title !== undefined || updates.content !== undefined || updates.uiCodeSnippet !== undefined
+          ? [...(existing.versions || []), { version: (existing.versions?.at(-1)?.version || 0) + 1, updatedAt: now, title: updates.title || existing.title, summary: 'บันทึกการแก้ไขใน QA Sandbox' }]
+          : existing.versions
+      };
+      writeMockAsset(next);
+      return { data: next, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
@@ -499,6 +636,15 @@ export const supabaseService = {
 
   // 4. Soft Delete Asset (Moves to Trash)
   async softDeleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      const userId = await getSessionUserId();
+      if (!userId) return { success: false, error: 'กรุณาเข้าสู่ระบบอีกครั้งก่อนดำเนินการ' };
+      const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true });
+      const existing = result.data.find(asset => asset.id === id && !asset.deletedAt);
+      if (!existing) return { success: false, error: 'ไม่พบผลงานของคุณ หรือผลงานอยู่ในถังขยะแล้ว' };
+      writeMockAsset({ ...existing, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      return { success: true, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
@@ -525,6 +671,15 @@ export const supabaseService = {
 
   // 5. Restore Asset (From Trash)
   async restoreAsset(id: string): Promise<{ success: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      const userId = await getSessionUserId();
+      if (!userId) return { success: false, error: 'กรุณาเข้าสู่ระบบอีกครั้งก่อนดำเนินการ' };
+      const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true });
+      const existing = result.data.find(asset => asset.id === id && asset.deletedAt);
+      if (!existing) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
+      writeMockAsset({ ...existing, deletedAt: null, updatedAt: new Date().toISOString() });
+      return { success: true, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
@@ -550,6 +705,15 @@ export const supabaseService = {
 
   // 6. Hard Delete Asset (Permanent Deletion)
   async permanentDeleteAsset(id: string): Promise<{ success: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      const userId = await getSessionUserId();
+      if (!userId) return { success: false, error: 'กรุณาเข้าสู่ระบบอีกครั้งก่อนดำเนินการ' };
+      const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true });
+      const existing = result.data.find(asset => asset.id === id && asset.deletedAt);
+      if (!existing) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
+      if (!removeMockAsset(id, userId)) return { success: false, error: 'ลบผลงานใน QA Sandbox ไม่สำเร็จ' };
+      return { success: true, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
     if (!supabase || auth.error || !auth.userId) {
@@ -575,6 +739,11 @@ export const supabaseService = {
 
   // 7. Empty Trash
   async emptyTrash(userId: string): Promise<{ success: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true, onlyDeleted: true });
+      result.data.forEach(asset => removeMockAsset(asset.id, userId));
+      return { success: true, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -601,6 +770,24 @@ export const supabaseService = {
     newAuthorName: string,
     newAuthorAvatar?: string
   ): Promise<{ data: Asset | null; sourceForkCount: number | null; error: string | null }> {
+    if (isMockPersistence) {
+      const copy: Asset = buildMockAsset({
+        ...originalAsset,
+        userId: newUserId,
+        authorName: newAuthorName,
+        authorAvatar: newAuthorAvatar,
+        title: `${originalAsset.title} (สำเนา)`,
+        visibility: 'private',
+        isPublic: false,
+        deletedAt: null,
+        forkedFromId: originalAsset.id,
+        forkedFromAuthor: originalAsset.authorName,
+        forkCount: 0,
+        likesCount: 0
+      });
+      writeMockAsset(copy);
+      return { data: copy, sourceForkCount: (originalAsset.forkCount || 0) + 1, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(newUserId);
     if (!supabase || auth.error || !auth.userId) {
@@ -652,6 +839,7 @@ export const supabaseService = {
 
   // 9. Like Asset
   async fetchLikedAssetIds(userId: string): Promise<{ data: string[]; error: string | null }> {
+    if (isMockPersistence) return { data: readMockLikes(userId), error: null };
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -675,6 +863,14 @@ export const supabaseService = {
     assetId: string,
     shouldLike: boolean
   ): Promise<{ success: boolean; isLiked: boolean; likesCount: number | null; error: string | null }> {
+    if (isMockPersistence) {
+      const ids = readMockLikes(userId);
+      const nextIds = shouldLike ? [...ids, assetId] : ids.filter(id => id !== assetId);
+      writeMockLikes(userId, nextIds);
+      const related = (await fetchAssetsFromMock({ currentUserId: userId, includeDeleted: true })).data.find(asset => asset.id === assetId);
+      const likesCount = related?.likesCount ?? (shouldLike ? 1 : 0);
+      return { success: true, isLiked: shouldLike, likesCount, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -733,6 +929,7 @@ export const supabaseService = {
 
   // 10. Bookmarks / Saved Resources System
   async fetchBookmarks(userId: string): Promise<{ data: string[]; error: string | null }> {
+    if (isMockPersistence) return { data: readMockBookmarks(userId), error: null };
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -756,6 +953,11 @@ export const supabaseService = {
     assetId: string,
     shouldBookmark: boolean
   ): Promise<{ success: boolean; isBookmarked: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      const ids = readMockBookmarks(userId);
+      writeMockBookmarks(userId, shouldBookmark ? [...ids, assetId] : ids.filter(id => id !== assetId));
+      return { success: true, isBookmarked: shouldBookmark, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -837,6 +1039,7 @@ export const supabaseService = {
 
   // 12. Folders CRUD
   async fetchFolders(userId: string): Promise<{ data: Folder[]; error: string | null }> {
+    if (isMockPersistence) return fetchFoldersFromMock(userId);
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -859,6 +1062,13 @@ export const supabaseService = {
   async createFolder(
     folder: { name: string; icon?: string; color?: string; userId: string }
   ): Promise<{ data: Folder | null; error: string | null }> {
+    if (isMockPersistence) {
+      if (!folder.name.trim()) return { data: null, error: 'กรุณาตั้งชื่อโฟลเดอร์' };
+      const now = new Date().toISOString();
+      const next: Folder = { id: createClientId('qa_folder'), userId: folder.userId, name: folder.name.trim(), icon: folder.icon || '📁', color: folder.color || 'purple', createdAt: now, updatedAt: now };
+      writeMockFolder(next);
+      return { data: next, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(folder.userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -896,6 +1106,15 @@ export const supabaseService = {
     userId: string,
     updates: { name?: string; icon?: string; color?: string }
   ): Promise<{ data: Folder | null; error: string | null }> {
+    if (isMockPersistence) {
+      if (updates.name !== undefined && !updates.name.trim()) return { data: null, error: 'ชื่อโฟลเดอร์ต้องไม่เป็นค่าว่าง' };
+      const result = await fetchFoldersFromMock(userId);
+      const existing = result.data.find(folder => folder.id === id);
+      if (!existing) return { data: null, error: 'ไม่พบโฟลเดอร์ของคุณที่ต้องการแก้ไข' };
+      const next = { ...existing, ...updates, name: updates.name?.trim() || existing.name, updatedAt: new Date().toISOString() };
+      writeMockFolder(next);
+      return { data: next, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -927,6 +1146,10 @@ export const supabaseService = {
   },
 
   async deleteFolder(id: string, userId: string): Promise<{ success: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      if (!removeMockFolder(id, userId)) return { success: false, error: 'ไม่พบโฟลเดอร์ของคุณที่ต้องการลบ' };
+      return { success: true, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     if (!supabase || auth.error || !auth.userId) {
@@ -952,7 +1175,9 @@ export const supabaseService = {
   // 14. Profiles
   async getProfile(userId: string): Promise<Partial<User> | null> {
     const supabase = getSupabaseClient();
-    if (!supabase || !userId) return null;
+    if (!userId) return null;
+    if (!supabase && isMockPersistence) return readMockProfile(userId, null);
+    if (!supabase) return null;
 
     try {
       const { data, error } = await supabase
@@ -967,7 +1192,7 @@ export const supabaseService = {
       }
 
       if (data) {
-        return {
+        const profile = {
           id: data.id,
           displayName: data.display_name || data.displayName,
           username: data.username || undefined,
@@ -977,6 +1202,7 @@ export const supabaseService = {
           socialLinks: await fetchProfileSocialLinks(userId),
           createdAt: data.created_at
         };
+        return readMockProfile(userId, profile);
       }
     } catch (error) {
       logServiceError('getProfile:exception', error);
@@ -991,6 +1217,10 @@ export const supabaseService = {
       cleanSlug = decodeURIComponent(slug).trim();
     } catch {
       return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+    }
+    if (isMockPersistence) {
+      const localProfile = readMockProfiles().find(profile => profile.id === cleanSlug || profile.username === cleanSlug);
+      if (localProfile) return { data: localProfile, error: null };
     }
     if (!supabase) return { data: null, error: 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     if (!cleanSlug || cleanSlug.length > 128) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
@@ -1016,19 +1246,17 @@ export const supabaseService = {
       if (!data) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
 
       const socialLinks = await fetchProfileSocialLinks(data.id);
-      return {
-        data: {
-          id: data.id,
-          displayName: data.display_name || 'Creator',
-          username: data.username || undefined,
-          bio: mapProfileBio(data.bio),
-          avatarUrl: data.avatar_url || undefined,
-          coverUrl: data.cover_url || undefined,
-          socialLinks,
-          createdAt: data.created_at || new Date().toISOString()
-        },
-        error: null
+      const profile: User = {
+        id: data.id,
+        displayName: data.display_name || 'Creator',
+        username: data.username || undefined,
+        bio: mapProfileBio(data.bio),
+        avatarUrl: data.avatar_url || undefined,
+        coverUrl: data.cover_url || undefined,
+        socialLinks,
+        createdAt: data.created_at || new Date().toISOString()
       };
+      return { data: readMockProfile(profile.id, profile), error: null };
     } catch (error) {
       return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
     }
@@ -1039,6 +1267,21 @@ export const supabaseService = {
     file: File,
     kind: 'avatar' | 'cover'
   ): Promise<{ data: string | null; error: string | null }> {
+    if (isMockPersistence) {
+      if (!file.type.startsWith('image/')) return { data: null, error: 'รองรับเฉพาะไฟล์รูปภาพ' };
+      if (file.size <= 0 || file.size > 5 * 1024 * 1024) return { data: null, error: 'ขนาดไฟล์ต้องไม่เกิน 5MB' };
+      try {
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('invalid image'));
+          reader.onerror = () => reject(reader.error || new Error('image read failed'));
+          reader.readAsDataURL(file);
+        });
+        return { data, error: null };
+      } catch {
+        return { data: null, error: `อ่านไฟล์ ${kind === 'cover' ? 'ภาพปก' : 'รูปโปรไฟล์'} ไม่สำเร็จ` };
+      }
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);
     const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -1062,6 +1305,10 @@ export const supabaseService = {
   },
 
   async upsertProfile(user: User): Promise<{ success: boolean; error: string | null }> {
+    if (isMockPersistence) {
+      writeMockProfile({ ...user, socialLinks: user.socialLinks || [] });
+      return { success: true, error: null };
+    }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(user.id);
     if (!supabase || auth.error || !auth.userId) {

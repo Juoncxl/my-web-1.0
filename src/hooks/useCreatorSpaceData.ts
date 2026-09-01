@@ -76,6 +76,16 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string): Creat
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const handleDataChanged = () => { void refresh(); };
+    window.addEventListener('creator-vault-qa-data-changed', handleDataChanged);
+    window.addEventListener('creator-vault-cloud-data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('creator-vault-qa-data-changed', handleDataChanged);
+      window.removeEventListener('creator-vault-cloud-data-changed', handleDataChanged);
+    };
+  }, [refresh]);
+
   return { profile, assets, folders, isLoading, error, refresh };
 }
 

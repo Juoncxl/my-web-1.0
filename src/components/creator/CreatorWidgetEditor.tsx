@@ -13,6 +13,8 @@ export interface CreatorWidgetConfig {
   items?: Array<{ label: string; done: boolean }>;
   links?: Array<{ label: string; url: string }>;
   goal?: number;
+  imageUrl?: string;
+  accent?: string;
 }
 
 interface CreatorWidgetEditorProps {
@@ -42,6 +44,10 @@ export const CreatorWidgetEditor: React.FC<CreatorWidgetEditorProps> = ({ type, 
         {type === 'links' && <><label className="csp-field">คำอธิบาย<input value={config.description || ''} onChange={event => set({ description: event.target.value })} /></label><label className="csp-field">ลิงก์เพิ่มเติม<input type="url" value={config.links?.[0]?.url || ''} onChange={event => set({ links: [{ label: config.links?.[0]?.label || 'ลิงก์ของฉัน', url: event.target.value }] })} placeholder="https://..." /></label></>}
         {type === 'goal' && <><label className="csp-field">เป้าหมาย<input value={config.description || ''} onChange={event => set({ description: event.target.value })} placeholder="สร้างผลงานให้ครบ 10 ชิ้น" /></label><label className="csp-field">ความคืบหน้า ({config.goal || 0}%)<input type="range" min="0" max="100" value={config.goal || 0} onChange={event => set({ goal: Number(event.target.value) })} /></label></>}
         {type === 'gallery' && <label className="csp-field">จำนวนภาพที่แสดง<select value={String(config.goal || 3)} onChange={event => set({ goal: Number(event.target.value) })}><option value="2">2 ภาพ</option><option value="3">3 ภาพ</option><option value="4">4 ภาพ</option></select></label>}
+        {type === 'calendar' && <label className="csp-field">คำอธิบายปฏิทิน<input value={config.description || ''} onChange={event => set({ description: event.target.value })} placeholder="กำหนดการสร้างงาน" /></label>}
+        {type === 'single_image' && <label className="csp-field">URL รูปภาพ<input type="url" value={config.imageUrl || ''} onChange={event => set({ imageUrl: event.target.value })} placeholder="https://..." /></label>}
+        {type === 'featured_work' && <label className="csp-field">คำอธิบายผลงานเด่น<input value={config.description || ''} onChange={event => set({ description: event.target.value })} /></label>}
+        {type === 'decoration' && <label className="csp-field">ข้อความตกแต่ง<input value={config.text || ''} onChange={event => set({ text: event.target.value })} placeholder="✦" /></label>}
         {type === 'clock' && <label className="csp-field">คำอธิบายเวลา<input value={config.description || 'เวลาท้องถิ่น · Asia/Bangkok'} onChange={event => set({ description: event.target.value })} /></label>}
       </div>
       <button type="button" className="csp-primary-button" onClick={onClose}>เสร็จสิ้น</button>

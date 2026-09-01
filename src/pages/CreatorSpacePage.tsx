@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AtSign, Edit3, Globe2, Instagram, Link2, Mail, Plus, RefreshCw, Settings2, Share2, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import type { Asset, AssetCategory, Folder, ProfileSocialLink } from '../types';
@@ -9,9 +9,10 @@ import { AssetViewModal } from '../components/AssetViewModal';
 import { Header } from '../components/Header';
 import { ProfileEditModal } from '../components/ProfileEditModal';
 import { CreatorCustomizePanel, CreatorWidgetControls, type CreatorLayout, type CreatorWidgetType, type LockedPreset, CREATOR_WIDGET_ICONS, CREATOR_WIDGET_LABELS } from '../components/creator/CreatorCustomizePanel';
-import { CreatorWorkWorkspace } from '../components/creator/CreatorWorkWorkspace';
 import { CreatorWidgetEditor, type CreatorWidgetConfig } from '../components/creator/CreatorWidgetEditor';
 import { getCreatorVisibleAssets, useCreatorSpaceData } from '../hooks/useCreatorSpaceData';
+import { isMockPersistence } from '../lib/persistenceMode';
+import { readCreatorSpaceSettings, writeCreatorSpaceSettings } from '../lib/creatorPersistence';
 
 interface CreatorSpacePageProps {
   // Kept in the legacy shell contract; the new Creator Space intentionally does not call it.
@@ -23,7 +24,7 @@ interface CreatorSpacePageProps {
 
 const CATEGORY_ORDER: Array<AssetCategory | 'all'> = ['all', 'character', 'lore', 'ui_code', 'prompts', 'collab', 'app_data'];
 const DEFAULT_WIDGETS: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'goal', 'gallery', 'clock'];
-const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right' };
+const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right', calendar: 'left', single_image: 'right', decoration: 'left', featured_work: 'right' };
 const DEFAULT_SPANS: Record<string, number> = { portfolio: 9, folder: 3, playlist: 4, todo: 4, note: 4, status: 4, links: 4, goal: 6, gallery: 6, clock: 3 };
 
 function getInitial(displayName: string): string { return displayName.trim().slice(0, 1).toUpperCase() || 'C'; }
@@ -90,6 +91,10 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
     goal: <div className="csp-goal-widget"><div><strong>{config.description || 'CXL Studio Production'}</strong><span>{config.goal || 0}%</span></div><div className="csp-progress"><span style={{ width: `${config.goal || 0}%` }} /></div></div>,
     gallery: <div className="csp-gallery-widget">{publicAssets.slice(0, config.goal || 3).map(asset => <div className="csp-gallery-tile" key={asset.id}>{asset.previewImages?.[0] ? <img src={asset.previewImages[0]} alt={asset.title} /> : <span>{asset.icon?.value || CREATOR_WIDGET_ICONS.gallery}</span>}</div>)}{publicAssets.length === 0 && <div className="csp-widget-empty">ยังไม่มีภาพในผลงานสาธารณะ</div>}</div>,
     clock: <div className="csp-clock-widget"><strong>{new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())}</strong><span>{config.description || 'เวลาท้องถิ่น · Asia/Bangkok'}</span></div>,
+    calendar: <div className="csp-calendar-widget"><strong>{new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long' }).format(new Date())}</strong><span>{config.description || 'กำหนดการสร้างงานของฉัน'}</span></div>,
+    single_image: config.imageUrl ? <img className="csp-single-image" src={config.imageUrl} alt={title || 'รูปภาพเดี่ยว'} /> : <div className="csp-widget-empty">เพิ่ม URL รูปภาพใน editor</div>,
+    decoration: <div className="csp-decoration-widget" aria-hidden="true">{config.text || '✦  ✧  ✦'}</div>,
+    featured_work: publicAssets[0] ? <div className="csp-featured-work"><strong>{publicAssets[0].title}</strong><span>{config.description || 'ผลงานที่อยากให้คนเห็นเป็นพิเศษ'}</span></div> : <div className="csp-widget-empty">ยังไม่มีผลงานสาธารณะ</div>,
   };
   return <article draggable={editing} onDragOver={event => { if (editing) event.preventDefault(); }} onDrop={event => { event.preventDefault(); if (editing) onDrop(type); }} onDragStart={event => event.dataTransfer.setData('text/plain', type)} className={`csp-widget ${layout === 'free' ? 'csp-layout-block' : ''}`} style={layout === 'free' ? { gridColumn: `span ${span}` } : undefined}>
     {editing && <CreatorWidgetControls type={type} layout={layout} lockedPreset={lockedPreset} span={span} rail={rail} onMove={onMove} onEdit={onEdit} onRemove={onRemove} onRail={onRail} onSpan={onSpan} />}
@@ -98,14 +103,12 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
   </article>;
 };
 
-export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset: legacyCreateAsset, onOpenAuth, onOpenFolderManager }) => {
-  void legacyCreateAsset;
+export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onOpenAuth, onOpenFolderManager }) => {
   const { currentUser, openAuthModal } = useAuth();
   const [activeSlug, setActiveSlug] = useState(slug);
   const { profile, assets, folders, isLoading, error, refresh } = useCreatorSpaceData(activeSlug, currentUser?.id);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
-  const [isWorkOpen, setIsWorkOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
   const [visibility, setVisibility] = useState<'all' | 'public' | 'private'>('all');
@@ -126,6 +129,29 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
 
   const isOwner = Boolean(profile && currentUser?.id === profile.id);
   const isEditing = isOwner && previewViewer === 'owner';
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
+
+  useEffect(() => {
+    if (!isMockPersistence || !profile || !isOwner) return;
+    setSettingsHydrated(false);
+    const saved = readCreatorSpaceSettings(profile.id);
+    if (saved) {
+      if (saved.layout) setLayout(saved.layout);
+      if (saved.lockedPreset) setLockedPreset(saved.lockedPreset);
+      if (saved.widgets) setWidgets(saved.widgets as CreatorWidgetType[]);
+      if (saved.widgetRail) setWidgetRail(previous => ({ ...previous, ...saved.widgetRail }));
+      if (saved.spans) setSpans(previous => ({ ...previous, ...saved.spans }));
+      if (saved.freeOrder) setFreeOrder(saved.freeOrder as Array<'portfolio' | CreatorWidgetType>);
+      if (saved.widgetTitles) setWidgetTitles(saved.widgetTitles);
+      if (saved.widgetConfigs) setWidgetConfigs(saved.widgetConfigs as Partial<Record<CreatorWidgetType, CreatorWidgetConfig>>);
+    }
+    setSettingsHydrated(true);
+  }, [isOwner, profile?.id]);
+
+  useEffect(() => {
+    if (!isMockPersistence || !isOwner || !profile || !settingsHydrated) return;
+    writeCreatorSpaceSettings(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>> });
+  }, [freeOrder, isOwner, layout, lockedPreset, profile, settingsHydrated, spans, widgetConfigs, widgetRail, widgetTitles, widgets]);
   const visibleAssets = useMemo(() => getCreatorVisibleAssets(assets, isEditing), [assets, isEditing]);
   const filteredAssets = useMemo(() => filterAssets(visibleAssets, selectedCategory, isEditing ? visibility : 'all', searchQuery), [isEditing, searchQuery, selectedCategory, visibility, visibleAssets]);
   const publicAssets = useMemo(() => visibleAssets.filter(isPublicFeedVisibility), [visibleAssets]);
@@ -135,7 +161,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
 
   const handleCreateAsset = () => {
     if (!isEditing) { openAuthModal('signup'); return; }
-    setIsWorkOpen(true);
+    onCreateAsset();
   };
 
   const moveWidget = (type: CreatorWidgetType, direction: -1 | 1) => {
@@ -198,6 +224,5 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     </main>
     <AssetViewModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} allAssets={visibleAssets} isOwner={isEditing} />
     <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = savedUser.username || savedUser.id; setActiveSlug(nextSlug); window.history.replaceState({}, '', `/creator/${encodeURIComponent(nextSlug)}`); void refresh(); }} />
-    <CreatorWorkWorkspace isOpen={isWorkOpen} onClose={() => setIsWorkOpen(false)} />
   </div>;
 };
