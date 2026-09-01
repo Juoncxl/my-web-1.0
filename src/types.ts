@@ -112,6 +112,8 @@ export interface User {
   bio?: string;
   avatarUrl?: string;
   coverUrl?: string;
+  avatarImageKey?: string;
+  coverImageKey?: string;
   socialLinks?: ProfileSocialLink[];
   createdAt: string;
   provider?: 'email' | 'google';
@@ -135,7 +137,7 @@ export interface AuthContextType {
   loginWithEmail: (email: string, pass: string, name?: string) => Promise<AuthResponse>;
   loginWithGoogle: () => Promise<AuthResponse>;
   logout: () => Promise<void>;
-  updateProfile: (data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; socialLinks?: ProfileSocialLink[] }) => Promise<{ success: boolean; user?: User; error?: string }>;
+  updateProfile: (data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; avatarImageKey?: string | null; coverImageKey?: string | null; socialLinks?: ProfileSocialLink[] }) => Promise<{ success: boolean; user?: User; error?: string }>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   isOnboardingOpen: boolean;
   setIsOnboardingOpen: (open: boolean) => void;

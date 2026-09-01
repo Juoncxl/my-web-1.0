@@ -66,6 +66,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     bio?: string;
     avatarUrl?: string;
     coverUrl?: string;
+    avatarImageKey?: string | null;
+    coverImageKey?: string | null;
     socialLinks?: ProfileSocialLink[];
   }): Promise<{ success: boolean; user?: NonNullable<AuthContextType['currentUser']>; error?: string }> => {
     const result = await updateProfileAction(currentUser, data);

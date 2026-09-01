@@ -12,7 +12,7 @@ export interface ProfileUpdateResult {
 
 export async function updateProfile(
   currentUser: User | null,
-  data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; socialLinks?: ProfileSocialLink[] }
+  data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; avatarImageKey?: string | null; coverImageKey?: string | null; socialLinks?: ProfileSocialLink[] }
 ): Promise<ProfileUpdateResult> {
   if (!currentUser) {
     return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนแก้ไขโปรไฟล์' };
@@ -25,6 +25,8 @@ export async function updateProfile(
     bio: data.bio !== undefined ? data.bio.trim() : currentUser.bio,
     avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : currentUser.avatarUrl,
     coverUrl: data.coverUrl !== undefined ? data.coverUrl : currentUser.coverUrl,
+    avatarImageKey: data.avatarImageKey !== undefined ? data.avatarImageKey || undefined : currentUser.avatarImageKey,
+    coverImageKey: data.coverImageKey !== undefined ? data.coverImageKey || undefined : currentUser.coverImageKey,
     socialLinks: data.socialLinks !== undefined ? data.socialLinks : currentUser.socialLinks
   };
 

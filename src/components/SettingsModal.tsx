@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../context/AuthContext';
 import { supabaseService } from '../lib/supabaseService';
+import { deleteQaProfileImage, getQaProfileImage, getQaProfileImageUrl, restoreQaProfileImage, isQaObjectUrl, validateQaProfileImage } from '../lib/qaProfileImageStore';
 import { SettingsBackupSection } from './settings/SettingsBackupSection';
 import { SettingsProfileSection } from './settings/SettingsProfileSection';
 import { SettingsSecuritySection } from './settings/SettingsSecuritySection';
@@ -17,6 +18,9 @@ export const SettingsModal: React.FC = () => {
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [bio, setBio] = useState(currentUser?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarImageKey, setAvatarImageKey] = useState<string | null>(currentUser?.avatarImageKey || null);
+  const temporaryAvatarPreview = useRef<string | null>(null);
   const [profileMsg, setProfileMsg] = useState<SettingsMessage | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -29,24 +33,77 @@ export const SettingsModal: React.FC = () => {
   const [legacySummary, setLegacySummary] = useState<LegacySummary>({ assets: 0, folders: 0 });
   const [backupMsg, setBackupMsg] = useState<SettingsMessage | null>(null);
 
+  const revokeTemporaryAvatarPreview = () => {
+    const previous = temporaryAvatarPreview.current;
+    if (previous && isQaObjectUrl(previous) && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previous);
+    temporaryAvatarPreview.current = null;
+  };
+
   useEffect(() => {
     if (isSettingsOpen && currentUser?.id) setLegacySummary(supabaseService.getLegacyGuestDataSummary(currentUser.id));
   }, [currentUser?.id, isSettingsOpen]);
 
+  useEffect(() => {
+    if (!currentUser || !isSettingsOpen) return;
+    revokeTemporaryAvatarPreview();
+    setDisplayName(currentUser.displayName || '');
+    setBio(currentUser.bio || '');
+    setAvatarUrl(currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
+    setAvatarImageKey(currentUser.avatarImageKey || null);
+    setAvatarFile(null);
+  }, [currentUser, isSettingsOpen]);
+
+  useEffect(() => () => {
+    revokeTemporaryAvatarPreview();
+  }, []);
+
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === 'string') setAvatarUrl(reader.result); };
-    reader.readAsDataURL(file);
+    const validationError = validateQaProfileImage(file);
+    if (validationError) { setProfileMsg({ type: 'error', text: validationError }); event.target.value = ''; return; }
+    let previewUrl: string;
+    try { previewUrl = URL.createObjectURL(file); }
+    catch { setProfileMsg({ type: 'error', text: 'ไม่สามารถอ่านไฟล์รูปภาพได้' }); event.target.value = ''; return; }
+    revokeTemporaryAvatarPreview();
+    temporaryAvatarPreview.current = previewUrl;
+    setAvatarFile(file);
+    setAvatarImageKey(currentUser?.avatarImageKey || null);
+    setAvatarUrl(previewUrl);
+    event.target.value = '';
   };
 
   const handleProfileSubmit = async (event: React.FormEvent) => {
     event.preventDefault(); setIsSavingProfile(true); setProfileMsg(null);
+    if (!currentUser) { setIsSavingProfile(false); return; }
+    const imageWrites: Array<{ previousBlob: Blob | null }> = [];
+    const rollbackImage = async () => {
+      await Promise.all(imageWrites.map(write => restoreQaProfileImage({ ownerId: currentUser.id, kind: 'avatar', blob: write.previousBlob }).catch(() => undefined)));
+      let restoredUrl: string | null = null;
+      try { restoredUrl = await getQaProfileImageUrl({ ownerId: currentUser.id, kind: 'avatar' }); } catch { /* keep the metadata URL fallback */ }
+      const fallbackUrl = currentUser.avatarUrl && !isQaObjectUrl(currentUser.avatarUrl) ? currentUser.avatarUrl : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+      setAvatarUrl(restoredUrl || fallbackUrl);
+      setAvatarImageKey(currentUser.avatarImageKey || null);
+    };
     try {
-      const result = await updateProfile({ displayName: displayName.trim() || 'Creator 🌸', bio: bio.trim(), avatarUrl });
+      let nextAvatarUrl = avatarUrl;
+      let nextAvatarImageKey = avatarImageKey;
+      if (avatarFile) {
+        const upload = await supabaseService.uploadProfileImage(currentUser.id, avatarFile, 'avatar');
+        if (!upload.data) { setProfileMsg({ type: 'error', text: upload.error || 'อัปโหลดรูปโปรไฟล์ไม่สำเร็จ' }); return; }
+        nextAvatarUrl = upload.data;
+        nextAvatarImageKey = upload.imageKey || null;
+        if (upload.imageKey) imageWrites.push({ previousBlob: upload.previousBlob || null });
+      } else if (nextAvatarImageKey === null && currentUser.avatarImageKey) {
+        const previousBlob = await getQaProfileImage({ ownerId: currentUser.id, kind: 'avatar' });
+        imageWrites.push({ previousBlob });
+        await deleteQaProfileImage({ ownerId: currentUser.id, kind: 'avatar' });
+      }
+      const result = await updateProfile({ displayName: displayName.trim() || 'Creator 🌸', bio: bio.trim(), avatarUrl: nextAvatarUrl, avatarImageKey: nextAvatarImageKey });
+      if (!result.success) await rollbackImage();
+      if (result.success && avatarFile && temporaryAvatarPreview.current === nextAvatarUrl) temporaryAvatarPreview.current = null;
       setProfileMsg(result.success ? { type: 'success', text: 'บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว' } : { type: 'error', text: result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ' });
-    } catch (error: unknown) { setProfileMsg({ type: 'error', text: errorMessage(error, 'เกิดข้อผิดพลาดในการบันทึก') }); }
+    } catch (error: unknown) { await rollbackImage(); setProfileMsg({ type: 'error', text: errorMessage(error, 'เกิดข้อผิดพลาดในการบันทึก') }); }
     finally { setIsSavingProfile(false); }
   };
 
@@ -100,7 +157,7 @@ export const SettingsModal: React.FC = () => {
       <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-2xl bg-purple-600 dark:bg-purple-700 text-white flex items-center justify-center text-lg shadow-md shadow-purple-500/20">⚙️</div><div><h2 className="text-base font-bold text-slate-800 dark:text-slate-100">ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)</h2><p className="text-xs text-slate-500 dark:text-slate-400">จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน</p></div></div><button onClick={() => setIsSettingsOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X className="w-4 h-4" /></button></div>
       <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarChange={setAvatarUrl} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
+        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarChange={value => { revokeTemporaryAvatarPreview(); setAvatarFile(null); setAvatarImageKey(null); setAvatarUrl(value); }} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
         {activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
       </div>

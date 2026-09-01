@@ -319,6 +319,41 @@ export function cacheMockProfileSnapshot(user: User): boolean {
   }
 }
 
+/** Writes Profile metadata without notifying data listeners during image migration. */
+export function replaceMockProfileSnapshot(user: User): boolean {
+  if (typeof window === 'undefined') return false;
+  const state = readState();
+  if (!user.id) return false;
+  const profiles = { ...state.profiles, [user.id]: user };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(profiles);
+  } catch {
+    return false;
+  }
+
+  try {
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, serialized);
+    try { window.sessionStorage?.removeItem(PROFILE_STORAGE_KEY); } catch { /* no-op */ }
+    cachedLocalProfilesRaw = serialized;
+    cachedLocalProfiles = profiles;
+    cachedSessionProfilesRaw = null;
+    cachedSessionProfiles = {};
+    memoryState = { ...state, profiles };
+    return true;
+  } catch {
+    try {
+      window.sessionStorage?.setItem(PROFILE_STORAGE_KEY, serialized);
+      cachedSessionProfilesRaw = serialized;
+      cachedSessionProfiles = profiles;
+      memoryState = { ...state, profiles };
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function readCreatorSpaceSettings(userId: string): CreatorSpaceSettings | null {
   return readState().settings[userId] || null;
 }

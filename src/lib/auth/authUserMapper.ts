@@ -25,6 +25,8 @@ export function mapSupabaseAuthUser(
       authUser.user_metadata?.avatarUrl ||
       undefined,
     coverUrl: profile?.coverUrl || authUser.user_metadata?.cover_url || authUser.user_metadata?.coverUrl || undefined,
+    avatarImageKey: profile?.avatarImageKey,
+    coverImageKey: profile?.coverImageKey,
     socialLinks: profile?.socialLinks || [],
     createdAt: profile?.createdAt || authUser.created_at || new Date().toISOString(),
     provider: authUser.app_metadata?.provider === 'google' ? 'google' : 'email'

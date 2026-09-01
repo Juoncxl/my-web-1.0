@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Sparkles, Camera, Check, ArrowRight, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { supabaseService } from '../lib/supabaseService';
+import { isQaObjectUrl, restoreQaProfileImage, validateQaProfileImage } from '../lib/qaProfileImageStore';
 
 const PRESET_AVATARS = [
   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -17,36 +19,72 @@ export const OnboardingModal: React.FC = () => {
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [bio, setBio] = useState(currentUser?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || PRESET_AVATARS[0]);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarImageKey, setAvatarImageKey] = useState<string | null>(currentUser?.avatarImageKey || null);
+  const [errorMsg, setErrorMsg] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const temporaryAvatarPreview = useRef<string | null>(null);
+
+  useEffect(() => () => {
+    const previous = temporaryAvatarPreview.current;
+    if (previous && isQaObjectUrl(previous) && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previous);
+  }, []);
 
   if (!isOnboardingOpen) return null;
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setAvatarUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    const validationError = validateQaProfileImage(file);
+    if (validationError) { setErrorMsg(validationError); e.target.value = ''; return; }
+    let previewUrl: string;
+    try { previewUrl = URL.createObjectURL(file); }
+    catch { setErrorMsg('ไม่สามารถอ่านไฟล์รูปภาพได้'); e.target.value = ''; return; }
+    const previous = temporaryAvatarPreview.current;
+    if (previous && isQaObjectUrl(previous) && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previous);
+    temporaryAvatarPreview.current = previewUrl;
+    setAvatarFile(file);
+    setAvatarImageKey(currentUser?.avatarImageKey || null);
+    setAvatarUrl(previewUrl);
+    setErrorMsg('');
+    e.target.value = '';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
+    setErrorMsg('');
+    let previousAvatarBlob: Blob | null = null;
+    let avatarWasPersisted = false;
     try {
-      await updateProfile({
+      let nextAvatarUrl = avatarUrl;
+      let nextAvatarImageKey = avatarImageKey;
+      if (avatarFile) {
+        const upload = await supabaseService.uploadProfileImage(currentUser?.id || '', avatarFile, 'avatar');
+        if (!upload.data) { setErrorMsg(upload.error || 'อัปโหลดรูปโปรไฟล์ไม่สำเร็จ'); return; }
+        nextAvatarUrl = upload.data;
+        nextAvatarImageKey = upload.imageKey || null;
+        previousAvatarBlob = upload.previousBlob || null;
+        avatarWasPersisted = Boolean(upload.imageKey);
+      }
+      const result = await updateProfile({
         displayName: displayName.trim() || 'Creator 🌸',
         bio: bio.trim(),
-        avatarUrl
+        avatarUrl: nextAvatarUrl,
+        avatarImageKey: nextAvatarImageKey
       });
+      if (!result.success) {
+        if (avatarWasPersisted && currentUser?.id) await restoreQaProfileImage({ ownerId: currentUser.id, kind: 'avatar', blob: previousAvatarBlob });
+        setErrorMsg(result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ');
+        return;
+      }
+      if (avatarFile && temporaryAvatarPreview.current === nextAvatarUrl) temporaryAvatarPreview.current = null;
       setIsOnboardingOpen(false);
     } catch (err) {
       console.error('Onboarding profile save error:', err);
+      if (avatarWasPersisted && currentUser?.id) await restoreQaProfileImage({ ownerId: currentUser.id, kind: 'avatar', blob: previousAvatarBlob }).catch(() => undefined);
+      setErrorMsg('บันทึกโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่');
     } finally {
       setIsSaving(false);
     }
@@ -105,7 +143,14 @@ export const OnboardingModal: React.FC = () => {
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => setAvatarUrl(url)}
+                    onClick={() => {
+                      const previous = temporaryAvatarPreview.current;
+                      if (previous && isQaObjectUrl(previous) && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previous);
+                      temporaryAvatarPreview.current = null;
+                      setAvatarFile(null);
+                      setAvatarImageKey(null);
+                      setAvatarUrl(url);
+                    }}
                     className={`w-7 h-7 rounded-xl overflow-hidden border-2 transition-all ${
                       avatarUrl === url
                         ? 'border-purple-600 scale-110 shadow-sm ring-2 ring-purple-300 dark:ring-purple-700'
@@ -118,6 +163,8 @@ export const OnboardingModal: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {errorMsg && <p className="text-xs font-medium text-rose-600" role="alert">{errorMsg}</p>}
 
           {/* Display Name */}
           <div className="space-y-1.5">

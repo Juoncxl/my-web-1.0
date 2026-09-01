@@ -25,6 +25,7 @@ import {
   writeMockProfile
 } from './creatorPersistence';
 import { supabaseService } from './supabaseService';
+import { deleteQaProfileImage } from './qaProfileImageStore';
 
 function makeProfile(overrides: Partial<User> = {}): User {
   return {
@@ -108,9 +109,37 @@ describe('Profile identity service in the QA persistence boundary', () => {
       displayName: 'Juon CXL',
       username: 'juoncxl',
       bio: 'Local creator bio',
-      avatarUrl: 'data:image/png;base64,avatar',
-      coverUrl: 'data:image/png;base64,cover'
+      avatarUrl: undefined,
+      coverUrl: undefined
     });
+    expect([...storage.values()].some(value => value.includes('base64,avatar') || value.includes('base64,cover'))).toBe(false);
+  });
+
+  it('stores a valid QA image through the local adapter without calling Supabase', async () => {
+    const file = new File([new Uint8Array(3_300_000)], 'avatar.png', { type: 'image/png' });
+    const result = await supabaseService.uploadProfileImage('owner-uuid', file, 'avatar');
+
+    expect(result.error).toBeNull();
+    expect(result.imageKey).toBe('owner-uuid:avatar');
+    expect(result.data).toMatch(/^blob:/);
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+    await deleteQaProfileImage({ ownerId: 'owner-uuid', kind: 'avatar' });
+  });
+
+  it('persists only the QA image key while retaining canonical Profile identity', async () => {
+    const result = await supabaseService.upsertProfile(makeProfile({
+      username: 'JuonCXL',
+      avatarUrl: 'blob:owner-avatar',
+      avatarImageKey: 'owner-uuid:avatar'
+    }));
+
+    expect(result).toEqual({ success: true, error: null });
+    expect(readMockProfile('owner-uuid', null)).toMatchObject({
+      username: 'juoncxl',
+      avatarImageKey: 'owner-uuid:avatar',
+      avatarUrl: undefined
+    });
+    expect([...storage.values()].some(value => value.includes('blob:owner-avatar'))).toBe(false);
   });
 
   it('returns an immediate Profile snapshot only for the matching owner ID', () => {

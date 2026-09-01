@@ -1,11 +1,14 @@
 import React from 'react';
 import { Camera, Upload, UserRound } from 'lucide-react';
+import { validateQaProfileImage } from '../../lib/qaProfileImageStore';
 
 interface ProfileAvatarPickerProps {
   avatarUrl: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onAvatarChange: (avatarUrl: string) => void;
-  onAvatarFileChange?: (file: File) => void;
+  onAvatarFileChange?: (file: File | null) => void;
+  onAvatarRemove?: () => void;
+  hasStoredImage?: boolean;
   onValidationError?: (message: string) => void;
   fallbackLabel?: string;
 }
@@ -15,30 +18,31 @@ export const ProfileAvatarPicker: React.FC<ProfileAvatarPickerProps> = ({
   fileInputRef,
   onAvatarChange,
   onAvatarFileChange,
+  onAvatarRemove,
+  hasStoredImage = false,
   onValidationError,
   fallbackLabel = 'C'
 }) => {
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-      onValidationError?.('รองรับเฉพาะไฟล์ JPG, PNG, WEBP หรือ GIF');
-      event.target.value = '';
-      return;
-    }
-    if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
-      onValidationError?.('ขนาดไฟล์ต้องไม่เกิน 5MB');
+    const validationError = validateQaProfileImage(file);
+    if (validationError) {
+      onValidationError?.(validationError);
       event.target.value = '';
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') onAvatarChange(reader.result);
-    };
-    reader.onerror = () => onValidationError?.('ไม่สามารถอ่านไฟล์รูปภาพได้');
+    let previewUrl: string;
+    try {
+      previewUrl = URL.createObjectURL(file);
+    } catch {
+      onValidationError?.('ไม่สามารถอ่านไฟล์รูปภาพได้');
+      event.target.value = '';
+      return;
+    }
+    onAvatarChange(previewUrl);
     onAvatarFileChange?.(file);
-    reader.readAsDataURL(file);
   };
 
   return (
@@ -70,6 +74,15 @@ export const ProfileAvatarPicker: React.FC<ProfileAvatarPickerProps> = ({
         <Upload className="w-3 h-3" />
         <span>อัปโหลดรูปจากเครื่อง</span>
       </button>
+      {(avatarUrl || hasStoredImage) && onAvatarRemove && (
+        <button
+          type="button"
+          onClick={onAvatarRemove}
+          className="text-[10px] font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400"
+        >
+          ลบรูปโปรไฟล์
+        </button>
+      )}
     </div>
   );
 };

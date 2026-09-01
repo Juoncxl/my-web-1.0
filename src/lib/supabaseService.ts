@@ -6,6 +6,11 @@ import { normalizeAssetVisibility } from './assetVisibility';
 import { isMockPersistence } from './persistenceMode';
 import { normalizeProfileUsername, resolveProfileBySlug, type ProfileLookupResult } from './profileIdentity';
 import {
+  hydrateQaProfileImages,
+  saveQaProfileImage,
+  validateQaProfileImage
+} from './qaProfileImageStore';
+import {
   readMockAssets,
   readMockBookmarks,
   readMockFolders,
@@ -1175,7 +1180,7 @@ export const supabaseService = {
     // QA Profile is the highest-priority presentation source for its owner.
     // Returning it before constructing/querying Supabase prevents a known
     // canonical identity from regressing behind a slower cloud lookup.
-    if (localProfile?.id === userId) return localProfile;
+    if (localProfile?.id === userId) return isMockPersistence ? hydrateQaProfileImages(localProfile) : localProfile;
 
     const supabase = getSupabaseClient();
     if (!supabase) return null;
@@ -1208,7 +1213,7 @@ export const supabaseService = {
           createdAt: data.created_at || new Date().toISOString()
         };
         if (isMockPersistence) cacheMockProfileSnapshot(profile);
-        return isMockPersistence ? readMockProfile(userId, profile) : profile;
+        return isMockPersistence ? hydrateQaProfileImages(readMockProfile(userId, profile) || profile) : profile;
       }
     } catch (error) {
       logServiceError('getProfile:exception', error);
@@ -1226,7 +1231,7 @@ export const supabaseService = {
     }
     if (isMockPersistence) {
       const localProfile = resolveProfileBySlug(readMockProfiles(), cleanSlug);
-      if (localProfile) return { data: localProfile, error: null, reason: null };
+      if (localProfile) return { data: await hydrateQaProfileImages(localProfile), error: null, reason: null };
     }
     if (!supabase) return { data: null, error: 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง', reason: 'unavailable' };
     if (!cleanSlug || cleanSlug.length > 128) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ', reason: 'not-found' };
@@ -1267,7 +1272,7 @@ export const supabaseService = {
         createdAt: data.created_at || new Date().toISOString()
       };
       if (isMockPersistence) cacheMockProfileSnapshot(profile);
-      const resolvedProfile = isMockPersistence ? readMockProfile(profile.id, profile) : profile;
+      const resolvedProfile = isMockPersistence ? await hydrateQaProfileImages(readMockProfile(profile.id, profile) || profile) : profile;
       return { data: resolvedProfile, error: null, reason: null };
     } catch (error) {
       return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ'), reason: 'error' };
@@ -1278,20 +1283,15 @@ export const supabaseService = {
     userId: string,
     file: File,
     kind: 'avatar' | 'cover'
-  ): Promise<{ data: string | null; error: string | null }> {
+  ): Promise<{ data: string | null; imageKey?: string; previousBlob?: Blob | null; error: string | null }> {
     if (isMockPersistence) {
-      if (!file.type.startsWith('image/')) return { data: null, error: 'รองรับเฉพาะไฟล์รูปภาพ' };
-      if (file.size <= 0 || file.size > 5 * 1024 * 1024) return { data: null, error: 'ขนาดไฟล์ต้องไม่เกิน 5MB' };
+      const validationError = validateQaProfileImage(file);
+      if (validationError) return { data: null, error: validationError };
       try {
-        const data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('invalid image'));
-          reader.onerror = () => reject(reader.error || new Error('image read failed'));
-          reader.readAsDataURL(file);
-        });
-        return { data, error: null };
-      } catch {
-        return { data: null, error: `อ่านไฟล์ ${kind === 'cover' ? 'ภาพปก' : 'รูปโปรไฟล์'} ไม่สำเร็จ` };
+        const saved = await saveQaProfileImage({ ownerId: userId, kind, blob: file });
+        return { data: saved.url, imageKey: saved.key, previousBlob: saved.previousBlob, error: null };
+      } catch (error) {
+        return { data: null, error: error instanceof Error ? error.message : `บันทึก ${kind === 'cover' ? 'ภาพปก' : 'รูปโปรไฟล์'} ใน QA Sandbox ไม่สำเร็จ` };
       }
     }
     const supabase = getSupabaseClient();
@@ -1318,7 +1318,13 @@ export const supabaseService = {
 
   async upsertProfile(user: User): Promise<{ success: boolean; error: string | null }> {
     if (isMockPersistence) {
-      const persisted = writeMockProfile({ ...user, username: normalizeProfileUsername(user.username), socialLinks: user.socialLinks || [] });
+      const persisted = writeMockProfile({
+        ...user,
+        username: normalizeProfileUsername(user.username),
+        avatarUrl: user.avatarImageKey ? undefined : (user.avatarUrl?.startsWith('blob:') || user.avatarUrl?.startsWith('data:') ? undefined : user.avatarUrl),
+        coverUrl: user.coverImageKey ? undefined : (user.coverUrl?.startsWith('blob:') || user.coverUrl?.startsWith('data:') ? undefined : user.coverUrl),
+        socialLinks: user.socialLinks || []
+      });
       return persisted.success
         ? { success: true, error: null }
         : { success: false, error: persisted.error || 'บันทึกโปรไฟล์ใน QA Sandbox ไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกเปลี่ยน' };

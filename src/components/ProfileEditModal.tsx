@@ -6,6 +6,7 @@ import { supabaseService } from '../lib/supabaseService';
 import { ProfileAvatarPicker } from './profile/ProfileAvatarPicker';
 import { ProfileFields } from './profile/ProfileFields';
 import { getProfileUsernameValidationError, normalizeProfileUsername } from '../lib/profileIdentity';
+import { deleteQaProfileImage, getQaProfileImage, getQaProfileImageUrl, restoreQaProfileImage, isQaObjectUrl, validateQaProfileImage } from '../lib/qaProfileImageStore';
 
 interface ProfileEditModalProps {
   isOpen: boolean;
@@ -35,16 +36,6 @@ function buildSocialLinkRows(links: ProfileSocialLink[] | undefined): ProfileSoc
   return [...known, ...custom];
 }
 
-function readFileAsDataUrl(file: File, onSuccess: (value: string) => void, onError: () => void) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    if (typeof reader.result === 'string') onSuccess(reader.result);
-    else onError();
-  };
-  reader.onerror = onError;
-  reader.readAsDataURL(file);
-}
-
 function validateSocialLinks(links: ProfileSocialLink[]): string | null {
   for (const link of links) {
     const value = link.url.trim();
@@ -69,10 +60,38 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   const [socialLinks, setSocialLinks] = useState<ProfileSocialLink[]>([]);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [avatarRemovalRequested, setAvatarRemovalRequested] = useState(false);
+  const [coverRemovalRequested, setCoverRemovalRequested] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const temporaryPreviewUrls = useRef<{ avatar: string | null; cover: string | null }>({ avatar: null, cover: null });
+
+  const revokeTemporaryPreview = (kind: 'avatar' | 'cover') => {
+    const previous = temporaryPreviewUrls.current[kind];
+    if (previous && isQaObjectUrl(previous) && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previous);
+    temporaryPreviewUrls.current[kind] = null;
+  };
+
+  const setTemporaryPreview = (kind: 'avatar' | 'cover', url: string) => {
+    revokeTemporaryPreview(kind);
+    temporaryPreviewUrls.current[kind] = url;
+    if (kind === 'avatar') setAvatarUrl(url);
+    else setCoverUrl(url);
+  };
+
+  // Once metadata has been saved, the QA image store owns this object URL.
+  // Do not revoke it when the modal closes or when AuthContext publishes the
+  // freshly saved User; the Header/Profile may still be rendering it.
+  const commitTemporaryPreview = (kind: 'avatar' | 'cover', url: string) => {
+    if (temporaryPreviewUrls.current[kind] === url) temporaryPreviewUrls.current[kind] = null;
+  };
+
+  useEffect(() => () => {
+    revokeTemporaryPreview('avatar');
+    revokeTemporaryPreview('cover');
+  }, []);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -82,8 +101,12 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
     setAvatarUrl(currentUser.avatarUrl || '');
     setCoverUrl(currentUser.coverUrl || '');
     setSocialLinks(buildSocialLinkRows(currentUser.socialLinks));
+    revokeTemporaryPreview('avatar');
+    revokeTemporaryPreview('cover');
     setAvatarFile(null);
     setCoverFile(null);
+    setAvatarRemovalRequested(false);
+    setCoverRemovalRequested(false);
     setErrorMsg('');
   }, [currentUser, isOpen]);
 
@@ -92,18 +115,23 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   const handleCoverUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-      setErrorMsg('รองรับเฉพาะไฟล์ JPG, PNG, WEBP หรือ GIF');
+    const validationError = validateQaProfileImage(file);
+    if (validationError) {
+      setErrorMsg(validationError);
       event.target.value = '';
       return;
     }
-    if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
-      setErrorMsg('ขนาดไฟล์ต้องไม่เกิน 5MB');
+    let previewUrl: string;
+    try {
+      previewUrl = URL.createObjectURL(file);
+    } catch {
+      setErrorMsg('ไม่สามารถอ่านไฟล์ภาพปกได้');
       event.target.value = '';
       return;
     }
     setCoverFile(file);
-    readFileAsDataUrl(file, setCoverUrl, () => setErrorMsg('ไม่สามารถอ่านไฟล์ภาพปกได้'));
+    setCoverRemovalRequested(false);
+    setTemporaryPreview('cover', previewUrl);
     setErrorMsg('');
   };
 
@@ -126,11 +154,39 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
       return;
     }
 
+    const imageWrites: Array<{ kind: 'avatar' | 'cover'; previousBlob: Blob | null }> = [];
+    const rollbackImages = async () => {
+      await Promise.all(imageWrites.map(async write => {
+        try {
+          await restoreQaProfileImage({ ownerId: currentUser.id, kind: write.kind, blob: write.previousBlob });
+        } catch {
+          // Keep reporting the metadata failure; a later hydration can still
+          // recover the last successfully persisted image when available.
+        }
+      }));
+      await Promise.all(imageWrites.map(async write => {
+        let restoredUrl: string | null = null;
+        try { restoredUrl = await getQaProfileImageUrl({ ownerId: currentUser.id, kind: write.kind }); } catch { /* use the canonical URL fallback below */ }
+        if (write.kind === 'avatar') {
+          revokeTemporaryPreview('avatar');
+          setAvatarUrl(restoredUrl || (currentUser.avatarUrl && !isQaObjectUrl(currentUser.avatarUrl) ? currentUser.avatarUrl : ''));
+        } else {
+          revokeTemporaryPreview('cover');
+          setCoverUrl(restoredUrl || (currentUser.coverUrl && !isQaObjectUrl(currentUser.coverUrl) ? currentUser.coverUrl : ''));
+        }
+      }));
+    };
+
     setIsSaving(true);
     setErrorMsg('');
     try {
       let nextAvatarUrl = avatarUrl;
       let nextCoverUrl = coverUrl;
+      let nextAvatarImageKey: string | null = currentUser.avatarImageKey || null;
+      let nextCoverImageKey: string | null = currentUser.coverImageKey || null;
+      if (avatarRemovalRequested) nextAvatarImageKey = null;
+      if (coverRemovalRequested) nextCoverImageKey = null;
+
       if (avatarFile) {
         const upload = await supabaseService.uploadProfileImage(currentUser.id, avatarFile, 'avatar');
         if (!upload.data) {
@@ -138,14 +194,27 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
           return;
         }
         nextAvatarUrl = upload.data;
+        nextAvatarImageKey = upload.imageKey || null;
+        if (upload.imageKey) imageWrites.push({ kind: 'avatar', previousBlob: upload.previousBlob || null });
       }
       if (coverFile) {
         const upload = await supabaseService.uploadProfileImage(currentUser.id, coverFile, 'cover');
         if (!upload.data) {
+          await rollbackImages();
           setErrorMsg(upload.error || 'อัปโหลดภาพปกไม่สำเร็จ');
           return;
         }
         nextCoverUrl = upload.data;
+        nextCoverImageKey = upload.imageKey || null;
+        if (upload.imageKey) imageWrites.push({ kind: 'cover', previousBlob: upload.previousBlob || null });
+      }
+      for (const [kind, imageKey] of [['avatar', nextAvatarImageKey], ['cover', nextCoverImageKey]] as const) {
+        const previousKey = kind === 'avatar' ? currentUser.avatarImageKey : currentUser.coverImageKey;
+        if (!imageKey && previousKey) {
+          const previousBlob = await getQaProfileImage({ ownerId: currentUser.id, kind });
+          imageWrites.push({ kind, previousBlob });
+          await deleteQaProfileImage({ ownerId: currentUser.id, kind });
+        }
       }
 
       const result = await updateProfile({
@@ -154,6 +223,8 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
         bio: bio.trim(),
         avatarUrl: nextAvatarUrl,
         coverUrl: nextCoverUrl,
+        avatarImageKey: nextAvatarImageKey,
+        coverImageKey: nextCoverImageKey,
         socialLinks: socialLinks.map((link, index) => ({
           ...link,
           label: link.label.trim(),
@@ -162,16 +233,23 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
         }))
       });
       if (!result.success) {
+        await rollbackImages();
         setErrorMsg(result.error || 'บันทึกโปรไฟล์ไม่สำเร็จ');
         return;
       }
       if (!result.user) {
+        await rollbackImages();
         setErrorMsg('บันทึกโปรไฟล์สำเร็จแต่ไม่สามารถอ่านข้อมูลที่อัปเดตได้ กรุณาลองใหม่');
         return;
       }
+      if (avatarFile) commitTemporaryPreview('avatar', nextAvatarUrl);
+      if (coverFile) commitTemporaryPreview('cover', nextCoverUrl);
       onSaved?.(result.user);
       onClose();
     } catch (error: unknown) {
+      // Restore any newly written QA blobs if metadata persistence fails.
+      // The previous Profile and its canonical identity remain untouched.
+      await rollbackImages();
       setErrorMsg(getErrorMessage(error) || 'บันทึกโปรไฟล์ไม่สำเร็จ');
     } finally {
       setIsSaving(false);
@@ -198,8 +276,10 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
               avatarUrl={avatarUrl}
               fileInputRef={fileInputRef}
               fallbackLabel={displayName || 'C'}
-              onAvatarChange={setAvatarUrl}
+              onAvatarChange={url => { setAvatarRemovalRequested(false); setTemporaryPreview('avatar', url); }}
               onAvatarFileChange={setAvatarFile}
+              onAvatarRemove={() => { revokeTemporaryPreview('avatar'); setAvatarUrl(''); setAvatarFile(null); setAvatarRemovalRequested(true); }}
+              hasStoredImage={Boolean(currentUser?.avatarImageKey)}
               onValidationError={setErrorMsg}
             />
             <div className="space-y-3">
@@ -209,7 +289,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
               <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleCoverUpload} className="hidden" />
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => coverInputRef.current?.click()} className="cv-profile-media-button"><ImageIcon className="h-3.5 w-3.5" />อัปโหลดภาพปก</button>
-                {coverUrl && <button type="button" onClick={() => { setCoverUrl(''); setCoverFile(null); }} className="cv-profile-media-button is-danger"><Trash2 className="h-3.5 w-3.5" />ลบภาพปก</button>}
+                {(coverUrl || currentUser.coverImageKey) && <button type="button" onClick={() => { revokeTemporaryPreview('cover'); setCoverUrl(''); setCoverFile(null); setCoverRemovalRequested(true); }} className="cv-profile-media-button is-danger"><Trash2 className="h-3.5 w-3.5" />ลบภาพปก</button>}
               </div>
               <p className="text-[10px] text-slate-400">JPG, PNG, WEBP หรือ GIF · ขนาดไม่เกิน 5MB</p>
             </div>
