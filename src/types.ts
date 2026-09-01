@@ -93,14 +93,26 @@ export interface ContentReport {
   status: 'pending' | 'reviewed' | 'resolved';
 }
 
+export interface ProfileSocialLink {
+  id?: string;
+  platform: 'instagram' | 'x' | 'website' | 'contact' | 'custom' | string;
+  label: string;
+  url: string;
+  visible: boolean;
+  sortOrder?: number;
+}
+
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface User {
   id: string;
   email?: string;
   displayName: string;
+  username?: string;
   bio?: string;
   avatarUrl?: string;
+  coverUrl?: string;
+  socialLinks?: ProfileSocialLink[];
   createdAt: string;
   provider?: 'email' | 'google';
 }
@@ -123,7 +135,7 @@ export interface AuthContextType {
   loginWithEmail: (email: string, pass: string, name?: string) => Promise<AuthResponse>;
   loginWithGoogle: () => Promise<AuthResponse>;
   logout: () => Promise<void>;
-  updateProfile: (data: { displayName?: string; bio?: string; avatarUrl?: string }) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; socialLinks?: ProfileSocialLink[] }) => Promise<{ success: boolean; error?: string }>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   isOnboardingOpen: boolean;
   setIsOnboardingOpen: (open: boolean) => void;

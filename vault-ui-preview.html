@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CXL Studio — Phase 3B Vault UI Preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #fbf9f5;
+        --ink: #20213c;
+        --ink-soft: #4c4d6b;
+        --muted: #777792;
+        --surface-soft: #f7f5ff;
+        --line: #e9e7ef;
+        --line-strong: #dcd9e8;
+        --purple: #7660ce;
+        --purple-dark: #5f4cb1;
+        --lilac: #eee9ff;
+        --ocean: #4d9dcc;
+        --glass: rgba(255, 255, 255, .82);
+        --glass-strong: rgba(255, 255, 255, .94);
+        --glass-border: rgba(221, 216, 241, .78);
+        --glass-highlight: rgba(255, 255, 255, .72);
+        --iridescent: rgba(150, 137, 226, .52);
+        --card: rgba(255, 255, 255, .9);
+        --shadow-sm: 0 6px 20px rgba(47, 40, 81, .06);
+        --shadow-md: 0 18px 45px rgba(47, 40, 81, .1);
+        --shadow-lg: 0 28px 80px rgba(47, 40, 81, .16);
+        --cta: linear-gradient(135deg, #7568cf, #5a9fca 68%, #6ebbd1);
+        --danger: #aa4a62;
+        --font: system-ui, -apple-system, BlinkMacSystemFont, 'Prompt', 'Kanit', 'Noto Sans Thai', 'Segoe UI', sans-serif;
+      }
+
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --page: #071426;
+        --ink: #e8efff;
+        --ink-soft: #becbe8;
+        --muted: #91a3c7;
+        --surface-soft: rgba(99, 112, 193, .16);
+        --line: rgba(132, 163, 231, .2);
+        --line-strong: rgba(150, 178, 241, .3);
+        --purple: #9d98f2;
+        --purple-dark: #c5c5ff;
+        --lilac: rgba(121, 116, 224, .24);
+        --ocean: #70c9e3;
+        --glass: rgba(7, 23, 48, .62);
+        --glass-strong: rgba(12, 30, 61, .78);
+        --glass-border: rgba(144, 181, 243, .27);
+        --glass-highlight: rgba(176, 210, 255, .16);
+        --iridescent: rgba(126, 196, 226, .44);
+        --card: rgba(9, 28, 57, .78);
+        --shadow-sm: 0 8px 22px rgba(1, 8, 25, .26);
+        --shadow-md: 0 20px 48px rgba(1, 8, 25, .38), 0 0 24px rgba(91, 86, 194, .08);
+        --shadow-lg: 0 28px 80px rgba(1, 8, 25, .5), 0 0 32px rgba(91, 86, 194, .1);
+        --cta: linear-gradient(135deg, #8276e3, #649ed1 66%, #69c5d6);
+        --danger: #f0a6b8;
+      }
+
+      * { box-sizing: border-box; }
+      html { min-width: 320px; background: var(--page); }
+      body { margin: 0; min-width: 320px; background: var(--page); color: var(--ink); font-family: var(--font); }
+      button, select { font: inherit; }
+      button { cursor: pointer; }
+      button:focus-visible { outline: 3px solid rgba(105, 174, 224, .28); outline-offset: 2px; }
+
+      .preview-page { min-height: 100vh; padding: 24px; background: radial-gradient(circle at 8% 12%, rgba(168, 147, 239, .14), transparent 24rem), radial-gradient(circle at 92% 78%, rgba(83, 192, 218, .12), transparent 26rem), var(--page); }
+      [data-theme="dark"] .preview-page { background: radial-gradient(circle at 8% 12%, rgba(83, 91, 193, .16), transparent 22rem), radial-gradient(circle at 94% 68%, rgba(43, 157, 191, .14), transparent 25rem), var(--page); }
+      .review-shell { width: min(1880px, 100%); margin: 0 auto; }
+      .review-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; padding: 14px 16px; border: 1px solid var(--glass-border); border-radius: 18px; background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-sm); backdrop-filter: blur(14px) saturate(120%); }
+      .review-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 11px; background: var(--cta); color: #fff; font-family: Georgia, serif; font-size: 16px; font-weight: 700; box-shadow: 0 7px 16px rgba(92, 104, 190, .2); }
+      .review-eyebrow, .section-eyebrow { margin: 0 0 3px; color: var(--ocean); font-size: 9px; font-weight: 900; letter-spacing: .16em; }
+      .review-title h1 { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.2; }
+      .review-title p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+      .review-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+      .control-group { display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+      .control-group button, .preview-select { min-height: 30px; border: 0; border-radius: 8px; padding: 5px 9px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 800; }
+      .control-group button.is-active { background: var(--glass-strong); color: var(--purple-dark); box-shadow: var(--shadow-sm); }
+      .preview-select { border: 1px solid var(--line); background: var(--glass-strong); color: var(--ink-soft); }
+      .mode-caption { color: var(--muted); font-size: 10px; font-weight: 800; }
+
+      .comparison-grid { display: grid; grid-template-columns: minmax(0, 1fr) 390px; align-items: start; gap: 18px; }
+      .review-panel { min-width: 0; }
+      .panel-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 4px 8px; color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+      .panel-label span:last-child { color: var(--ocean); letter-spacing: 0; text-transform: none; }
+      .device-frame { min-width: 0; overflow: hidden; border: 1px solid var(--glass-border); border-radius: 24px; background: var(--page); box-shadow: var(--shadow-md); }
+      .mobile-frame { width: 390px; max-width: 100%; margin-left: auto; }
+      .app-preview { min-width: 0; padding: 18px; background: radial-gradient(ellipse at 86% 12%, rgba(218, 195, 255, .2), transparent 17rem), var(--page); }
+      [data-theme="dark"] .app-preview { background: radial-gradient(ellipse at 86% 12%, rgba(76, 77, 166, .2), transparent 17rem), var(--page); }
+      .preview-app-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -18px -18px 18px; padding: 12px 18px; border-bottom: 1px solid var(--glass-border); background: var(--glass); box-shadow: 0 8px 28px rgba(47, 40, 81, .06); backdrop-filter: blur(12px); }
+      .preview-wordmark { display: inline-flex; align-items: baseline; gap: 3px; color: var(--ink); font-family: Georgia, serif; font-size: 18px; white-space: nowrap; }
+      .preview-wordmark em { color: var(--purple); font-style: normal; }
+      .preview-header-actions { display: flex; align-items: center; gap: 7px; }
+      .preview-search { width: min(270px, 26vw); min-height: 32px; border: 1px solid var(--glass-border); border-radius: 10px; padding: 6px 10px; background: var(--glass-strong); color: var(--ink); font-size: 11px; }
+      .header-icon { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--glass-border); border-radius: 10px; background: var(--glass-strong); color: var(--muted); font-size: 14px; }
+      .vault-intro { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 4px 0 10px; }
+      .vault-profile { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      .vault-avatar { width: 48px; height: 48px; flex: 0 0 auto; border: 2px solid var(--glass-border); border-radius: 15px; background: linear-gradient(145deg, #decfff, #9bcbe7); box-shadow: 0 7px 18px rgba(47, 40, 81, .1); }
+      .vault-title { margin: 0; color: var(--ink); font-size: 22px; font-weight: 850; letter-spacing: -.025em; line-height: 1.2; }
+      .vault-description { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+      .vault-intro-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+      .secondary-action, .create-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; border-radius: 10px; padding: 7px 10px; font-size: 10px; font-weight: 850; }
+      .profile-action { width: 34px; padding: 7px; }
+      .secondary-action { border: 1px solid var(--line-strong); background: var(--glass-strong); color: var(--ink-soft); }
+      .create-action { border: 1px solid rgba(255, 255, 255, .5); background: var(--cta); color: #fff; box-shadow: 0 10px 24px rgba(92, 104, 190, .2); }
+      .vault-summary { display: flex; align-items: center; gap: 14px; margin: 10px 3px 12px; color: var(--muted); font-size: 10px; font-weight: 800; }
+      .vault-summary span { display: inline-flex; align-items: center; gap: 4px; }
+      .vault-summary span:first-child { color: var(--ink-soft); }
+
+      .vault-navigation { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); }
+      .primary-tabs, .utility-tabs { display: flex; align-items: center; min-width: 0; gap: 3px; }
+      .primary-tabs { overflow-x: auto; scrollbar-width: none; }
+      .primary-tabs::-webkit-scrollbar { display: none; }
+      .vault-tab, .utility-tab { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid transparent; white-space: nowrap; cursor: pointer; }
+      .vault-tab { min-height: 42px; border-bottom: 2px solid transparent; border-radius: 11px 11px 0 0; padding: 8px 12px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 850; }
+      .vault-tab:hover { background: var(--surface-soft); color: var(--purple-dark); }
+      .vault-tab.is-active { border-bottom-color: var(--purple); background: linear-gradient(180deg, var(--lilac), transparent); color: var(--purple-dark); }
+      .tab-count, .utility-count { display: inline-grid; place-items: center; min-width: 19px; height: 19px; border-radius: 999px; padding: 0 4px; background: var(--surface-soft); color: var(--muted); font-size: 9px; }
+      .vault-tab.is-active .tab-count { background: var(--purple); color: #fff; }
+      .utility-tabs { flex: 0 0 auto; padding-bottom: 4px; }
+      .utility-tab { min-height: 29px; border-radius: 9px; padding: 5px 7px; color: var(--muted); font-size: 9px; font-weight: 800; }
+      .utility-tab:hover, .utility-tab.is-active { border-color: var(--line); background: var(--glass); color: var(--ink-soft); }
+      .utility-tab.is-trash.is-active { border-color: rgba(204, 100, 122, .25); background: rgba(255, 239, 242, .65); color: var(--danger); }
+      [data-theme="dark"] .utility-tab.is-trash.is-active { background: rgba(116, 41, 69, .22); }
+
+      .vault-controls { margin-top: 12px; border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+      .control-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; color: var(--ink-soft); font-size: 10px; font-weight: 850; }
+      .manage-action { border: 0; border-radius: 8px; padding: 5px 6px; background: transparent; color: var(--purple-dark); font-size: 9px; font-weight: 850; }
+      .manage-action:hover { background: var(--lilac); }
+      .folder-pills, .status-pills { display: flex; align-items: center; gap: 5px; min-width: 0; overflow-x: auto; padding-bottom: 3px; scrollbar-width: none; }
+      .folder-pills::-webkit-scrollbar, .status-pills::-webkit-scrollbar { display: none; }
+      .folder-pill, .add-folder, .status-pill { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: 0 0 auto; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; background: var(--glass-strong); color: var(--muted); font-size: 9px; font-weight: 850; white-space: nowrap; }
+      .folder-pill:hover, .status-pill:hover { border-color: var(--iridescent); color: var(--purple-dark); }
+      .folder-pill.is-active, .status-pill.is-active { border-color: var(--purple); background: var(--lilac); color: var(--purple-dark); }
+      .add-folder { border-style: dashed; border-color: var(--iridescent); color: var(--purple-dark); }
+      .status-row { display: flex; align-items: center; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+      .status-label { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; color: var(--muted); font-size: 9px; font-weight: 850; }
+
+      .collection-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 15px 2px 10px; }
+      .section-eyebrow { margin-bottom: 3px; }
+      .collection-heading h2 { margin: 0; color: var(--ink); font-size: 17px; letter-spacing: -.02em; }
+      .collection-heading p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+      .section-count { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 6px 9px; background: var(--glass); color: var(--muted); font-size: 9px; font-weight: 850; }
+      .feed-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 15px 0 9px; color: var(--muted); font-size: 10px; }
+      .feed-toolbar-left { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .active-filter { border-radius: 999px; padding: 3px 6px; background: var(--lilac); color: var(--purple-dark); font-weight: 850; }
+      .sort-control { display: inline-flex; align-items: center; gap: 4px; }
+      .sort-control select { min-height: 28px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 4px 22px 4px 7px; background: var(--glass-strong); color: var(--ink-soft); font-size: 9px; font-weight: 850; }
+      .category-row { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 9px; padding-bottom: 4px; scrollbar-width: none; }
+      .category-row::-webkit-scrollbar { display: none; }
+      .category-pill { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; background: var(--glass); color: var(--muted); font-size: 9px; font-weight: 850; white-space: nowrap; }
+      .category-pill.is-active { border-color: var(--ink); background: var(--ink); color: #fff; }
+      [data-theme="dark"] .category-pill.is-active { border-color: rgba(157, 169, 255, .58); background: rgba(102, 116, 219, .32); }
+
+      .asset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+      .asset-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 18px; background: var(--card); box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-sm); backdrop-filter: blur(12px) saturate(118%); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+      .asset-card:hover, .asset-card.is-menu-open { border-color: var(--iridescent); box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-md); transform: translateY(-3px); }
+      .asset-card.is-trash { opacity: .78; }
+      .asset-card.is-trash:hover { opacity: 1; }
+      .card-cover { position: relative; aspect-ratio: 4 / 5; overflow: hidden; border-radius: 18px 18px 0 0; background: linear-gradient(140deg, #e4ddff, #8877d1 56%, #39498b); }
+      .card-cover::after { content: ''; position: absolute; inset: 0; opacity: .3; background-image: radial-gradient(rgba(255,255,255,.9) 1px, transparent 1px); background-size: 18px 18px; mask-image: linear-gradient(135deg, #000, transparent 75%); }
+      .thumb-prompts { background: linear-gradient(140deg, #ffe7c9, #d995a3 55%, #6d4f98); }
+      .thumb-ui { background: linear-gradient(140deg, #d6f1ee, #64a8b4 54%, #2e527f); }
+      .thumb-character { background: linear-gradient(140deg, #e4ddff, #8877d1 56%, #39498b); }
+      .thumb-lore { background: linear-gradient(140deg, #e9e0ff, #a076c3 55%, #40558f); }
+      .thumb-collab { background: linear-gradient(140deg, #dbf2e4, #71b59b 54%, #3a6d85); }
+      .thumb-app { background: linear-gradient(140deg, #d8ebff, #7198d4 54%, #414478); }
+      .thumb-orbit { position: absolute; right: -28px; bottom: 17px; width: 180px; height: 54px; border: 1px solid rgba(255,255,255,.35); border-radius: 50%; transform: rotate(-18deg); box-shadow: 0 0 0 18px rgba(255,255,255,.06); }
+      .thumb-mark { position: absolute; left: 14px; bottom: 14px; z-index: 1; display: grid; place-items: center; width: 50px; height: 50px; border: 1px solid rgba(255,255,255,.45); border-radius: 15px; background: rgba(255,255,255,.15); color: #fff; font-family: Georgia, serif; font-size: 18px; backdrop-filter: blur(8px); }
+      .cover-line { position: absolute; top: 10px; left: 11px; right: 11px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+      .cover-badge, .cover-state, .bookmark-button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.32); background: rgba(22, 23, 54, .42); color: #fff; backdrop-filter: blur(10px); }
+      .cover-badge { max-width: 72%; overflow: hidden; border-radius: 999px; padding: 5px 7px; font-size: 9px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+      .cover-state { width: 25px; height: 25px; border-radius: 50%; font-size: 11px; }
+      .card-actions-cover { position: absolute; right: 11px; bottom: 10px; z-index: 2; display: flex; align-items: center; gap: 5px; }
+      .bookmark-button { width: 30px; height: 30px; border-radius: 50%; font-size: 15px; }
+      .bookmark-button.is-bookmarked { border-color: #f6d48a; background: #f5c34d; color: #372917; }
+      .card-body { padding: 12px 13px 11px; }
+      .card-meta, .card-footer, .author { display: flex; align-items: center; }
+      .card-meta { justify-content: space-between; gap: 6px; }
+      .category-label { border-radius: 7px; padding: 4px 5px; background: var(--surface-soft); color: var(--purple-dark); font-size: 9px; font-weight: 850; }
+      .visibility-label { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 8px; white-space: nowrap; }
+      .card-title { display: -webkit-box; overflow: hidden; margin: 10px 0 0; color: var(--ink); font-size: 13px; font-weight: 850; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+      .card-snippet { display: -webkit-box; overflow: hidden; min-height: 34px; margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+      .card-tags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; margin-top: 8px; }
+      .card-tags span { border: 1px solid var(--line); border-radius: 999px; padding: 3px 5px; background: var(--glass); color: var(--muted); font-size: 8px; }
+      .card-footer { justify-content: space-between; gap: 7px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+      .author { min-width: 0; gap: 5px; }
+      .author-avatar { width: 23px; height: 23px; flex: 0 0 auto; border: 2px solid var(--lilac); border-radius: 50%; background: linear-gradient(145deg, #ffd8e9, #c7bdff); }
+      .author-copy { min-width: 0; }
+      .author-name { overflow: hidden; margin: 0; color: var(--ink-soft); font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+      .author-date { display: block; margin-top: 2px; color: var(--muted); font-size: 7px; }
+      .card-footer-actions { display: flex; align-items: center; gap: 4px; }
+      .like-button, .more-button { display: inline-flex; align-items: center; justify-content: center; min-height: 27px; border: 1px solid var(--line); border-radius: 8px; background: var(--glass); color: var(--muted); font-size: 9px; }
+      .like-button { gap: 3px; padding: 4px 6px; }
+      .more-button { width: 27px; padding: 0; }
+      .like-button:hover, .like-button.is-liked, .more-button:hover { border-color: var(--iridescent); background: var(--lilac); color: var(--purple-dark); }
+      .menu-wrap { position: relative; }
+      .card-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 8; width: 160px; padding: 4px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-strong); box-shadow: var(--shadow-lg); backdrop-filter: blur(14px); }
+      .card-menu button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 31px; border: 0; border-radius: 8px; padding: 6px; background: transparent; color: var(--ink-soft); text-align: left; font-size: 9px; font-weight: 700; }
+      .card-menu button:hover { background: var(--lilac); color: var(--purple-dark); }
+      .card-menu button.is-danger:hover { background: rgba(255, 239, 242, .8); color: var(--danger); }
+      .folder-note { padding: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8px; }
+
+      .folder-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .folder-card, .create-folder-tile { min-height: 112px; border-radius: 17px; }
+      .folder-card { display: flex; align-items: stretch; gap: 2px; border: 1px solid var(--line); border-top: 3px solid var(--folder-accent, var(--iridescent)); background: var(--card); box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-sm); backdrop-filter: blur(10px); transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+      .folder-card:hover { border-color: var(--iridescent); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+      .folder-card-main { display: flex; align-items: center; flex: 1; min-width: 0; gap: 10px; border: 0; border-radius: 16px; padding: 14px; background: transparent; color: inherit; text-align: left; }
+      .folder-icon { display: grid; place-items: center; width: 45px; height: 45px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); font-size: 21px; }
+      .folder-copy { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+      .folder-copy strong { overflow: hidden; color: var(--ink); font-size: 11px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+      .folder-copy span { color: var(--muted); font-size: 9px; font-weight: 750; }
+      .folder-menu { align-self: flex-start; display: grid; place-items: center; width: 30px; height: 30px; margin: 8px 7px 0 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); }
+      .folder-menu:hover { border-color: var(--line); background: var(--surface-soft); color: var(--purple-dark); }
+      .create-folder-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px dashed var(--iridescent); background: linear-gradient(145deg, rgba(238, 233, 255, .36), rgba(224, 244, 252, .25)); color: var(--purple-dark); }
+      .create-folder-tile:hover { background: var(--lilac); }
+      .create-folder-tile b { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 9px; background: var(--glass); font-size: 18px; }
+      .create-folder-tile strong { font-size: 10px; }
+      .create-folder-tile small { color: var(--muted); font-size: 8px; }
+      .folder-open-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 15px 2px 10px; }
+      .folder-open-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .folder-open-title .folder-icon { width: 38px; height: 38px; font-size: 18px; }
+      .folder-open-title h2 { margin: 0; color: var(--ink); font-size: 16px; }
+      .folder-open-title p { margin: 3px 0 0; color: var(--muted); font-size: 9px; }
+      .back-button { display: inline-flex; align-items: center; gap: 4px; min-height: 29px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 7px; background: var(--glass); color: var(--muted); font-size: 9px; font-weight: 850; }
+      .back-button:hover { border-color: var(--iridescent); background: var(--lilac); color: var(--purple-dark); }
+
+      .empty-state { position: relative; overflow: hidden; max-width: 400px; margin: 22px auto; border: 1px solid var(--line); border-radius: 18px; padding: 28px 18px; background: var(--glass); text-align: center; box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-sm); }
+      .empty-state::before { content: ''; position: absolute; width: 200px; height: 90px; right: -65px; top: -40px; border: 1px solid var(--iridescent); border-radius: 50%; transform: rotate(-20deg); box-shadow: 0 0 0 18px rgba(93, 148, 207, .05); }
+      .empty-orbit { position: relative; z-index: 1; display: grid; place-items: center; width: 52px; height: 52px; margin: 0 auto 12px; border: 1px solid var(--glass-border); border-radius: 50%; background: var(--surface-soft); color: var(--ocean); font-size: 23px; box-shadow: 0 0 0 9px rgba(99, 137, 220, .1); }
+      .empty-state h3 { position: relative; z-index: 1; margin: 0; color: var(--ink); font-size: 14px; }
+      .empty-state p { position: relative; z-index: 1; margin: 7px auto 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+      .empty-state .create-action { position: relative; z-index: 1; margin-top: 13px; }
+      .review-note { margin-top: 18px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--glass); color: var(--muted); font-size: 10px; line-height: 1.5; }
+      .review-note strong { color: var(--ink-soft); }
+
+      .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: rgba(6, 15, 33, .68); backdrop-filter: blur(9px); }
+      .modal { width: min(520px, 100%); max-height: min(700px, 90vh); overflow: auto; border: 1px solid var(--glass-border); border-radius: 21px; background: var(--glass-strong); box-shadow: var(--shadow-lg); backdrop-filter: blur(16px) saturate(125%); }
+      .modal-header, .modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 17px; }
+      .modal-header { border-bottom: 1px solid var(--line); background: linear-gradient(120deg, rgba(238, 233, 255, .58), rgba(224, 244, 252, .3)); }
+      [data-theme="dark"] .modal-header { background: linear-gradient(120deg, rgba(74, 61, 139, .36), rgba(23, 82, 112, .2)); }
+      .modal-header h2 { margin: 0; color: var(--ink); font-size: 14px; }
+      .modal-header p { margin: 4px 0 0; color: var(--muted); font-size: 9px; }
+      .close-button { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font-size: 17px; }
+      .close-button:hover { border-color: var(--line); background: var(--surface-soft); color: var(--ink); }
+      .modal-body { padding: 16px 17px; }
+      .mock-form { display: grid; gap: 10px; }
+      .mock-form label { display: grid; gap: 5px; color: var(--ink-soft); font-size: 10px; font-weight: 850; }
+      .mock-form input { min-height: 35px; border: 1px solid var(--line-strong); border-radius: 9px; padding: 7px 9px; background: var(--glass); color: var(--ink); font-size: 10px; }
+      .mock-icon-row { display: flex; gap: 6px; flex-wrap: wrap; }
+      .mock-icon { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); font-size: 15px; }
+      .mock-mode-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 7px; border-bottom: 1px solid var(--line); }
+      .mock-mode-tabs button { min-height: 28px; border: 0; border-bottom: 2px solid transparent; border-radius: 7px 7px 0 0; background: transparent; color: var(--muted); font-size: 9px; font-weight: 850; }
+      .mock-mode-tabs button.is-active { border-bottom-color: var(--purple); background: var(--lilac); color: var(--purple-dark); }
+      .mock-upload { width: 100%; margin-top: 8px; border: 1px dashed var(--iridescent); border-radius: 9px; padding: 7px; background: var(--surface-soft); color: var(--purple-dark); font-size: 9px; font-weight: 850; }
+      .mock-color-row { display: flex; flex-wrap: wrap; gap: 9px; }
+      .mock-color { display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid rgba(255,255,255,.78); border-radius: 50%; box-shadow: 0 1px 5px rgba(20,28,54,.18); }
+      .mock-color.is-selected { outline: 3px solid rgba(118, 96, 206, .22); outline-offset: 2px; }
+      .mock-section-label { margin: 16px 0 8px; color: var(--ink-soft); font-size: 10px; font-weight: 850; }
+      .modal-folder-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin-top: 6px; border: 1px solid var(--line); border-radius: 11px; padding: 10px; background: var(--glass); color: var(--ink-soft); text-align: left; }
+      .modal-folder-option.is-selected { border-color: var(--purple); background: var(--lilac); }
+      .modal-folder-option:hover { border-color: var(--iridescent); }
+      .option-copy { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .option-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-soft); font-size: 15px; }
+      .option-copy strong { display: block; color: var(--ink); font-size: 10px; }
+      .option-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+      .modal-footer { justify-content: flex-end; border-top: 1px solid var(--line); background: rgba(247, 245, 255, .42); }
+      [data-theme="dark"] .modal-footer { background: rgba(7, 20, 38, .42); }
+      .secondary-action.is-wide { padding-inline: 14px; }
+      .hidden { display: none !important; }
+
+      .vault-filter-bar { display: grid; gap: 7px; margin-top: 10px; border: 1px solid var(--line); border-radius: 13px; padding: 7px; background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+      .vault-filter-controls { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+      .vault-filter-select { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; min-height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; background: var(--glass-strong); color: var(--muted); font-size: 9px; font-weight: 850; }
+      .vault-filter-select span { flex: 0 0 auto; }
+      .vault-filter-select select { min-width: 0; max-width: 70%; border: 0; padding: 0 12px 0 0; background: transparent; color: var(--ink-soft); font-size: 9px; font-weight: 850; text-align: right; }
+      .vault-filter-select select:focus { outline: none; }
+      .vault-filter-sort { border-color: var(--iridescent); }
+      .active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 16px; }
+      .active-filters span { border: 1px solid var(--iridescent); border-radius: 999px; padding: 2px 5px; background: var(--lilac); color: var(--purple-dark); font-size: 8px; font-weight: 850; }
+      @media (max-width: 1200px) {
+        .asset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      @media (max-width: 1050px) {
+        .comparison-grid { grid-template-columns: minmax(0, 1fr) 350px; }
+        .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .folder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 760px) {
+        .preview-page { padding: 12px; }
+        .review-toolbar { align-items: flex-start; flex-direction: column; }
+        .review-controls { width: 100%; justify-content: flex-start; }
+        .comparison-grid { grid-template-columns: 1fr; }
+        .mobile-frame { width: 100%; }
+        .desktop-frame { width: 100%; }
+      }
+
+      /* Keep the 390px artboard intentionally compact even when the outer page is wide. */
+      .mobile-frame .app-preview { padding: 12px; }
+      .mobile-frame .preview-app-header { margin: -12px -12px 12px; padding: 10px 12px; }
+      .mobile-frame .preview-wordmark { font-size: 15px; }
+      .mobile-frame .preview-search { display: none; }
+      .mobile-frame .vault-intro { align-items: flex-start; flex-direction: column; gap: 11px; padding: 4px 0 10px; }
+      .mobile-frame .vault-profile { width: 100%; }
+      .mobile-frame .vault-avatar { width: 39px; height: 39px; border-radius: 12px; }
+      .mobile-frame .vault-title { font-size: 18px; }
+      .mobile-frame .vault-intro-actions { width: auto; }
+      .mobile-frame .secondary-action, .mobile-frame .create-action { flex: 0 0 auto; }
+      .mobile-frame .vault-summary { gap: 8px; font-size: 9px; }
+      .mobile-frame .vault-navigation { align-items: stretch; flex-direction: column; gap: 2px; }
+      .mobile-frame .primary-tabs { width: 100%; }
+      .mobile-frame .vault-tab { min-height: 38px; padding-inline: 9px; }
+      .mobile-frame .utility-tabs { padding-bottom: 2px; }
+      .mobile-frame .vault-filter-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .mobile-frame .vault-filter-sort { grid-column: span 2; }
+      .mobile-frame .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .mobile-frame .card-body { padding: 8px 7px 7px; }
+      .mobile-frame .card-title { margin-top: 7px; font-size: 10px; }
+      .mobile-frame .card-snippet { min-height: 27px; font-size: 8px; }
+      .mobile-frame .card-tags { margin-top: 5px; }
+      .mobile-frame .card-footer { margin-top: 6px; padding-top: 6px; }
+      .mobile-frame .like-button { padding-inline: 4px; }
+      .mobile-frame .category-label, .mobile-frame .visibility-label, .mobile-frame .author-name { font-size: 7px; }
+      .mobile-frame .author-date { font-size: 6px; }
+      .mobile-frame .folder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .mobile-frame .folder-card, .mobile-frame .create-folder-tile { min-height: 88px; }
+      .mobile-frame .folder-card-main { gap: 6px; padding: 9px; }
+      .mobile-frame .folder-icon { width: 33px; height: 33px; border-radius: 10px; font-size: 16px; }
+      .mobile-frame .folder-copy strong { font-size: 9px; }
+      .mobile-frame .folder-copy span { font-size: 8px; }
+      .mobile-frame .folder-menu { width: 24px; height: 24px; margin: 5px 4px 0 0; }
+      .mobile-frame .card-menu { width: 145px; }
+    </style>
+  </head>
+  <body>
+    <main id="previewRoot" class="preview-page" data-theme="light">
+      <div class="review-shell">
+        <section class="review-toolbar" aria-label="Preview controls">
+          <div class="review-title">
+            <div class="brand-mark">CX</div>
+            <div>
+              <p class="review-eyebrow">CXL STUDIO · PHASE 3B</p>
+              <h1>My Vault visual review</h1>
+              <p>Isolated mock preview · ไม่เชื่อมต่อ production หรือ Supabase</p>
+            </div>
+          </div>
+          <div class="review-controls">
+            <span class="mode-caption">Theme</span>
+            <div class="control-group" aria-label="เลือกธีม">
+              <button type="button" data-theme-button="light" class="is-active">Light</button>
+              <button type="button" data-theme-button="dark">Dark</button>
+            </div>
+            <span class="mode-caption">State</span>
+            <div class="control-group" aria-label="เลือกสถานะข้อมูล">
+              <button type="button" data-state-button="filled" class="is-active">Filled</button>
+              <button type="button" data-state-button="empty">Empty</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="comparison-grid">
+          <section class="review-panel" aria-label="Desktop preview">
+            <div class="panel-label"><span>Desktop artboard</span><span>approximately 1440px</span></div>
+            <div class="device-frame desktop-frame"><div class="app-preview" data-preview="desktop"></div></div>
+          </section>
+          <section class="review-panel" aria-label="Mobile preview">
+            <div class="panel-label"><span>Mobile artboard</span><span>approximately 390px</span></div>
+            <div class="device-frame mobile-frame"><div class="app-preview" data-preview="mobile"></div></div>
+          </section>
+        </div>
+
+        <p class="review-note"><strong>Preview-only interactions:</strong> สลับ tab, เปิด folder, เปิด overflow, เปิด Folder Manager / Move To Folder และลอง Light/Dark หรือ Empty state ได้ ข้อมูลทั้งหมดเป็น mock ในไฟล์นี้เท่านั้น ปุ่ม destructive ไม่มีผลจริง</p>
+      </div>
+    </main>
+
+    <div id="modalRoot" class="hidden"></div>
+
+    <script>
+      (() => {
+        const folders = [
+          { id: 'moonlit', name: 'Moonlit Prompts', icon: '🌙', color: '#7A5CC7' },
+          { id: 'interface', name: 'Interface Lab', icon: '🎨', color: '#67B8C7' },
+          { id: 'atlas', name: 'Character Atlas', icon: '🔮', color: '#C982A7' }
+        ];
+
+        const assets = [
+          { id: 'a1', title: 'Moonlit Companion System', category: 'prompts', categoryLabel: 'คำสั่งพรอมต์', emoji: '✦', tags: ['companion', 'lore', 'system'], visibility: 'public', folderId: 'moonlit', bookmarked: true, recent: true, thumb: 'thumb-prompts', mark: 'MC', snippet: 'A warm system prompt for a thoughtful midnight companion.' },
+          { id: 'a2', title: 'CXL Creator Dashboard Kit', category: 'ui', categoryLabel: 'โค้ดหน้าตา UI', emoji: '⌘', tags: ['glass', 'dashboard'], visibility: 'private', folderId: 'interface', bookmarked: false, recent: true, thumb: 'thumb-ui', mark: 'CX', snippet: 'Reusable translucent panels for creator workflows.' },
+          { id: 'a3', title: 'Asteria Character Bible', category: 'character', categoryLabel: 'โปรไฟล์ตัวละคร', emoji: '✧', tags: ['character', 'fantasy'], visibility: 'public', folderId: 'atlas', bookmarked: true, recent: false, thumb: 'thumb-character', mark: 'AB', snippet: 'Voice, visual cues and relationship notes for Asteria.' },
+          { id: 'a4', title: 'Tiny rituals for midnight writers with an intentionally long title', category: 'lore', categoryLabel: 'เนื้อเรื่อง / โลกทัศน์', emoji: '☾', tags: ['writing', 'rituals'], visibility: 'private', folderId: 'moonlit', bookmarked: false, recent: true, thumb: 'thumb-lore', mark: 'TR', snippet: 'Small world-building prompts to make a quiet scene feel alive.' },
+          { id: 'a5', title: 'Frosted Glass UI Notes', category: 'ui', categoryLabel: 'โค้ดหน้าตา UI', emoji: '◈', tags: ['components', 'pearl'], visibility: 'public', folderId: 'interface', bookmarked: true, recent: true, thumb: 'thumb-ui', mark: 'FG', snippet: 'Notes on translucent surfaces, readable hierarchy and soft edges.' },
+          { id: 'a6', title: 'The Pearl Archive', category: 'collab', categoryLabel: 'คอลแลป', emoji: '◎', tags: ['reference', 'team'], visibility: 'public', folderId: null, bookmarked: false, recent: false, thumb: 'thumb-collab', mark: 'PA', snippet: 'A shared reference shelf for the next creative sprint.' },
+          { id: 'a7', title: 'Archive: Neon Garden Prompt Pack', category: 'prompts', categoryLabel: 'คำสั่งพรอมต์', emoji: '⚡', tags: ['archive', 'neon'], visibility: 'private', folderId: 'moonlit', bookmarked: false, recent: false, deleted: true, thumb: 'thumb-app', mark: 'NG', snippet: 'Deleted mock asset for reviewing the trash treatment.' }
+        ];
+
+        const state = { tab: 'my_assets', theme: 'light', dataState: 'filled', selectedFolder: null, openMenu: null, modal: null, selectedMoveFolder: 'moonlit' };
+        const root = document.getElementById('previewRoot');
+        const modalRoot = document.getElementById('modalRoot');
+
+        const esc = value => String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+        const visibleAssets = assets.filter(asset => !asset.deleted);
+        const folderCount = folderId => visibleAssets.filter(asset => asset.folderId === folderId).length;
+        const currentTabLabel = () => ({ my_assets: 'ผลงาน', folders: 'โฟลเดอร์', bookmarks: 'บันทึกไว้', recent: 'ดูล่าสุด', trash: 'ถังขยะ' }[state.tab]);
+
+        function renderHeader() {
+          return `
+            <header class="preview-app-header">
+              <div class="preview-wordmark"><span>CXL</span><em>Studio</em></div>
+              <div class="preview-header-actions"><input class="preview-search" aria-label="ค้นหา mock" placeholder="ค้นหาในคลัง..." /><span class="header-icon">☼</span><span class="header-icon">◉</span></div>
+            </header>`;
+        }
+
+        function renderVaultHeader() {
+          const primary = [
+            ['my_assets', '▦', 'ผลงาน', visibleAssets.length],
+            ['folders', '▣', 'โฟลเดอร์', folders.length],
+            ['bookmarks', '☆', 'บันทึกไว้', assets.filter(asset => asset.bookmarked && !asset.deleted).length]
+          ];
+          return `
+            <section class="vault-intro">
+              <div class="vault-profile"><div class="vault-avatar" aria-hidden="true"></div><div><h1 class="vault-title">คลังของฉัน</h1></div></div>
+              <div class="vault-intro-actions"><button type="button" class="secondary-action profile-action" data-action="profile" aria-label="ตั้งค่าโปรไฟล์">⚙</button><button type="button" class="create-action" data-action="create-asset">＋ <span>สร้างผลงาน</span></button></div>
+            </section>
+            <div class="vault-summary"><span>▦ ${visibleAssets.length} ผลงาน</span><span>◉ ${visibleAssets.filter(asset => asset.visibility === 'public').length} สาธารณะ</span><span>⌑ ${visibleAssets.filter(asset => asset.visibility === 'private').length} ส่วนตัว</span></div>
+            <nav class="vault-navigation" aria-label="เมนูคลังของฉัน">
+              <div class="primary-tabs">${primary.map(([id, icon, label, count]) => `<button type="button" class="vault-tab ${state.tab === id ? 'is-active' : ''}" data-tab="${id}">${icon} <span>${label}</span><span class="tab-count">${count}</span></button>`).join('')}</div>
+              <div class="utility-tabs"><button type="button" class="utility-tab ${state.tab === 'recent' ? 'is-active' : ''}" data-tab="recent">◷ <span>ดูล่าสุด</span></button><button type="button" class="utility-tab is-trash ${state.tab === 'trash' ? 'is-active' : ''}" data-tab="trash">♲ <span>ถังขยะ</span><span class="utility-count">${assets.filter(asset => asset.deleted).length}</span></button></div>
+            </nav>`;
+        }
+
+        function renderFolderControls() {
+          if (state.tab !== 'my_assets' && state.tab !== 'bookmarks' && state.tab !== 'recent' && state.tab !== 'trash') return '';
+          const folderValue = state.selectedFolder ? (folders.find(folder => folder.id === state.selectedFolder)?.name || 'เลือกแล้ว') : 'ทั้งหมด';
+          return `<section class="vault-filter-bar" aria-label="ตัวกรองคลัง"><div class="vault-filter-controls"><label class="vault-filter-select"><span>โฟลเดอร์</span><select aria-label="กรองตามโฟลเดอร์"><option>${esc(folderValue)}</option><option>ทั้งหมด</option><option>นอกโฟลเดอร์</option></select></label><label class="vault-filter-select"><span>สถานะ</span><select aria-label="กรองตามสถานะ"><option>ทั้งหมด</option><option>ไอเดีย</option><option>ฉบับร่าง</option><option>กำลังทำ</option><option>เสร็จแล้ว</option></select></label><label class="vault-filter-select"><span>หมวดหมู่</span><select aria-label="กรองตามหมวดหมู่"><option>ทั้งหมด</option><option>โปรไฟล์ตัวละคร</option><option>เนื้อเรื่อง / โลกทัศน์</option><option>โค้ดหน้าตา UI</option><option>คำสั่งพรอมต์</option><option>คอลแลป</option><option>แอป / แพลตฟอร์ม</option></select></label><label class="vault-filter-select"><span>การมองเห็น</span><select aria-label="กรองตามการมองเห็น"><option>ทั้งหมด</option><option>สาธารณะ</option><option>ส่วนตัว</option></select></label><label class="vault-filter-select vault-filter-sort"><span>เรียง</span><select aria-label="เรียงลำดับ"><option>ล่าสุด</option><option>ชื่อ A–Z</option></select></label></div><div class="active-filters"><span>ทั้งหมด</span><span>7 รายการ</span><button type="button" class="manage-action" data-action="folder-manager">⚙ จัดการโฟลเดอร์</button></div></section>`;
+        }
+
+        function getAssetsForTab() {
+          if (state.dataState === 'empty') return [];
+          if (state.tab === 'trash') return assets.filter(asset => asset.deleted);
+          if (state.tab === 'bookmarks') return visibleAssets.filter(asset => asset.bookmarked);
+          if (state.tab === 'recent') return visibleAssets.filter(asset => asset.recent);
+          if (state.tab === 'folders' && state.selectedFolder) return visibleAssets.filter(asset => asset.folderId === state.selectedFolder);
+          return visibleAssets.filter(asset => state.tab === 'my_assets' ? (state.selectedFolder === null || asset.folderId === state.selectedFolder || (state.selectedFolder === 'unassigned' && !asset.folderId)) : true);
+        }
+
+        function renderCategoryControls() {
+          if (state.tab !== 'folders' || !state.selectedFolder) return '';
+          return `<section class="vault-filter-bar" aria-label="ตัวกรองผลงานในโฟลเดอร์"><div class="vault-filter-controls"><label class="vault-filter-select"><span>หมวดหมู่</span><select aria-label="กรองตามหมวดหมู่"><option>ทั้งหมด</option><option>โปรไฟล์ตัวละคร</option><option>เนื้อเรื่อง / โลกทัศน์</option><option>โค้ดหน้าตา UI</option><option>คำสั่งพรอมต์</option><option>คอลแลป</option><option>แอป / แพลตฟอร์ม</option></select></label><label class="vault-filter-select vault-filter-sort"><span>เรียง</span><select aria-label="เรียงลำดับ"><option>ล่าสุด</option><option>ชื่อ A–Z</option></select></label></div><div class="active-filters"><span>${esc(folders.find(folder => folder.id === state.selectedFolder)?.name || 'โฟลเดอร์')}</span><span>${getAssetsForTab().length} รายการ</span></div></section>`;
+        }
+
+        function renderAssetCard(asset) {
+          const menuOpen = state.openMenu === asset.id;
+          return `
+            <article class="asset-card ${asset.deleted ? 'is-trash' : ''} ${menuOpen ? 'is-menu-open' : ''}">
+              <div class="card-cover ${asset.thumb}"><span class="thumb-orbit"></span><span class="thumb-mark">${esc(asset.mark)}</span><div class="cover-line"><span class="cover-badge">${asset.emoji} ${esc(asset.categoryLabel)}</span><span class="cover-state">${asset.visibility === 'public' ? '◉' : '⌑'}</span></div><div class="card-actions-cover"><span class="cover-state">${asset.deleted ? '♲' : '✦'}</span>${!asset.deleted ? `<button type="button" class="bookmark-button ${asset.bookmarked ? 'is-bookmarked' : ''}" data-action="bookmark" data-asset="${asset.id}" aria-label="บันทึกไว้">${asset.bookmarked ? '★' : '☆'}</button>` : ''}</div></div>
+              <div class="card-body"><div class="card-meta"><span class="category-label">${asset.emoji} ${esc(asset.categoryLabel)}</span><span class="visibility-label">${asset.visibility === 'public' ? '◉ สาธารณะ' : '⌑ ส่วนตัว'}</span></div><h3 class="card-title">${esc(asset.title)}</h3><p class="card-snippet">${esc(asset.snippet)}</p><div class="card-tags">${asset.tags.slice(0, 2).map(tag => `<span>#${esc(tag)}</span>`).join('')}${asset.tags.length > 2 ? `<span>+${asset.tags.length - 2}</span>` : ''}</div><footer class="card-footer"><div class="author"><span class="author-avatar"></span><div class="author-copy"><p class="author-name">Creator</p><small class="author-date">30 ส.ค. 2026</small></div></div><div class="card-footer-actions">${!asset.deleted ? `<button type="button" class="like-button">♡ <span>${asset.id === 'a1' ? '24' : asset.id === 'a5' ? '18' : '8'}</span></button>` : ''}<div class="menu-wrap"><button type="button" class="more-button" data-action="toggle-menu" data-asset="${asset.id}" aria-expanded="${menuOpen}">•••</button>${menuOpen ? renderMenu(asset) : ''}</div></div></footer></div>
+            </article>`;
+        }
+
+        function renderMenu(asset) {
+          if (asset.deleted) return `<div class="card-menu"><button type="button" data-action="restore">↶ กู้คืนผลงาน</button><button type="button" class="is-danger" data-action="permanent-delete">× ลบถาวร</button></div>`;
+          return `<div class="card-menu"><button type="button" data-action="edit">✎ แก้ไขผลงาน</button><button type="button" data-action="move-folder" data-asset="${asset.id}">▣ ย้ายไปโฟลเดอร์</button><button type="button" data-action="copy">▢ คัดลอกเนื้อหา</button><button type="button" class="is-danger" data-action="delete">⌫ ย้ายไปถังขยะ</button>${asset.folderId ? `<div class="folder-note">${folders.find(folder => folder.id === asset.folderId)?.icon || '▣'} ${esc(folders.find(folder => folder.id === asset.folderId)?.name || '')}</div>` : ''}</div>`;
+        }
+
+        function renderEmpty(icon, title, copy, action = '') {
+          return `<div class="empty-state"><div class="empty-orbit">${icon}</div><h3>${title}</h3><p>${copy}</p>${action ? `<button type="button" class="create-action" data-action="${action}">＋ ${action === 'folder-manager' ? 'สร้างโฟลเดอร์' : 'สร้างผลงาน'}</button>` : ''}</div>`;
+        }
+
+        function renderFolderOverview() {
+          if (state.dataState === 'empty' || folders.length === 0) return renderEmpty('▣', 'ยังไม่มีโฟลเดอร์', 'สร้างคอลเลกชันแรกเพื่อจัดระเบียบผลงานของคุณ', 'folder-manager');
+          return `<div class="folder-grid">${folders.map(folder => `<article class="folder-card" style="--folder-accent:${folder.color}"><button type="button" class="folder-card-main" data-folder="${folder.id}"><span class="folder-icon">${folder.icon}</span><span class="folder-copy"><strong>${esc(folder.name)}</strong><span>${folderCount(folder.id)} ผลงาน</span></span></button><button type="button" class="folder-menu" data-action="folder-manager" aria-label="จัดการโฟลเดอร์">•••</button></article>`).join('')}<button type="button" class="create-folder-tile" data-action="folder-manager"><b>＋</b><strong>สร้างโฟลเดอร์</strong><small>จัดกลุ่มผลงานให้เป็นระเบียบ</small></button></div>`;
+        }
+
+        function renderCollection() {
+          if (state.tab === 'folders' && !state.selectedFolder) {
+            return `<div class="collection-heading"><div><h2>โฟลเดอร์ของฉัน</h2><p>รวมพื้นที่จัดเก็บผลงานตามโปรเจกต์หรือไอเดีย</p></div><span class="section-count">${folders.length} โฟลเดอร์</span></div>${renderFolderOverview()}`;
+          }
+
+          const selectedFolder = folders.find(folder => folder.id === state.selectedFolder);
+          const assetsForView = getAssetsForTab();
+          const title = state.tab === 'trash' ? 'ถังขยะ' : state.tab === 'bookmarks' ? 'บันทึกไว้' : state.tab === 'recent' ? 'ดูล่าสุด' : selectedFolder ? selectedFolder.name : currentTabLabel();
+          const emptyMap = { my_assets: ['⌑', 'ยังไม่มีผลงานในคลัง', 'เริ่มสร้างผลงานชิ้นแรกของคุณได้เลย', 'create-asset'], bookmarks: ['☆', 'ยังไม่มีผลงานที่บันทึกไว้', 'ผลงานที่คุณบันทึกไว้จะแสดงที่นี่', ''], recent: ['◷', 'ยังไม่มีประวัติการเปิดดู', 'ผลงานที่คุณเปิดดูล่าสุดจะแสดงที่นี่', ''], trash: ['♲', 'ถังขยะว่าง', 'ผลงานที่ลบจะอยู่ที่นี่เพื่อให้คุณกู้คืนหรือลบถาวร', ''] };
+          const empty = emptyMap[state.tab] || ['⌑', 'โฟลเดอร์นี้ยังไม่มีผลงาน', 'ย้ายผลงานเข้ามาในโฟลเดอร์นี้จากเมนูเพิ่มเติมบนการ์ด', ''];
+          return `${selectedFolder ? `<div class="folder-open-heading"><div class="folder-open-title"><span class="folder-icon">${selectedFolder.icon}</span><div><h2>${esc(selectedFolder.name)}</h2><p>${folderCount(selectedFolder.id)} ผลงานในโฟลเดอร์นี้</p></div></div><button type="button" class="back-button" data-folder="all">← กลับไปโฟลเดอร์</button></div>` : `<div class="collection-heading"><div><h2>${title}</h2><p>${state.tab === 'trash' ? 'รายการที่ลบแล้ว แยกจากผลงานปกติ' : 'ดูและจัดการผลงานในพื้นที่ส่วนตัวของคุณ'}</p></div><span class="section-count">${assetsForView.length} รายการ</span></div>`}${renderCategoryControls()}<div class="feed-toolbar"><div class="feed-toolbar-left"><strong>${assetsForView.length} รายการ</strong>${state.tab === 'bookmarks' ? '<span class="active-filter">บันทึกไว้</span>' : ''}</div></div>${assetsForView.length ? `<div class="asset-grid">${assetsForView.map(renderAssetCard).join('')}</div>` : renderEmpty(empty[0], empty[1], empty[2], empty[3])}`;
+        }
+
+        function renderPreview(target) {
+          target.innerHTML = `${renderHeader()}${renderVaultHeader()}${renderFolderControls()}<section class="preview-content">${renderCollection()}</section>`;
+        }
+
+        function renderAll() {
+          root.dataset.theme = state.theme;
+          document.querySelectorAll('[data-preview]').forEach(renderPreview);
+          document.querySelectorAll('[data-theme-button]').forEach(button => button.classList.toggle('is-active', button.dataset.themeButton === state.theme));
+          document.querySelectorAll('[data-state-button]').forEach(button => button.classList.toggle('is-active', button.dataset.stateButton === state.dataState));
+        }
+
+        function showModal(type, assetId = null) {
+          state.modal = { type, assetId };
+          state.openMenu = null;
+          const asset = assets.find(item => item.id === assetId);
+          if (type === 'folder-manager') {
+            modalRoot.innerHTML = `<div class="modal-backdrop" data-action="close-modal"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="folder-modal-title" data-modal-surface><header class="modal-header"><div><h2 id="folder-modal-title">จัดการโฟลเดอร์</h2><p>หน้าต่างตัวอย่างสำหรับตรวจ visual เท่านั้น</p></div><button type="button" class="close-button" data-action="close-modal">×</button></header><div class="modal-body"><form class="mock-form" data-action="mock-submit"><label>ชื่อโฟลเดอร์<input value="New creative collection" /></label><div><p class="mock-section-label">ไอคอนโฟลเดอร์</p><div class="mock-mode-tabs"><button type="button" class="is-active">Emoji แนะนำ</button><button type="button">Emoji ของฉัน</button><button type="button">GIF / รูป</button></div><div class="mock-icon-row">${['📁', '🌙', '🎨', '🔮', '✨', '💎', '🎧', '🚀'].map(icon => `<span class="mock-icon">${icon}</span>`).join('')}</div><button type="button" class="mock-upload">＋ เลือก GIF หรือรูปจากเครื่อง</button></div><div><p class="mock-section-label">สีประจำโฟลเดอร์</p><div class="mock-color-row">${['#7A5CC7', '#C982A7', '#356FA8', '#67B8C7', '#A9B2D8', '#D08AAE'].map((color, index) => `<span class="mock-color ${index === 0 ? 'is-selected' : ''}" style="background:${color}" title="สีโฟลเดอร์"></span>`).join('')}</div></div></form></div><footer class="modal-footer"><button type="button" class="secondary-action is-wide" data-action="close-modal">ยกเลิก</button><button type="button" class="create-action" data-action="close-modal">สร้างโฟลเดอร์</button></footer></section></div>`;
+          } else {
+            modalRoot.innerHTML = `<div class="modal-backdrop" data-action="close-modal"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="move-modal-title" data-modal-surface><header class="modal-header"><div><h2 id="move-modal-title">ย้ายผลงานไปยังโฟลเดอร์</h2><p>${esc(asset?.title || 'Mock asset')}</p></div><button type="button" class="close-button" data-action="close-modal">×</button></header><div class="modal-body"><p class="mock-section-label">เลือกโฟลเดอร์ปลายทาง</p><button type="button" class="modal-folder-option" data-move-folder="none"><span class="option-copy"><span class="option-icon">🗃️</span><span><strong>ไม่มีโฟลเดอร์</strong><small>เก็บไว้ที่หน้าแรกของคลัง</small></span></span><span>○</span></button>${folders.map(folder => `<button type="button" class="modal-folder-option ${state.selectedMoveFolder === folder.id ? 'is-selected' : ''}" data-move-folder="${folder.id}"><span class="option-copy"><span class="option-icon">${folder.icon}</span><span><strong>${esc(folder.name)}</strong><small>${folderCount(folder.id)} ผลงานข้างใน</small></span></span><span>${state.selectedMoveFolder === folder.id ? '✓' : '○'}</span></button>`).join('')}</div><footer class="modal-footer"><button type="button" class="secondary-action is-wide" data-action="close-modal">ยกเลิก</button><button type="button" class="create-action" data-action="close-modal">ยืนยันการย้าย</button></footer></section></div>`;
+          }
+          modalRoot.classList.remove('hidden');
+        }
+
+        function closeModal() { state.modal = null; modalRoot.classList.add('hidden'); modalRoot.innerHTML = ''; }
+
+        document.addEventListener('click', event => {
+          const target = event.target.closest('button, [data-folder], [data-action="close-modal"], [data-move-folder]');
+          if (!target) return;
+          const action = target.dataset.action;
+          const tab = target.dataset.tab;
+          const folder = target.dataset.folder;
+
+          if (target.dataset.themeButton) { state.theme = target.dataset.themeButton; renderAll(); return; }
+          if (target.dataset.stateButton) { state.dataState = target.dataset.stateButton; state.openMenu = null; renderAll(); return; }
+          if (tab) { state.tab = tab; state.selectedFolder = null; state.openMenu = null; renderAll(); return; }
+          if (folder !== undefined) { state.selectedFolder = folder === 'all' || folder === 'unassigned' ? null : folder; state.tab = state.tab === 'folders' ? 'folders' : 'my_assets'; state.openMenu = null; renderAll(); return; }
+          if (target.dataset.moveFolder) { state.selectedMoveFolder = target.dataset.moveFolder === 'none' ? null : target.dataset.moveFolder; showModal('move-folder', state.modal?.assetId || null); return; }
+          if (action === 'toggle-menu') { event.stopPropagation(); state.openMenu = state.openMenu === target.dataset.asset ? null : target.dataset.asset; renderAll(); return; }
+          if (action === 'folder-manager') { showModal('folder-manager'); return; }
+          if (action === 'move-folder') { showModal('move-folder', target.dataset.asset); return; }
+          if (action === 'close-modal' || action === 'mock-submit') { closeModal(); return; }
+          if (action === 'bookmark') { target.textContent = target.textContent === '★' ? '☆' : '★'; target.classList.toggle('is-bookmarked'); return; }
+          if (['edit', 'copy', 'delete', 'restore', 'permanent-delete', 'profile', 'create-asset'].includes(action)) { state.openMenu = null; renderAll(); return; }
+        });
+
+        document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (state.modal) closeModal(); else if (state.openMenu) { state.openMenu = null; renderAll(); } } });
+        renderAll();
+      })();
+    </script>
+  </body>
+</html>

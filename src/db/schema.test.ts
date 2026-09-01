@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL('../../supabase/migrations/20260828140320_phase_1_stabilize_security.sql', import.meta.url),
   'utf8'
 );
+const creatorSpaceMigration = readFileSync(
+  new URL('../../supabase/migrations/20260831190000_creator_space_profile_foundation.sql', import.meta.url),
+  'utf8'
+);
 const legacyReference = readFileSync(new URL('../lib/constants.ts', import.meta.url), 'utf8');
 
 describe('Phase 1 database security contract', () => {
@@ -30,5 +34,12 @@ describe('Phase 1 database security contract', () => {
     const functionBody = migration.match(/create or replace function public\.fork_asset[\s\S]*?end\s*\$\$;/i)?.[0] || '';
     expect(functionBody).toContain('insert into public.assets');
     expect(functionBody.indexOf('insert into public.assets')).toBeLessThan(functionBody.indexOf('set fork_count = fork_count + 1'));
+  });
+
+  it('keeps Creator Space profile links and media owner-scoped', () => {
+    expect(creatorSpaceMigration).toMatch(/add column if not exists username/i);
+    expect(creatorSpaceMigration).toMatch(/create table if not exists public\.profile_social_links/i);
+    expect(creatorSpaceMigration).toMatch(/visible = true or \(select auth\.uid\(\)\)::text = profile_id/i);
+    expect(creatorSpaceMigration).toMatch(/profile_media_owner_insert[\s\S]*storage\.foldername\(name\)/i);
   });
 });

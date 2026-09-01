@@ -3,6 +3,19 @@
 The SQL files in `supabase/migrations/` are review artifacts. Phase 1 does not
 apply them to the production project automatically.
 
+## Local Auth configuration
+
+The Vite client reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` at build
+time. Copy `.env.example` to an ignored `.env.local`, set both values from the
+intended Supabase project, and rebuild before using `npm run preview`. Never
+place a service-role key in a Vite environment variable.
+
+Email signup uses the current browser origin as `emailRedirectTo`. For local
+preview, add the exact origin (for example `http://localhost:4173`) to the
+Supabase Auth URL Configuration allow list. The app handles both outcomes:
+`data.session` means the project does not require email confirmation; a null
+session means the UI asks the user to confirm their email before login.
+
 ## Phase 1 rollout checklist
 
 1. Take a database backup and test the migration on a Supabase development

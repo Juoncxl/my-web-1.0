@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
-import { DEFAULT_AVATAR, mapSupabaseAuthUser } from './authUserMapper';
+import { mapSupabaseAuthUser } from './authUserMapper';
 
 function makeAuthUser(overrides: Partial<SupabaseAuthUser> = {}): SupabaseAuthUser {
   return {
@@ -62,8 +62,8 @@ describe('mapSupabaseAuthUser', () => {
       email: 'email-name@example.com'
     }));
     expect(emailUser.displayName).toBe('email-name');
-    expect(emailUser.bio).toBe('นักสร้างสรรค์ผลงาน 🌸');
-    expect(emailUser.avatarUrl).toBe(DEFAULT_AVATAR);
+    expect(emailUser.bio).toBe('');
+    expect(emailUser.avatarUrl).toBeUndefined();
     expect(Object.hasOwn(emailUser, 'isGuest')).toBe(false);
   });
 });

@@ -1,46 +1,55 @@
 import React from 'react';
-import { Camera, Upload } from 'lucide-react';
-
-const PRESET_AVATARS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80'
-];
+import { Camera, Upload, UserRound } from 'lucide-react';
 
 interface ProfileAvatarPickerProps {
   avatarUrl: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onAvatarChange: (avatarUrl: string) => void;
+  onAvatarFileChange?: (file: File) => void;
+  onValidationError?: (message: string) => void;
+  fallbackLabel?: string;
 }
 
 export const ProfileAvatarPicker: React.FC<ProfileAvatarPickerProps> = ({
   avatarUrl,
   fileInputRef,
-  onAvatarChange
+  onAvatarChange,
+  onAvatarFileChange,
+  onValidationError,
+  fallbackLabel = 'C'
 }) => {
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+      onValidationError?.('รองรับเฉพาะไฟล์ JPG, PNG, WEBP หรือ GIF');
+      event.target.value = '';
+      return;
+    }
+    if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
+      onValidationError?.('ขนาดไฟล์ต้องไม่เกิน 5MB');
+      event.target.value = '';
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
-      onAvatarChange(reader.result as string);
+      if (typeof reader.result === 'string') onAvatarChange(reader.result);
     };
+    reader.onerror = () => onValidationError?.('ไม่สามารถอ่านไฟล์รูปภาพได้');
+    onAvatarFileChange?.(file);
     reader.readAsDataURL(file);
   };
 
   return (
     <div className="flex flex-col items-center space-y-2">
       <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-        <img
-          src={avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-          alt="Avatar"
-          className="w-20 h-20 rounded-full object-cover ring-4 ring-purple-100 dark:ring-purple-900 shadow-md"
-        />
-        <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        {avatarUrl ? <img src={avatarUrl} alt="ตัวอย่างรูปโปรไฟล์" className="w-20 h-20 rounded-full object-cover ring-4 ring-purple-100 dark:ring-purple-900 shadow-md" referrerPolicy="no-referrer" /> : (
+          <span className="w-20 h-20 rounded-full ring-4 ring-purple-100 dark:ring-purple-900 shadow-md bg-gradient-to-br from-purple-500 to-cyan-500 text-white flex items-center justify-center text-2xl font-black" aria-label="ยังไม่มีรูปโปรไฟล์">
+            {fallbackLabel.slice(0, 1).toUpperCase() || <UserRound className="w-7 h-7" />}
+          </span>
+        )}
+        <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true">
           <Camera className="w-6 h-6 text-white" />
         </div>
       </div>
@@ -61,25 +70,6 @@ export const ProfileAvatarPicker: React.FC<ProfileAvatarPickerProps> = ({
         <Upload className="w-3 h-3" />
         <span>อัปโหลดรูปจากเครื่อง</span>
       </button>
-
-      {/* Quick Avatar Presets */}
-      <div className="pt-2">
-        <span className="text-[10px] text-slate-400 dark:text-slate-500 block text-center mb-1">หรือเลือกภาพสำเร็จรูป:</span>
-        <div className="flex items-center gap-1.5 justify-center">
-          {PRESET_AVATARS.map((avatar, index) => (
-            <button
-              key={index}
-              type="button"
-              onClick={() => onAvatarChange(avatar)}
-              className={`w-7 h-7 rounded-full overflow-hidden transition-transform ${
-                avatarUrl === avatar ? 'ring-2 ring-purple-600 dark:ring-purple-400 scale-110' : 'opacity-70 hover:opacity-100'
-              }`}
-            >
-              <img src={avatar} alt="preset" className="w-full h-full object-cover" />
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };

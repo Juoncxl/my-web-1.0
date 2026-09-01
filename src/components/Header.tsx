@@ -29,6 +29,7 @@ interface HeaderProps {
   onOpenSignUpModal?: () => void;
   onOpenProfileModal: () => void;
   onOpenSettingsModal?: () => void;
+  creatorMode?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -40,7 +41,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   onOpenSignUpModal,
   onOpenProfileModal,
-  onOpenSettingsModal
+  onOpenSettingsModal,
+  creatorMode = false
 }) => {
   const { currentUser, isAuthenticated, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -121,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             
             {/* View Switcher: Public Feed vs My Vault */}
-            <div className="cv-view-switcher hidden md:flex items-center p-1 rounded-full">
+            {!creatorMode && <div className="cv-view-switcher hidden md:flex items-center p-1 rounded-full">
               <button
                 onClick={() => onViewChange('feed')}
                 className={`cv-view-tab flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
@@ -144,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <Lock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300" />
                 <span>คลังของฉัน</span>
               </button>
-            </div>
+            </div>}
 
             {/* Dark / Light Theme Toggle */}
             <button
@@ -161,13 +163,13 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {/* Create Asset Button */}
-            <button
+            {!creatorMode && <button
               onClick={onOpenCreateModal}
               className="cv-create-button flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">สร้างผลงาน</span>
-            </button>
+            </button>}
 
             {/* User Profile Avatar with Dropdown Menu */}
             <div className="relative" ref={dropdownRef}>
@@ -241,6 +243,18 @@ export const Header: React.FC<HeaderProps> = ({
                       <UserIcon className="w-4 h-4 text-purple-500" />
                       <span>คลังผลงานของฉัน</span>
                     </button>
+
+                    {isAuthenticated && currentUser && !creatorMode && (
+                      <a
+                        href={`/creator/${encodeURIComponent(currentUser.username || currentUser.id)}`}
+                        onClick={() => setDropdownOpen(false)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
+                        role="menuitem"
+                      >
+                        <UserIcon className="w-4 h-4 text-cyan-600 dark:text-cyan-300" />
+                        <span>Creator Space ของฉัน</span>
+                      </a>
+                    )}
 
                     <button
                       onClick={() => {

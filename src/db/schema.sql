@@ -7,8 +7,10 @@
 CREATE TABLE IF NOT EXISTS public.profiles (
     id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL DEFAULT 'Creator',
-    bio TEXT DEFAULT 'นักสร้างสรรค์ผลงาน 🌸',
-    avatar_url TEXT DEFAULT 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    username TEXT,
+    bio TEXT DEFAULT '',
+    avatar_url TEXT,
+    cover_url TEXT,
     is_guest BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
@@ -57,6 +59,27 @@ CREATE TABLE IF NOT EXISTS public.assets (
     CONSTRAINT assets_status_check CHECK (status IN ('idea', 'draft', 'in_progress', 'finished', 'archived')),
     CONSTRAINT assets_counters_nonnegative_check CHECK (likes_count >= 0 AND legacy_likes_count >= 0 AND fork_count >= 0)
 );
+
+-- 2b. Profile social links. Public reads are restricted to visible links by RLS.
+CREATE TABLE IF NOT EXISTS public.profile_social_links (
+    id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    platform TEXT NOT NULL DEFAULT 'custom',
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    visible BOOLEAN NOT NULL DEFAULT true,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    CONSTRAINT profile_social_links_url_check CHECK (
+        LEFT(LOWER(TRIM(url)), 8) = 'https://' OR LEFT(LOWER(TRIM(url)), 7) = 'mailto:'
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS profiles_username_lower_unique
+    ON public.profiles (LOWER(username))
+    WHERE username IS NOT NULL AND LENGTH(TRIM(username)) > 0;
+CREATE INDEX IF NOT EXISTS profile_social_links_profile_order_idx
+    ON public.profile_social_links (profile_id, sort_order);
 
 -- Migration safety: Add any missing columns to existing assets table
 DO $$ 
@@ -139,6 +162,7 @@ WHERE visibility = 'public' AND is_public = true AND deleted_at IS NULL;
 
 -- 8. Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profile_social_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.folders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookmarks ENABLE ROW LEVEL SECURITY;
@@ -155,7 +179,7 @@ BEGIN
         SELECT schemaname, tablename, policyname
         FROM pg_policies
         WHERE schemaname = 'public'
-          AND tablename = ANY (ARRAY['profiles', 'folders', 'assets', 'bookmarks', 'reports', 'asset_likes'])
+          AND tablename = ANY (ARRAY['profiles', 'profile_social_links', 'folders', 'assets', 'bookmarks', 'reports', 'asset_likes'])
     LOOP
         EXECUTE format(
             'DROP POLICY IF EXISTS %I ON %I.%I',
@@ -330,7 +354,7 @@ BEGIN
             split_part(COALESCE(NEW.email, ''), '@', 1),
             'Creator'
         ),
-        COALESCE(NEW.raw_user_meta_data ->> 'bio', 'นักสร้างสรรค์ผลงาน 🌸'),
+        COALESCE(NEW.raw_user_meta_data ->> 'bio', ''),
         COALESCE(
             NEW.raw_user_meta_data ->> 'avatar_url',
             NEW.raw_user_meta_data ->> 'avatarUrl'
@@ -348,6 +372,7 @@ REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated
 
 -- 12. Least-privilege grants
 REVOKE ALL ON public.profiles FROM anon, authenticated;
+REVOKE ALL ON public.profile_social_links FROM anon, authenticated;
 REVOKE ALL ON public.folders FROM anon, authenticated;
 REVOKE ALL ON public.assets FROM anon, authenticated;
 REVOKE ALL ON public.bookmarks FROM anon, authenticated;
@@ -356,6 +381,8 @@ REVOKE ALL ON public.asset_likes FROM anon, authenticated;
 
 GRANT SELECT ON public.profiles TO anon, authenticated;
 GRANT INSERT, UPDATE ON public.profiles TO authenticated;
+GRANT SELECT ON public.profile_social_links TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.profile_social_links TO authenticated;
 GRANT SELECT ON public.assets TO anon, authenticated;
 GRANT INSERT, UPDATE, DELETE ON public.assets TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.folders TO authenticated;
@@ -371,6 +398,16 @@ TO authenticated WITH CHECK ((SELECT auth.uid())::TEXT = id AND COALESCE(is_gues
 CREATE POLICY profiles_owner_update ON public.profiles FOR UPDATE
 TO authenticated USING ((SELECT auth.uid())::TEXT = id)
 WITH CHECK ((SELECT auth.uid())::TEXT = id AND COALESCE(is_guest, false) = false);
+
+CREATE POLICY profile_social_links_visible_read ON public.profile_social_links FOR SELECT
+TO anon, authenticated USING (visible = true OR (SELECT auth.uid())::TEXT = profile_id);
+CREATE POLICY profile_social_links_owner_insert ON public.profile_social_links FOR INSERT
+TO authenticated WITH CHECK ((SELECT auth.uid())::TEXT = profile_id);
+CREATE POLICY profile_social_links_owner_update ON public.profile_social_links FOR UPDATE
+TO authenticated USING ((SELECT auth.uid())::TEXT = profile_id)
+WITH CHECK ((SELECT auth.uid())::TEXT = profile_id);
+CREATE POLICY profile_social_links_owner_delete ON public.profile_social_links FOR DELETE
+TO authenticated USING ((SELECT auth.uid())::TEXT = profile_id);
 
 CREATE POLICY folders_owner_read ON public.folders FOR SELECT
 TO authenticated USING ((SELECT auth.uid())::TEXT = user_id);

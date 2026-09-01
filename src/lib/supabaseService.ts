@@ -1,4 +1,4 @@
-import { Asset, Folder, User, AssetStatus, AssetVersion } from '../types';
+import type { Asset, Folder, User, AssetStatus, AssetVersion, ProfileSocialLink } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { formatFriendlyErrorMessage } from './apiHelper';
 import { isLegacyGuestUserId } from './accessPolicy';
@@ -12,9 +12,14 @@ const LEGACY_IMPORT_STORAGE_PREFIX = 'creator_vault_legacy_import_';
 type CloudAuth = { userId: string; error: null } | { userId: null; error: string };
 
 function logServiceError(context: string, error: unknown) {
-  if ((import.meta as any).env?.DEV) {
-    console.error(`[supabaseService:${context}]`, error);
-  }
+  if (!((import.meta as any).env?.DEV || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)))) return;
+  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  console.error(`[supabaseService:${context}]`, {
+    code: typeof record.code === 'string' ? record.code : undefined,
+    status: typeof record.status === 'number' ? record.status : undefined,
+    name: typeof record.name === 'string' ? record.name : undefined,
+    message: typeof record.message === 'string' ? record.message.replace(/[\r\n]+/g, ' ').slice(0, 300) : String(error || 'Unknown service error')
+  });
 }
 
 function toServiceError(error: any, fallback: string): string {
@@ -193,6 +198,56 @@ function mapDbToFolder(row: any): Folder {
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
     updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
   };
+}
+
+function mapDbToSocialLink(row: any): ProfileSocialLink {
+  return {
+    id: row.id,
+    platform: row.platform || 'custom',
+    label: row.label || row.platform || 'ลิงก์',
+    url: row.url || '',
+    visible: row.visible !== false,
+    sortOrder: Number.isFinite(row.sort_order) ? row.sort_order : 0
+  };
+}
+
+function mapProfileBio(value: unknown): string {
+  const bio = typeof value === 'string' ? value : '';
+  return bio === 'นักสร้างสรรค์ผลงาน 🌸' ? '' : bio;
+}
+
+function createClientId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isSafeProfileLink(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'mailto:';
+  } catch {
+    return false;
+  }
+}
+
+async function fetchProfileSocialLinks(userId: string): Promise<ProfileSocialLink[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from('profile_social_links')
+    .select('id, platform, label, url, visible, sort_order')
+    .eq('profile_id', userId)
+    .order('sort_order', { ascending: true });
+
+  if (error) {
+    logServiceError('fetchProfileSocialLinks', error);
+    return [];
+  }
+
+  return (data || []).map(mapDbToSocialLink);
 }
 
 // DIRECT SUPABASE DATABASE SERVICE (CRUD & ADVANCED LOGIC)
@@ -907,7 +962,7 @@ export const supabaseService = {
         .maybeSingle();
 
       if (error) {
-        console.warn('Supabase getProfile error:', error);
+        logServiceError('getProfile', error);
         return null;
       }
 
@@ -915,15 +970,95 @@ export const supabaseService = {
         return {
           id: data.id,
           displayName: data.display_name || data.displayName,
-          bio: data.bio || '',
+          username: data.username || undefined,
+          bio: mapProfileBio(data.bio),
           avatarUrl: data.avatar_url || data.avatarUrl,
+          coverUrl: data.cover_url || data.coverUrl,
+          socialLinks: await fetchProfileSocialLinks(userId),
           createdAt: data.created_at
         };
       }
-    } catch (e) {
-      console.warn('Profile fetch exception:', e);
+    } catch (error) {
+      logServiceError('getProfile:exception', error);
     }
     return null;
+  },
+
+  async getCreatorProfile(slug: string): Promise<{ data: User | null; error: string | null }> {
+    const supabase = getSupabaseClient();
+    let cleanSlug = '';
+    try {
+      cleanSlug = decodeURIComponent(slug).trim();
+    } catch {
+      return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+    }
+    if (!supabase) return { data: null, error: 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
+    if (!cleanSlug || cleanSlug.length > 128) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+
+    try {
+      let { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, bio, avatar_url, cover_url, created_at')
+        .eq('username', cleanSlug)
+        .maybeSingle();
+
+      if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
+      if (!data) {
+        const result = await supabase
+          .from('profiles')
+          .select('id, display_name, username, bio, avatar_url, cover_url, created_at')
+          .eq('id', cleanSlug)
+          .maybeSingle();
+        data = result.data;
+        error = result.error;
+      }
+      if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
+      if (!data) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+
+      const socialLinks = await fetchProfileSocialLinks(data.id);
+      return {
+        data: {
+          id: data.id,
+          displayName: data.display_name || 'Creator',
+          username: data.username || undefined,
+          bio: mapProfileBio(data.bio),
+          avatarUrl: data.avatar_url || undefined,
+          coverUrl: data.cover_url || undefined,
+          socialLinks,
+          createdAt: data.created_at || new Date().toISOString()
+        },
+        error: null
+      };
+    } catch (error) {
+      return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
+    }
+  },
+
+  async uploadProfileImage(
+    userId: string,
+    file: File,
+    kind: 'avatar' | 'cover'
+  ): Promise<{ data: string | null; error: string | null }> {
+    const supabase = getSupabaseClient();
+    const auth = await requireCloudUser(userId);
+    const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const maxFileSize = 5 * 1024 * 1024;
+    if (!supabase || auth.error || !auth.userId) return { data: null, error: auth.error || 'ระบบจัดเก็บรูปภาพยังไม่พร้อมใช้งาน' };
+    if (!allowedTypes.has(file.type)) return { data: null, error: 'รองรับเฉพาะไฟล์ JPG, PNG, WEBP หรือ GIF' };
+    if (file.size <= 0 || file.size > maxFileSize) return { data: null, error: 'ขนาดไฟล์ต้องไม่เกิน 5MB' };
+
+    const extension = file.type.split('/')[1].replace('jpeg', 'jpg');
+    const path = `${auth.userId}/${kind}-${Date.now()}-${createClientId('image').slice(-8)}.${extension}`;
+    try {
+      const { error } = await supabase.storage
+        .from('profile-media')
+        .upload(path, file, { cacheControl: '3600', contentType: file.type, upsert: false });
+      if (error) return { data: null, error: toServiceError(error, 'อัปโหลดรูปภาพไม่สำเร็จ') };
+      const { data } = supabase.storage.from('profile-media').getPublicUrl(path);
+      return { data: data.publicUrl, error: null };
+    } catch (error) {
+      return { data: null, error: toServiceError(error, 'อัปโหลดรูปภาพไม่สำเร็จ') };
+    }
   },
 
   async upsertProfile(user: User): Promise<{ success: boolean; error: string | null }> {
@@ -937,14 +1072,52 @@ export const supabaseService = {
       const { error } = await supabase.from('profiles').upsert({
         id: auth.userId,
         display_name: user.displayName,
+        username: user.username || null,
         bio: user.bio,
         avatar_url: user.avatarUrl,
+        cover_url: user.coverUrl || null,
         is_guest: false,
-        created_at: user.createdAt
+        updated_at: new Date().toISOString()
       });
 
       if (error) {
         return { success: false, error: toServiceError(error, 'บันทึกโปรไฟล์ไม่สำเร็จ') };
+      }
+
+      if (user.socialLinks !== undefined) {
+        const links = user.socialLinks
+          .map((link, index) => ({
+            id: link.id || createClientId('social'),
+            profile_id: auth.userId,
+            platform: link.platform || 'custom',
+            label: link.label.trim(),
+            url: link.url.trim(),
+            visible: link.visible !== false,
+            sort_order: link.sortOrder ?? index,
+            updated_at: new Date().toISOString()
+          }))
+          .filter(link => link.label && isSafeProfileLink(link.url));
+
+        const { data: existingLinks, error: existingError } = await supabase
+          .from('profile_social_links')
+          .select('id')
+          .eq('profile_id', auth.userId);
+        if (existingError) return { success: false, error: toServiceError(existingError, 'บันทึกลิงก์โปรไฟล์ไม่สำเร็จ') };
+
+        const nextIds = new Set(links.map(link => link.id));
+        const idsToDelete = (existingLinks || []).map(link => link.id).filter(id => !nextIds.has(id));
+        if (idsToDelete.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('profile_social_links')
+            .delete()
+            .in('id', idsToDelete)
+            .eq('profile_id', auth.userId);
+          if (deleteError) return { success: false, error: toServiceError(deleteError, 'บันทึกลิงก์โปรไฟล์ไม่สำเร็จ') };
+        }
+        if (links.length > 0) {
+          const { error: linksError } = await supabase.from('profile_social_links').upsert(links);
+          if (linksError) return { success: false, error: toServiceError(linksError, 'บันทึกลิงก์โปรไฟล์ไม่สำเร็จ') };
+        }
       }
       return { success: true, error: null };
     } catch (error) {

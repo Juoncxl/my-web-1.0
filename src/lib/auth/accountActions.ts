@@ -1,4 +1,4 @@
-import type { User } from '../../types';
+import type { ProfileSocialLink, User } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
 import { getSupabaseClient } from '../supabaseClient';
 import { supabaseService } from '../supabaseService';
@@ -11,7 +11,7 @@ export interface ProfileUpdateResult {
 
 export async function updateProfile(
   currentUser: User | null,
-  data: { displayName?: string; bio?: string; avatarUrl?: string }
+  data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; socialLinks?: ProfileSocialLink[] }
 ): Promise<ProfileUpdateResult> {
   if (!currentUser) {
     return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนแก้ไขโปรไฟล์' };
@@ -20,8 +20,11 @@ export async function updateProfile(
   const updatedUser: User = {
     ...currentUser,
     displayName: data.displayName?.trim() || currentUser.displayName,
+    username: data.username !== undefined ? data.username.trim().replace(/^@+/, '').toLowerCase() : currentUser.username,
     bio: data.bio !== undefined ? data.bio.trim() : currentUser.bio,
-    avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : currentUser.avatarUrl
+    avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : currentUser.avatarUrl,
+    coverUrl: data.coverUrl !== undefined ? data.coverUrl : currentUser.coverUrl,
+    socialLinks: data.socialLinks !== undefined ? data.socialLinks : currentUser.socialLinks
   };
 
   const saved = await supabaseService.upsertProfile(updatedUser);

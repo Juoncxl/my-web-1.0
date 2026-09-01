@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import type { AuthContextType } from '../types';
+import type { AuthContextType, ProfileSocialLink } from '../types';
 import { isGuestUser } from '../lib/accessPolicy';
 import {
   changePassword as changePasswordAction,
@@ -76,8 +76,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateProfile = async (data: {
     displayName?: string;
+    username?: string;
     bio?: string;
     avatarUrl?: string;
+    coverUrl?: string;
+    socialLinks?: ProfileSocialLink[];
   }): Promise<{ success: boolean; error?: string }> => {
     const result = await updateProfileAction(currentUser, data);
     if (!result.success) return { success: false, error: result.error };

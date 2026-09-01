@@ -31,6 +31,8 @@ import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { VaultPage } from './pages/VaultPage';
+import { CreatorSpacePage } from './pages/CreatorSpacePage';
+import { getCreatorSlug } from './hooks/useCreatorSpaceData';
 
 function MainApp() {
   const { 
@@ -41,8 +43,10 @@ function MainApp() {
     isOnboardingOpen,
     setIsOnboardingOpen,
     isSettingsOpen,
-    setIsSettingsOpen
+    setIsSettingsOpen,
+    isLoading: authLoading
   } = useAuth();
+  const creatorSlug = getCreatorSlug(window.location.pathname);
 
   // Navigation State
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
@@ -135,13 +139,14 @@ function MainApp() {
   }, [openAssetView, trackRecentlyViewed]);
 
   const handleViewChange = useCallback((view: 'feed' | 'vault') => {
+    if (authLoading) return;
     if (view === 'vault' && !currentUser) {
       openAuthModal('login');
       return;
     }
     setActiveView(view);
     setSelectedTag(null);
-  }, [currentUser, openAuthModal]);
+  }, [authLoading, currentUser, openAuthModal]);
 
   const handleVaultTabChange = useCallback((tab: VaultTabType) => {
     setActiveVaultTab(tab);
@@ -150,12 +155,13 @@ function MainApp() {
 
   // Persisted actions require a real Supabase account session.
   const handleOpenCreateModal = useCallback(() => {
+    if (authLoading) return;
     if (!canCreateOwnedAsset(currentUser)) {
       openAuthModal('signup');
       return;
     }
     openCreateEditor();
-  }, [currentUser, openAuthModal, openCreateEditor]);
+  }, [authLoading, currentUser, openAuthModal, openCreateEditor]);
 
   const handleOpenAIModal = useCallback(() => {
     setAiContext(null);
@@ -341,69 +347,82 @@ function MainApp() {
     onCreateAsset: handleOpenCreateModal
   };
 
+  // Do not let account-only UI interpret the initial auth check as a guest
+  // session. The AuthProvider is the single source of truth, but its initial
+  // getSession/getUser round trip is asynchronous.
+  if (authLoading) {
+    return (
+      <div className="cv-app-shell min-h-screen flex items-center justify-center px-4 text-slate-600 dark:text-slate-300" aria-busy="true">
+        <span className="text-sm">กำลังตรวจสอบบัญชี...</span>
+      </div>
+    );
+  }
+
   return (
     <div className="cv-app-shell min-h-screen flex flex-col text-slate-800 dark:text-slate-100 transition-colors duration-200">
-      
-      {/* Top Header */}
-      <Header
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        activeView={activeView}
-        onViewChange={handleViewChange}
-        onOpenCreateModal={handleOpenCreateModal}
-        onOpenAuthModal={() => openAuthModal('login')}
-        onOpenSignUpModal={() => openAuthModal('signup')}
-        onOpenProfileModal={() => setIsProfileOpen(true)}
-        onOpenSettingsModal={() => setIsSettingsOpen(true)}
-      />
-
-      {/* Main Container */}
-      <main className="cv-main-container flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {operationError && (
-          <div className="mb-4 p-3 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2" role="alert">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span className="flex-1">{operationError}</span>
-            <button type="button" onClick={() => setOperationError(null)} aria-label="ปิดข้อความแจ้งเตือน" className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-        
-        {activeView === 'feed' ? (
-          <DiscoverPage
-            collectionProps={collectionProps}
+      {creatorSlug ? (
+        <CreatorSpacePage
+          slug={creatorSlug}
+          onCreateAsset={handleOpenCreateModal}
+          onOpenAuth={() => openAuthModal('login')}
+          onOpenFolderManager={() => setIsFolderManagerOpen(true)}
+        />
+      ) : (
+        <>
+          {/* Top Header */}
+          <Header
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            activeView={activeView}
+            onViewChange={handleViewChange}
+            onOpenCreateModal={handleOpenCreateModal}
+            onOpenAuthModal={() => openAuthModal('login')}
+            onOpenSignUpModal={() => openAuthModal('signup')}
+            onOpenProfileModal={() => setIsProfileOpen(true)}
+            onOpenSettingsModal={() => setIsSettingsOpen(true)}
           />
-        ) : (
-          <VaultPage
-            collectionProps={collectionProps}
-            totalAssetsCount={vaultStats.total}
-            publicCount={vaultStats.publicCount}
-            privateCount={vaultStats.privateCount}
-            bookmarksCount={vaultStats.bookmarksCount}
-            trashCount={vaultStats.trashCount}
-            folders={foldersWithCounts}
-            activeVaultTab={activeVaultTab}
-            onChangeVaultTab={handleVaultTabChange}
-            onOpenFolderManager={() => setIsFolderManagerOpen(true)}
-            onEditProfile={() => setIsProfileOpen(true)}
-            onCreateAsset={handleOpenCreateModal}
-          />
-        )}
 
-      </main>
+          {/* Main Container */}
+          <main className="cv-main-container flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            {operationError && (
+              <div className="mb-4 p-3 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2" role="alert">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="flex-1">{operationError}</span>
+                <button type="button" onClick={() => setOperationError(null)} aria-label="ปิดข้อความแจ้งเตือน" className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {activeView === 'feed' ? <DiscoverPage collectionProps={collectionProps} /> : (
+              <VaultPage
+                collectionProps={collectionProps}
+                totalAssetsCount={vaultStats.total}
+                publicCount={vaultStats.publicCount}
+                privateCount={vaultStats.privateCount}
+                bookmarksCount={vaultStats.bookmarksCount}
+                trashCount={vaultStats.trashCount}
+                folders={foldersWithCounts}
+                activeVaultTab={activeVaultTab}
+                onChangeVaultTab={handleVaultTabChange}
+                onOpenFolderManager={() => setIsFolderManagerOpen(true)}
+                onEditProfile={() => setIsProfileOpen(true)}
+                onCreateAsset={handleOpenCreateModal}
+              />
+            )}
+          </main>
 
-      {/* Footer */}
-      <footer className="cv-footer border-t py-6 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-2">
-            <img src={brandMicroMarkUrl} alt="" aria-hidden="true" className="w-4 h-4 object-contain" />
-            <span className="font-bold text-slate-700 dark:text-slate-300">CXL Studio</span>
-            <span>— คลังไอเดียสำหรับนักเขียนและครีเอเตอร์</span>
-          </div>
-
-          <span>เก็บและจัดการผลงานของคุณไว้ในที่เดียว</span>
-        </div>
-      </footer>
+          <footer className="cv-footer border-t py-6 mt-12">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-2">
+                <img src={brandMicroMarkUrl} alt="" aria-hidden="true" className="w-4 h-4 object-contain" />
+                <span className="font-bold text-slate-700 dark:text-slate-300">CXL Studio</span>
+                <span>— คลังไอเดียสำหรับนักเขียนและครีเอเตอร์</span>
+              </div>
+              <span>เก็บและจัดการผลงานของคุณไว้ในที่เดียว</span>
+            </div>
+          </footer>
+        </>
+      )}
 
       {/* Modals */}
       <AssetViewModal
