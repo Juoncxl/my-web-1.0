@@ -175,7 +175,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   useEffect(() => {
     if (!isMockPersistence || !isOwner || !profile || !settingsHydrated) return;
     writeCreatorSpaceSettings(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>> });
-  }, [freeOrder, isOwner, layout, lockedPreset, profile, settingsHydrated, spans, widgetConfigs, widgetRail, widgetTitles, widgets]);
+  }, [freeOrder, isOwner, layout, lockedPreset, profile?.id, settingsHydrated, spans, widgetConfigs, widgetRail, widgetTitles, widgets]);
   const visibleAssets = useMemo(() => getCreatorVisibleAssets(assets, isEditing), [assets, isEditing]);
   const filteredAssets = useMemo(() => filterAssets(visibleAssets, selectedCategory, isEditing ? visibility : 'all', searchQuery), [isEditing, searchQuery, selectedCategory, visibility, visibleAssets]);
   const publicAssets = useMemo(() => visibleAssets.filter(isPublicFeedVisibility), [visibleAssets]);

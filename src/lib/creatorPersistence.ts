@@ -59,13 +59,15 @@ function readState(): CreatorSandboxState {
   return memoryState;
 }
 
-function writeState(next: CreatorSandboxState): void {
+function writeState(next: CreatorSandboxState, notifyDataListeners = true): void {
   memoryState = next;
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    window.dispatchEvent(new Event('creator-vault-qa-data-changed'));
-    window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
+    if (notifyDataListeners) {
+      window.dispatchEvent(new Event('creator-vault-qa-data-changed'));
+      window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
+    }
   } catch (error) {
     console.warn('[creatorPersistence] local sandbox write failed', error);
   }
@@ -134,7 +136,10 @@ export function readCreatorSpaceSettings(userId: string): CreatorSpaceSettings |
 
 export function writeCreatorSpaceSettings(userId: string, settings: CreatorSpaceSettings): void {
   const state = readState();
-  writeState({ ...state, settings: { ...state.settings, [userId]: settings } });
+  // Layout/widget settings are local presentation state. They must not notify
+  // asset/profile data listeners: doing so creates a settings -> profile
+  // refresh -> rerender -> settings feedback loop on the Profile route.
+  writeState({ ...state, settings: { ...state.settings, [userId]: settings } }, false);
 }
 
 export function readMockBookmarks(userId: string): string[] {
