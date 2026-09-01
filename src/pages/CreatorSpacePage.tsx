@@ -62,7 +62,11 @@ function filterAssets(assets: Asset[], category: AssetCategory | 'all', visibili
     if (visibility === 'public' && !isPublicFeedVisibility(asset)) return false;
     if (visibility === 'private' && isPublicFeedVisibility(asset)) return false;
     if (!query) return true;
-    return asset.title.toLowerCase().includes(query) || asset.content.toLowerCase().includes(query) || Boolean(asset.tags?.some(tag => tag.toLowerCase().includes(query)));
+    return asset.title.toLowerCase().includes(query)
+      || Boolean(asset.shortDescription?.toLowerCase().includes(query))
+      || asset.content.toLowerCase().includes(query)
+      || Boolean(asset.contentBlocks?.some(block => block.title.toLowerCase().includes(query) || block.body.toLowerCase().includes(query)))
+      || Boolean(asset.tags?.some(tag => tag.toLowerCase().includes(query)));
   });
 }
 

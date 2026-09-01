@@ -151,6 +151,8 @@ function mapDbToAsset(row: any): Asset {
       ? parseStoredJson(row.icon, { type: 'emoji', value: row.icon || '✨' })
       : row.icon || { type: 'emoji', value: '✨' },
     category: row.category,
+    shortDescription: row.short_description ?? row.shortDescription,
+    contentBlocks: parseStoredJson(row.content_blocks ?? row.contentBlocks, []),
     content: row.content || '',
     uiCodeSnippet: row.ui_code_snippet || row.uiCodeSnippet || '',
     previewImage: row.preview_image || row.previewImage,
@@ -303,7 +305,7 @@ async function fetchAssetsFromMock(options?: {
   if (options?.userId && options.folderId !== undefined) list = list.filter(asset => options.folderId === null ? !asset.folderId : asset.folderId === options.folderId);
   if (options?.search?.trim()) {
     const search = options.search.toLowerCase().trim();
-    list = list.filter(asset => asset.title.toLowerCase().includes(search) || asset.content.toLowerCase().includes(search) || asset.tags?.some(tag => tag.toLowerCase().includes(search)));
+    list = list.filter(asset => asset.title.toLowerCase().includes(search) || asset.shortDescription?.toLowerCase().includes(search) || asset.content.toLowerCase().includes(search) || asset.contentBlocks?.some(block => block.title.toLowerCase().includes(search) || block.body.toLowerCase().includes(search)) || asset.tags?.some(tag => tag.toLowerCase().includes(search)));
   }
   return { data: list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), error: null };
 }

@@ -47,6 +47,15 @@ export interface AssetVersion {
   editorName?: string;
 }
 
+export type WorkContentBlockType = 'Text' | 'Heading' | 'Image' | 'Prompt' | 'UI Code' | 'Divider' | 'Note';
+
+export interface WorkContentBlock {
+  id: string;
+  type: WorkContentBlockType;
+  title: string;
+  body: string;
+}
+
 export interface Asset {
   id: string;
   userId: string;
@@ -55,6 +64,8 @@ export interface Asset {
   title: string;
   icon: AssetIcon;
   category: AssetCategory;
+  shortDescription?: string;
+  contentBlocks?: WorkContentBlock[];
   content: string;
   uiCodeSnippet?: string;
   previewImage?: string; // legacy single image support

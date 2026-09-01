@@ -74,7 +74,9 @@ function matchesSearch(asset: Asset, searchQuery: string): boolean {
 
   return Boolean(
     asset.title.toLowerCase().includes(query) ||
+      asset.shortDescription?.toLowerCase().includes(query) ||
       asset.content.toLowerCase().includes(query) ||
+      asset.contentBlocks?.some(block => block.title.toLowerCase().includes(query) || block.body.toLowerCase().includes(query)) ||
       asset.authorName.toLowerCase().includes(query) ||
       asset.tags?.some(tag => tag.toLowerCase().includes(query)) ||
       asset.uiCodeSnippet?.toLowerCase().includes(query)

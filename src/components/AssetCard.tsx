@@ -80,7 +80,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const statusMeta = STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished;
   const galleryCount = asset.previewImages?.length || (asset.previewImage ? 1 : 0);
   const mainImage = asset.previewImages?.[0] || asset.previewImage;
-  const snippet = asset.content.replace(/[#*`_]/g, '').trim();
+  const snippet = (asset.shortDescription ?? asset.content).replace(/[#*`_]/g, '').trim();
   const creator = resolveWorkCreator(asset, creatorProfile || (currentUser?.id === asset.userId ? currentUser : null));
 
   const handleQuickCopy = (event: React.MouseEvent) => {

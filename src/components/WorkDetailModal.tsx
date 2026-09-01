@@ -3,14 +3,16 @@ import confetti from 'canvas-confetti';
 import type { Asset } from '../types';
 import { CATEGORIES } from '../lib/constants';
 import { resolveWorkCreator } from '../lib/workPresentation';
+import { resolveWorkPresentationContent } from '../lib/workContent';
 import { AssetViewHeader } from './asset-view/AssetViewHeader';
 import { AssetViewAttribution } from './asset-view/AssetViewAttribution';
 import { AssetViewGallery } from './asset-view/AssetViewGallery';
-import { AssetCopyType, AssetViewContentSection } from './asset-view/AssetViewContentSection';
+import type { AssetCopyType } from './asset-view/AssetViewContentSection';
 import { AssetViewLinkedAssets } from './asset-view/AssetViewLinkedAssets';
 import { AssetViewCodeSection, AssetViewTab } from './asset-view/AssetViewCodeSection';
 import { AssetViewTags } from './asset-view/AssetViewTags';
 import { AssetViewFooter } from './asset-view/AssetViewFooter';
+import { WorkContentBlocksSection } from './work-detail/WorkContentBlocksSection';
 
 export interface WorkDetailModalProps {
   asset: Asset | null;
@@ -51,6 +53,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     .map(id => allAssets.find(candidate => candidate.id === id))
     .filter((candidate): candidate is Asset => Boolean(candidate));
   const categoryMeta = CATEGORIES[asset.category] || CATEGORIES.character;
+  const { contentBlocks, shortDescription, uiCode, legacyContent } = resolveWorkPresentationContent(asset);
+  const mainContentMarkdown = contentBlocks.filter(block => block.type !== 'UI Code').map(block => `### ${block.title}\n${block.body}`).join('\n\n') || legacyContent;
 
   const copyToClipboard = (text: string, type: AssetCopyType) => {
     void navigator.clipboard?.writeText(text);
@@ -70,7 +74,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     document.body.appendChild(anchor); anchor.click(); anchor.remove();
   };
   const handleExportMarkdown = () => {
-    const markdown = `# ${asset.title}\n**หมวดหมู่:** ${categoryMeta.name} (${categoryMeta.nameEn})\n**ผู้สร้าง:** ${creator.displayName}\n**วันที่สร้าง:** ${asset.createdAt}\n**ลิขสิทธิ์ / Proof Hash:** #VAULT-${asset.id.slice(0, 8).toUpperCase()}\n\n---\n\n## เนื้อหาหลัก\n${asset.content}\n${asset.uiCodeSnippet ? `\n---\n\n## โค้ด UI Snippet\n\`\`\`html\n${asset.uiCodeSnippet}\n\`\`\`` : ''}\n`;
+    const markdown = `# ${asset.title}\n**หมวดหมู่:** ${categoryMeta.name} (${categoryMeta.nameEn})\n**ผู้สร้าง:** ${creator.displayName}\n**วันที่สร้าง:** ${asset.createdAt}\n**ลิขสิทธิ์ / Proof Hash:** #VAULT-${asset.id.slice(0, 8).toUpperCase()}\n\n## คำอธิบายสั้น\n${shortDescription}\n\n---\n\n## เนื้อหาหลัก\n${mainContentMarkdown}\n${uiCode ? `\n---\n\n## โค้ด UI Snippet\n\`\`\`html\n${uiCode}\n\`\`\`` : ''}\n`;
     const anchor = document.createElement('a');
     anchor.href = `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`;
     anchor.download = `${asset.title.replace(/[^a-zA-Z0-9ก-๙]/g, '_')}.md`;
@@ -83,9 +87,10 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
         <AssetViewAttribution asset={asset} showVersionHistory={showVersionHistory} onToggleVersionHistory={() => setShowVersionHistory(value => !value)} creatorProfile={creatorProfile} />
         <AssetViewGallery images={galleryImages} activeImageIdx={activeImageIdx} onSelectImage={setActiveImageIdx} />
-        <AssetViewContentSection content={asset.content} copiedType={copiedType} onCopy={copyToClipboard} />
+        {shortDescription && <section data-work-detail-section="short-description" className="rounded-2xl border border-purple-100 bg-purple-50/60 p-4 dark:border-purple-900/50 dark:bg-purple-950/30"><h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">คำอธิบายสั้น</h3><p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-200">{shortDescription}</p></section>}
+        <WorkContentBlocksSection blocks={contentBlocks} legacyContent={legacyContent} copiedType={copiedType} onCopy={copyToClipboard} />
         <AssetViewLinkedAssets linkedAssets={linkedAssets} onSelectLinkedAsset={onSelectLinkedAsset} />
-        <AssetViewCodeSection code={asset.uiCodeSnippet || ''} uiTab={uiTab} copiedType={copiedType} onTabChange={setUiTab} onCopy={copyToClipboard} />
+        <AssetViewCodeSection code={uiCode} uiTab={uiTab} copiedType={copiedType} onTabChange={setUiTab} onCopy={copyToClipboard} />
         <AssetViewTags tags={asset.tags} />
       </div>
       <AssetViewFooter asset={asset} isOwner={isOwner} isTrashMode={isTrashMode} onExportMarkdown={handleExportMarkdown} onExportJSON={handleExportJSON} onRestore={onRestore} onPermanentDelete={onPermanentDelete} onEdit={onEdit} onDelete={onDelete} onClose={onClose} />
