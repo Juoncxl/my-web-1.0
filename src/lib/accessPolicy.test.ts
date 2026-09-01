@@ -3,6 +3,7 @@ import type { Asset, User } from '../types';
 import {
   canCreateOwnedAsset,
   canForkAsset,
+  canViewAssetDetail,
   isGuestUser,
   isLegacyGuestUserId,
   isOwnedActiveAsset,
@@ -60,6 +61,16 @@ describe('visitor and legacy Guest policy', () => {
 });
 
 describe('asset visibility filters', () => {
+  it('allows owner detail for Public/Private/Draft while visitors can open only strict Public Works', () => {
+    expect(canViewAssetDetail(makeAsset(), true)).toBe(true);
+    expect(canViewAssetDetail(makeAsset({ visibility: 'private', isPublic: false }), true)).toBe(true);
+    expect(canViewAssetDetail(makeAsset({ visibility: 'draft', isPublic: false }), true)).toBe(true);
+    expect(canViewAssetDetail(makeAsset(), false)).toBe(true);
+    expect(canViewAssetDetail(makeAsset({ visibility: 'private', isPublic: false }), false)).toBe(false);
+    expect(canViewAssetDetail(makeAsset({ visibility: 'draft', isPublic: false }), false)).toBe(false);
+    expect(canViewAssetDetail(makeAsset({ visibility: 'public', isPublic: false }), false)).toBe(false);
+  });
+
   it('keeps private, inconsistent, and deleted assets out of the public feed', () => {
     expect(isPublicFeedAsset(makeAsset())).toBe(true);
     expect(isPublicFeedAsset(makeAsset({ visibility: 'private', isPublic: false }))).toBe(false);

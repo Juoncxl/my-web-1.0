@@ -24,6 +24,11 @@ export function canForkAsset(user: User | null | undefined, asset: Asset): boole
   return asset.userId === user.id || isPublicFeedVisibility(asset);
 }
 
+/** A canonical Work Detail may expose private/draft data only in owner context. */
+export function canViewAssetDetail(asset: Pick<Asset, 'visibility' | 'isPublic'>, isOwner: boolean): boolean {
+  return isOwner || isPublicFeedVisibility(asset);
+}
+
 export function isPublicFeedAsset(asset: Asset): boolean {
   return !asset.deletedAt && isPublicFeedVisibility(asset);
 }
