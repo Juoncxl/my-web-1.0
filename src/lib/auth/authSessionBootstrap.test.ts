@@ -134,6 +134,65 @@ describe('Auth session bootstrap regression coverage', () => {
     bootstrap.dispose();
   });
 
+  it('keeps a freshly hydrated Avatar URL when the lightweight snapshot has only an image key', async () => {
+    const client = createAuthClient(makeSession());
+    const profile = deferred<Partial<User> | null>();
+    const scheduler = createScheduler();
+    const users: Array<User | null> = [];
+    const imageKey = 'user-1:avatar';
+
+    const bootstrap = startAuthSessionBootstrap({
+      auth: client.auth,
+      getProfileSnapshot: () => ({ id: 'user-1', displayName: 'Juon', username: 'juoncxl', avatarImageKey: imageKey }),
+      loadProfile: () => profile.promise,
+      setCurrentUser: user => users.push(user),
+      setLoading: vi.fn(),
+      schedule: scheduler.schedule,
+      cancelScheduled: scheduler.cancel
+    });
+
+    await bootstrap.ready;
+    scheduler.work.shift()?.();
+    profile.resolve({ id: 'user-1', displayName: 'Juon', username: 'juoncxl', avatarImageKey: imageKey, avatarUrl: 'blob:qa-avatar-new' });
+    await flushPromises();
+
+    expect(users.at(-1)).toMatchObject({
+      id: 'user-1',
+      username: 'juoncxl',
+      avatarImageKey: imageKey,
+      avatarUrl: 'blob:qa-avatar-new'
+    });
+    bootstrap.dispose();
+  });
+
+  it('does not publish a Profile hydration result whose image keys are older than the snapshot', async () => {
+    const client = createAuthClient(makeSession());
+    const profile = deferred<Partial<User> | null>();
+    const scheduler = createScheduler();
+    const users: Array<User | null> = [];
+
+    const bootstrap = startAuthSessionBootstrap({
+      auth: client.auth,
+      getProfileSnapshot: () => ({ id: 'user-1', displayName: 'Juon', username: 'juoncxl', avatarImageKey: 'user-1:avatar:new' }),
+      loadProfile: () => profile.promise,
+      setCurrentUser: user => users.push(user),
+      setLoading: vi.fn(),
+      schedule: scheduler.schedule,
+      cancelScheduled: scheduler.cancel
+    });
+
+    await bootstrap.ready;
+    expect(users).toHaveLength(1);
+    scheduler.work.shift()?.();
+    profile.resolve({ id: 'user-1', displayName: 'Older Profile', username: 'old-name', avatarImageKey: 'user-1:avatar:old' });
+    await flushPromises();
+
+    // The already-rendered currentUser (including an optimistic new Avatar)
+    // must not be replaced by the stale hydration response.
+    expect(users).toHaveLength(1);
+    bootstrap.dispose();
+  });
+
   it('never renders a cached Profile that belongs to another authenticated user', async () => {
     const client = createAuthClient(makeSession());
     const scheduler = createScheduler();

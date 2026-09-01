@@ -38,6 +38,24 @@ export interface AuthSessionBootstrap {
 // soon as it settles; this is request deduplication, not a session cache/store.
 const pendingSessionRestorations = new WeakMap<AuthClientForBootstrap, Promise<SessionRestoreResult>>();
 
+/**
+ * The synchronous snapshot is the authority for canonical identity, while
+ * the async Profile result may contain freshly hydrated runtime image URLs.
+ * Merge them instead of allowing a lightweight snapshot (which intentionally
+ * stores only image keys) to erase an already-hydrated Avatar/Cover URL.
+ */
+function mergeProfileSnapshot(snapshot: Partial<User>, hydrated: Partial<User> | null): Partial<User> {
+  if (!hydrated || hydrated.id !== snapshot.id) return snapshot;
+  return {
+    ...hydrated,
+    ...snapshot,
+    avatarUrl: hydrated.avatarUrl || snapshot.avatarUrl,
+    coverUrl: hydrated.coverUrl || snapshot.coverUrl,
+    avatarImageKey: snapshot.avatarImageKey ?? hydrated.avatarImageKey,
+    coverImageKey: snapshot.coverImageKey ?? hydrated.coverImageKey
+  };
+}
+
 function restoreSessionOnce(auth: AuthClientForBootstrap): Promise<SessionRestoreResult> {
   const pending = pendingSessionRestorations.get(auth);
   if (pending) return pending;
@@ -110,8 +128,18 @@ export function startAuthSessionBootstrap({
         .then(profile => {
           if (disposed || requestRevision !== userRevision || activeUserId !== authUser.id) return;
           const latestSnapshot = getProfileSnapshot(authUser.id);
+          const imageStateIsOlderThanSnapshot = latestSnapshot?.id === authUser.id && profile?.id === authUser.id && (
+            latestSnapshot.avatarImageKey !== profile.avatarImageKey ||
+            latestSnapshot.coverImageKey !== profile.coverImageKey
+          );
+          // A Profile request may have started before a local Avatar/Cover
+          // mutation and resolve afterwards. Publishing that older image-key
+          // state would overwrite the optimistic currentUser and leave the
+          // Header avatar stale. Keep the already-rendered user in that case;
+          // the next explicit hydration/refresh will observe the new snapshot.
+          if (imageStateIsOlderThanSnapshot) return;
           const preferredProfile = latestSnapshot?.id === authUser.id
-            ? latestSnapshot
+            ? mergeProfileSnapshot(latestSnapshot, profile)
             : profile && (!profile.id || profile.id === authUser.id)
               ? profile
               : null;
