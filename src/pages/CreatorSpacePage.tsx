@@ -14,6 +14,7 @@ import { getCreatorVisibleAssets, useCreatorSpaceData } from '../hooks/useCreato
 import { isMockPersistence } from '../lib/persistenceMode';
 import { readCreatorSpaceSettings, writeCreatorSpaceSettings } from '../lib/creatorPersistence';
 import { parseCanonicalProfileLocation, resolveProfileView, type ProfileTab } from '../lib/profileRouting';
+import { getCanonicalProfilePath, getCanonicalProfileSlug } from '../lib/profileIdentity';
 
 interface CreatorSpacePageProps {
   // The canonical profile is the home for profile identity editing.
@@ -116,7 +117,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
 export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenSettingsModal, allKnownAssets = [], bookmarkedAssetIds = [], recentlyViewedIds = [], onDeleteAsset, onRestoreAsset }) => {
   const { currentUser, openAuthModal } = useAuth();
   const [activeSlug, setActiveSlug] = useState(slug);
-  const { profile, assets, folders, isLoading, error, refresh } = useCreatorSpaceData(activeSlug, currentUser?.id, currentUser);
+  const { profile, assets, folders, isLoading, isNotFound, error, refresh } = useCreatorSpaceData(activeSlug, currentUser?.id, currentUser);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -154,6 +155,15 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const activeTab = resolvedView.activeTab;
   const isEditing = isOwner && !resolvedView.isPublicView;
   const [settingsHydrated, setSettingsHydrated] = useState(false);
+
+  useEffect(() => {
+    if (!profile) return;
+    const canonicalSlug = getCanonicalProfileSlug(profile);
+    if (activeSlug === canonicalSlug) return;
+    const search = window.location.search;
+    window.history.replaceState({}, '', getCanonicalProfilePath(profile, search));
+    setActiveSlug(canonicalSlug);
+  }, [activeSlug, profile]);
 
   useEffect(() => {
     // Query parameters are not authority. A visitor who manually supplies an
@@ -267,7 +277,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     <main className="csp-main mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
       <div className="csp-breadcrumb"><a href="/">CXL Studio</a><span aria-hidden="true">/</span><span>โปรไฟล์ครีเอเตอร์</span></div>
       {isLoading && !profile && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
-      {!isLoading && !profile && <section className="csp-empty csp-route-state" role="alert"><div className="csp-empty-icon"><UserRound className="h-6 w-6" /></div><h1>ไม่พบโปรไฟล์ครีเอเตอร์</h1><p>{error || 'โปรไฟล์นี้อาจยังไม่มีอยู่ หรือ URL ไม่ถูกต้อง'}</p><div className="csp-state-actions"><button type="button" onClick={() => void refresh()} className="csp-secondary-button"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</button><a href="/" className="csp-primary-button">กลับหน้าแรก</a></div></section>}
+      {!isLoading && !profile && <section className="csp-empty csp-route-state" role="alert"><div className="csp-empty-icon"><UserRound className="h-6 w-6" /></div><h1>{isNotFound ? 'ไม่พบโปรไฟล์ครีเอเตอร์' : 'โหลดโปรไฟล์ไม่สำเร็จ'}</h1><p>{error || (isNotFound ? 'โปรไฟล์นี้อาจยังไม่มีอยู่ หรือ URL ไม่ถูกต้อง' : 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง')}</p><div className="csp-state-actions"><button type="button" onClick={() => void refresh()} className="csp-secondary-button"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</button><a href="/" className="csp-primary-button">กลับหน้าแรก</a></div></section>}
       {profile && <>
        {isCustomizeOpen && isEditing && activeTab === 'profile' && <CreatorCustomizePanel layout={layout} lockedPreset={lockedPreset} widgets={widgets} widgetRail={widgetRail} spans={spans} onLayoutChange={setLayout} onLockedPresetChange={setLockedPreset} onAddWidget={(type, rail) => { if (!widgets.includes(type)) { setWidgets(previous => [...previous, type]); setFreeOrder(previous => previous.includes(type) ? previous : [...previous, type]); if (rail) setWidgetRail(previous => ({ ...previous, [type]: rail })); } }} onRemoveWidget={type => { setWidgets(previous => previous.filter(item => item !== type)); setFreeOrder(previous => previous.filter(item => item !== type)); }} onMoveWidget={moveWidget} onMoveRail={(type, rail) => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpanChange={(type, span) => setSpans(previous => ({ ...previous, [type]: span }))} onClose={() => setIsCustomizeOpen(false)} />}
         {isCustomizeOpen && isEditing && editingWidget && <CreatorWidgetEditor type={editingWidget} config={widgetConfigs[editingWidget] || {}} onChange={config => setWidgetConfigs(previous => ({ ...previous, [editingWidget]: config }))} onClose={() => setEditingWidget(null)} />}
@@ -283,6 +293,6 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       </>}
     </main>
     <AssetViewModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} onEdit={isEditing ? onEditAsset : undefined} allAssets={visibleAssets} isOwner={isEditing} />
-    <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = savedUser.username || savedUser.id; setActiveSlug(nextSlug); window.history.replaceState({}, '', `/@${encodeURIComponent(nextSlug)}`); }} />
+    <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = getCanonicalProfileSlug(savedUser); setActiveSlug(nextSlug); window.history.replaceState({}, '', getCanonicalProfilePath(savedUser)); }} />
   </div>;
 };

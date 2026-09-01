@@ -30,6 +30,7 @@ import { useAssetActions } from './hooks/useAssetActions';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { CreatorSpacePage } from './pages/CreatorSpacePage';
 import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
+import { getCanonicalProfilePath } from './lib/profileIdentity';
 import { CreatorWorkWorkspace, type CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 
 function MainApp() {
@@ -188,7 +189,7 @@ function MainApp() {
         tags: draft.tags
       });
       if (result.data) {
-        window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}?tab=works`);
+        window.location.assign(getCanonicalProfilePath(currentUser, '?tab=works'));
         return { success: true };
       }
       return { success: false, error: result.error || 'แก้ไขผลงานไม่สำเร็จ' };
@@ -216,7 +217,7 @@ function MainApp() {
       versions: []
     });
     if (result.data) {
-      window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}?tab=works`);
+      window.location.assign(getCanonicalProfilePath(currentUser, '?tab=works'));
       return { success: true };
     }
     return { success: false, error: result.error || 'สร้างผลงานไม่สำเร็จ' };
@@ -237,7 +238,7 @@ function MainApp() {
 
   const handleOpenCreatorProfile = useCallback(() => {
     if (!currentUser) return;
-    window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}`);
+    window.location.assign(getCanonicalProfilePath(currentUser));
   }, [currentUser]);
 
   // Work create, detail, and edit continue to share the existing canonical
@@ -258,7 +259,7 @@ function MainApp() {
   }, [assets, authLoading, currentUser, handleOpenCreateModal, openAssetView, openAuthModal, openEditEditor, workRoute?.[1], workRoute?.[2]]);
 
   const handleForkSuccess = useCallback(() => {
-    if (currentUser) window.location.assign(`/@${encodeURIComponent(currentUser.username || currentUser.id)}?tab=works`);
+    if (currentUser) window.location.assign(getCanonicalProfilePath(currentUser, '?tab=works'));
     confetti({ particleCount: 35, spread: 55, origin: { y: 0.6 } });
   }, [currentUser]);
 

@@ -2,6 +2,7 @@ import type { ProfileSocialLink, User } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
 import { getSupabaseClient } from '../supabaseClient';
 import { supabaseService } from '../supabaseService';
+import { normalizeProfileUsername } from '../profileIdentity';
 
 export interface ProfileUpdateResult {
   success: boolean;
@@ -20,7 +21,7 @@ export async function updateProfile(
   const updatedUser: User = {
     ...currentUser,
     displayName: data.displayName?.trim() || currentUser.displayName,
-    username: data.username !== undefined ? data.username.trim().replace(/^@+/, '').toLowerCase() : currentUser.username,
+    username: data.username !== undefined ? normalizeProfileUsername(data.username) : normalizeProfileUsername(currentUser.username),
     bio: data.bio !== undefined ? data.bio.trim() : currentUser.bio,
     avatarUrl: data.avatarUrl !== undefined ? data.avatarUrl : currentUser.avatarUrl,
     coverUrl: data.coverUrl !== undefined ? data.coverUrl : currentUser.coverUrl,

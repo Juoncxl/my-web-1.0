@@ -4,6 +4,7 @@ import { formatFriendlyErrorMessage } from './apiHelper';
 import { isLegacyGuestUserId } from './accessPolicy';
 import { normalizeAssetVisibility } from './assetVisibility';
 import { isMockPersistence } from './persistenceMode';
+import { normalizeProfileUsername, resolveProfileBySlug, type ProfileLookupResult } from './profileIdentity';
 import {
   readMockAssets,
   readMockBookmarks,
@@ -1176,7 +1177,8 @@ export const supabaseService = {
   async getProfile(userId: string): Promise<Partial<User> | null> {
     const supabase = getSupabaseClient();
     if (!userId) return null;
-    if (!supabase && isMockPersistence) return readMockProfile(userId, null);
+    const localProfile = isMockPersistence ? readMockProfile(userId, null) : null;
+    if (!supabase && isMockPersistence) return localProfile;
     if (!supabase) return null;
 
     try {
@@ -1188,7 +1190,7 @@ export const supabaseService = {
 
       if (error) {
         logServiceError('getProfile', error);
-        return null;
+        return localProfile;
       }
 
       if (data) {
@@ -1202,37 +1204,37 @@ export const supabaseService = {
           socialLinks: await fetchProfileSocialLinks(userId),
           createdAt: data.created_at
         };
-        return readMockProfile(userId, profile);
+        return isMockPersistence ? readMockProfile(userId, profile) : profile;
       }
     } catch (error) {
       logServiceError('getProfile:exception', error);
     }
-    return null;
+    return localProfile;
   },
 
-  async getCreatorProfile(slug: string): Promise<{ data: User | null; error: string | null }> {
+  async getCreatorProfile(slug: string): Promise<ProfileLookupResult> {
     const supabase = getSupabaseClient();
     let cleanSlug = '';
     try {
       cleanSlug = decodeURIComponent(slug).trim();
     } catch {
-      return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+      return { data: null, error: 'ไม่พบ Creator ที่ต้องการ', reason: 'not-found' };
     }
     if (isMockPersistence) {
-      const localProfile = readMockProfiles().find(profile => profile.id === cleanSlug || profile.username === cleanSlug);
-      if (localProfile) return { data: localProfile, error: null };
+      const localProfile = resolveProfileBySlug(readMockProfiles(), cleanSlug);
+      if (localProfile) return { data: localProfile, error: null, reason: null };
     }
-    if (!supabase) return { data: null, error: 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
-    if (!cleanSlug || cleanSlug.length > 128) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+    if (!supabase) return { data: null, error: 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง', reason: 'unavailable' };
+    if (!cleanSlug || cleanSlug.length > 128) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ', reason: 'not-found' };
 
     try {
       let { data, error } = await supabase
         .from('profiles')
         .select('id, display_name, username, bio, avatar_url, cover_url, created_at')
-        .eq('username', cleanSlug)
+        .eq('username', normalizeProfileUsername(cleanSlug) || cleanSlug)
         .maybeSingle();
 
-      if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
+      if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ'), reason: 'error' };
       if (!data) {
         const result = await supabase
           .from('profiles')
@@ -1242,8 +1244,8 @@ export const supabaseService = {
         data = result.data;
         error = result.error;
       }
-      if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
-      if (!data) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ' };
+      if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ'), reason: 'error' };
+      if (!data) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ', reason: 'not-found' };
 
       const socialLinks = await fetchProfileSocialLinks(data.id);
       const profile: User = {
@@ -1256,9 +1258,10 @@ export const supabaseService = {
         socialLinks,
         createdAt: data.created_at || new Date().toISOString()
       };
-      return { data: readMockProfile(profile.id, profile), error: null };
+      const resolvedProfile = isMockPersistence ? readMockProfile(profile.id, profile) : profile;
+      return { data: resolvedProfile, error: null, reason: null };
     } catch (error) {
-      return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ') };
+      return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ'), reason: 'error' };
     }
   },
 
@@ -1306,8 +1309,10 @@ export const supabaseService = {
 
   async upsertProfile(user: User): Promise<{ success: boolean; error: string | null }> {
     if (isMockPersistence) {
-      writeMockProfile({ ...user, socialLinks: user.socialLinks || [] });
-      return { success: true, error: null };
+      const persisted = writeMockProfile({ ...user, username: normalizeProfileUsername(user.username), socialLinks: user.socialLinks || [] });
+      return persisted
+        ? { success: true, error: null }
+        : { success: false, error: 'บันทึกโปรไฟล์ใน QA Sandbox ไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกเปลี่ยน' };
     }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(user.id);

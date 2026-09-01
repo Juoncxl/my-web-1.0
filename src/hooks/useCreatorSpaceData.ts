@@ -3,6 +3,7 @@ import type { Asset, Folder, User } from '../types';
 import { supabaseService } from '../lib/supabaseService';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
 import { isMockPersistence } from '../lib/persistenceMode';
+import { isGenuineProfileNotFound } from '../lib/profileIdentity';
 
 const CREATOR_PROFILE_LOAD_TIMEOUT_MS = 10000;
 
@@ -21,6 +22,7 @@ export interface CreatorSpaceData {
   assets: Asset[];
   folders: Folder[];
   isLoading: boolean;
+  isNotFound: boolean;
   error: string | null;
   refresh: (options?: { background?: boolean }) => Promise<void>;
 }
@@ -30,6 +32,7 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
   const [assets, setAssets] = useState<Asset[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isNotFound, setIsNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
   const initializedSlug = useRef<string | null>(null);
@@ -57,6 +60,7 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
     if (!background) {
       blockingLoadActive.current = true;
       setIsLoading(true);
+      setIsNotFound(false);
       setError(null);
     }
     if (ownerProfileFallback) {
@@ -82,9 +86,11 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
         setError(isOwnerSlug
           ? 'บัญชีของคุณยังไม่มี Creator Profile กรุณาลองใหม่หลังการ provision โปรไฟล์'
           : profileResult.error || 'ไม่พบ Creator ที่ต้องการ');
+        setIsNotFound(!isOwnerSlug && isGenuineProfileNotFound(profileResult));
         return;
       }
 
+      setIsNotFound(false);
       setProfile(resolvedProfile);
       const isOwner = resolvedProfile.id === currentUserId;
       const [assetResult, folderResult] = await withTimeout(
@@ -114,6 +120,7 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
     } catch (caughtError) {
       if (requestId !== requestSequence.current) return;
       console.error('Creator profile load error:', caughtError);
+      setIsNotFound(false);
       if (ownerProfileFallback) {
         setProfile(ownerProfileFallback);
         if (!background) {
@@ -158,7 +165,7 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
     };
   }, [refresh]);
 
-  return { profile, assets, folders, isLoading, error, refresh };
+  return { profile, assets, folders, isLoading, isNotFound, error, refresh };
 }
 
 export function getCreatorVisibleAssets(assets: Asset[], isOwner: boolean): Asset[] {

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { getCanonicalProfilePath } from '../lib/profileIdentity';
 
 const brandMarkUrl = new URL('../assets/brand/brand-mark.svg', import.meta.url).href;
 const brandMarkLightUrl = new URL('../assets/brand/brand-mark-light.svg', import.meta.url).href;
@@ -212,7 +213,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="space-y-0.5">
                     {isAuthenticated && currentUser && (
                       <a
-                        href={`/@${encodeURIComponent(currentUser.username || currentUser.id)}`}
+                        href={getCanonicalProfilePath(currentUser)}
                         onClick={() => setDropdownOpen(false)}
                         className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
                         role="menuitem"

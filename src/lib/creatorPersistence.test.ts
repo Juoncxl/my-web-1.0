@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { resetCreatorSandbox, writeCreatorSpaceSettings, writeMockAsset } from './creatorPersistence';
+import type { User } from '../types';
+import { readMockProfile, resetCreatorSandbox, writeCreatorSpaceSettings, writeMockAsset, writeMockProfile } from './creatorPersistence';
 
 describe('creator persistence event boundaries', () => {
   const storage = new Map<string, string>();
@@ -52,5 +53,37 @@ describe('creator persistence event boundaries', () => {
     });
 
     expect(dispatched).toHaveLength(2);
+  });
+
+  it('persists canonical Profile identity across state rehydration', () => {
+    (globalThis as { window: Window }).window = {
+      localStorage: {
+        getItem: key => storage.get(key) ?? null,
+        setItem: (key, value) => { storage.set(key, value); },
+        removeItem: key => { storage.delete(key); },
+        clear: () => storage.clear(),
+        key: index => [...storage.keys()][index] ?? null,
+        length: storage.size
+      } as Storage,
+      dispatchEvent: event => { dispatched.push(event); return true; }
+    } as unknown as Window;
+    const profile = { id: 'owner-1', displayName: 'Owner', username: 'juoncxl' } as User;
+
+    expect(writeMockProfile(profile)).toBe(true);
+    expect(readMockProfile('owner-1', null)?.username).toBe('juoncxl');
+  });
+
+  it('does not report a Profile update as accepted when local persistence fails', () => {
+    (globalThis as { window: Window }).window = {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => { throw new Error('quota exceeded'); }
+      } as unknown as Storage,
+      dispatchEvent: event => { dispatched.push(event); return true; }
+    } as unknown as Window;
+
+    expect(writeMockProfile({ id: 'owner-1', displayName: 'Owner', username: 'juoncxl' } as User)).toBe(false);
+    expect(readMockProfile('owner-1', null)).toBeNull();
+    expect(dispatched).toHaveLength(0);
   });
 });

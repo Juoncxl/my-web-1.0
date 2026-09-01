@@ -1,5 +1,6 @@
 import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { User } from '../../types';
+import { normalizeProfileUsername } from '../profileIdentity';
 
 export function mapSupabaseAuthUser(
   authUser: SupabaseAuthUser,
@@ -14,7 +15,9 @@ export function mapSupabaseAuthUser(
       authUser.user_metadata?.displayName ||
       authUser.email?.split('@')[0] ||
       'Creator',
-    username: profile?.username || authUser.user_metadata?.username || undefined,
+    // Public Profile identity comes from the Profile record (or its explicit
+    // local QA overlay), never independently from mutable Auth metadata.
+    username: normalizeProfileUsername(profile?.username),
     bio: profile?.bio || authUser.user_metadata?.bio || '',
     avatarUrl:
       profile?.avatarUrl ||

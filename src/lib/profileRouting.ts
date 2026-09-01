@@ -1,3 +1,5 @@
+import { getCanonicalProfilePath } from './profileIdentity';
+
 export type ProfileTab = 'profile' | 'works' | 'folders' | 'drafts' | 'saved' | 'recent' | 'trash';
 
 const OWNER_TABS = new Set<ProfileTab>(['works', 'folders', 'drafts', 'saved', 'recent', 'trash']);
@@ -49,8 +51,7 @@ export function getLegacyProfileRedirect(
   if (creatorMatch) return `/@${creatorMatch[1]}${search}`;
 
   if (!currentUser) return null;
-  const ownerSlug = encodeURIComponent(currentUser.username || currentUser.id);
-  if (/^\/vault\/?$/i.test(pathname)) return `/@${ownerSlug}?tab=works`;
-  if (/^\/creator-space\/?$/i.test(pathname)) return `/@${ownerSlug}`;
+  if (/^\/vault\/?$/i.test(pathname)) return getCanonicalProfilePath(currentUser, '?tab=works');
+  if (/^\/creator-space\/?$/i.test(pathname)) return getCanonicalProfilePath(currentUser);
   return null;
 }

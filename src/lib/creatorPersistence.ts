@@ -59,17 +59,22 @@ function readState(): CreatorSandboxState {
   return memoryState;
 }
 
-function writeState(next: CreatorSandboxState, notifyDataListeners = true): void {
-  memoryState = next;
-  if (typeof window === 'undefined') return;
+function writeState(next: CreatorSandboxState, notifyDataListeners = true): boolean {
+  if (typeof window === 'undefined') {
+    memoryState = next;
+    return true;
+  }
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    memoryState = next;
     if (notifyDataListeners) {
       window.dispatchEvent(new Event('creator-vault-qa-data-changed'));
       window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
     }
+    return true;
   } catch (error) {
     console.warn('[creatorPersistence] local sandbox write failed', error);
+    return false;
   }
 }
 
@@ -125,9 +130,9 @@ export function readMockProfiles(): User[] {
   return Object.values(readState().profiles);
 }
 
-export function writeMockProfile(user: User): void {
+export function writeMockProfile(user: User): boolean {
   const state = readState();
-  writeState({ ...state, profiles: { ...state.profiles, [user.id]: user } });
+  return writeState({ ...state, profiles: { ...state.profiles, [user.id]: user } });
 }
 
 export function readCreatorSpaceSettings(userId: string): CreatorSpaceSettings | null {
