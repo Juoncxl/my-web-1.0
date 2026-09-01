@@ -27,7 +27,6 @@ interface HeaderProps {
   onOpenCreateModal: () => void;
   onOpenAuthModal: () => void;
   onOpenSignUpModal?: () => void;
-  onOpenProfileModal: () => void;
   onOpenSettingsModal?: () => void;
   creatorMode?: boolean;
 }
@@ -40,7 +39,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateModal,
   onOpenAuthModal,
   onOpenSignUpModal,
-  onOpenProfileModal,
   onOpenSettingsModal,
   creatorMode = false
 }) => {
@@ -62,7 +60,6 @@ export const Header: React.FC<HeaderProps> = ({
 
   const hasAvatar = Boolean(isAuthenticated && currentUser?.avatarUrl);
   const displayName = isAuthenticated ? (currentUser?.displayName || 'Creator') : 'ผู้เยี่ยมชม';
-  const userSubtitle = isAuthenticated ? (currentUser?.email || 'บัญชีที่เชื่อมต่อ') : 'สำรวจผลงานสาธารณะได้';
 
   return (
     <header className="cv-shell-header sticky top-0 z-30 backdrop-blur-md transition-colors duration-200">
@@ -144,7 +141,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Lock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300" />
-                <span>คลังของฉัน</span>
+                <span>คลังผลงาน</span>
               </button>
             </div>}
 
@@ -153,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={toggleTheme}
               title={isDark ? "เปลี่ยนเป็นโหมดสว่าง (Light Mode)" : "เปลี่ยนเป็นโหมดมืด (Dark Mode)"}
               className="cv-shell-button p-2 rounded-full text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 transition-all hover:scale-105 cursor-pointer"
-              aria-label="Toggle Theme"
+              aria-label={isDark ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด'}
             >
               {isDark ? (
                 <Sun className="w-4 h-4 text-amber-400" />
@@ -218,9 +215,6 @@ export const Header: React.FC<HeaderProps> = ({
                         <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
                           {displayName}
                         </p>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {userSubtitle}
-                        </p>
                         {!isAuthenticated && (
                           <p className="mt-1 text-[10px] leading-relaxed text-purple-600/80 dark:text-blue-200/75">
                             เข้าสู่ระบบเพื่อบันทึกและจัดการคลังของคุณ
@@ -232,19 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {/* Menu Navigation Items */}
                   <div className="space-y-0.5">
-                    <button
-                      onClick={() => {
-                        if (isAuthenticated) onViewChange('vault');
-                        else onOpenAuthModal();
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
-                    >
-                      <UserIcon className="w-4 h-4 text-purple-500" />
-                      <span>คลังผลงานของฉัน</span>
-                    </button>
-
-                    {isAuthenticated && currentUser && !creatorMode && (
+                    {isAuthenticated && currentUser && (
                       <a
                         href={`/creator/${encodeURIComponent(currentUser.username || currentUser.id)}`}
                         onClick={() => setDropdownOpen(false)}
@@ -252,44 +234,21 @@ export const Header: React.FC<HeaderProps> = ({
                         role="menuitem"
                       >
                         <UserIcon className="w-4 h-4 text-cyan-600 dark:text-cyan-300" />
-                        <span>Creator Space ของฉัน</span>
+                        <span>โปรไฟล์ครีเอเตอร์ของฉัน</span>
                       </a>
                     )}
-
-                    <button
-                      onClick={() => {
-                        onViewChange('feed');
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left md:hidden cursor-pointer"
-                    >
-                      <Globe className="w-4 h-4 text-indigo-500" />
-                      <span>ฟีดสาธารณะ</span>
-                    </button>
 
                     {isAuthenticated && (
                       <>
                         <button
                           onClick={() => {
                             if (onOpenSettingsModal) onOpenSettingsModal();
-                            else onOpenProfileModal();
                             setDropdownOpen(false);
                           }}
                           className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
                         >
                           <Settings className="w-4 h-4 text-purple-500" />
-                          <span>ตั้งค่าบัญชีและรหัสผ่าน</span>
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            onOpenProfileModal();
-                            setDropdownOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
-                        >
-                          <UserIcon className="w-4 h-4 text-slate-400" />
-                          <span>แก้ไขโปรไฟล์</span>
+                          <span>ตั้งค่าบัญชี</span>
                         </button>
                       </>
                     )}

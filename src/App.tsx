@@ -7,12 +7,10 @@ import {
 } from './lib/accessPolicy';
 import { Header } from './components/Header';
 import { AssetViewModal } from './components/AssetViewModal';
-import { AssetEditorModal } from './components/AssetEditorModal';
 import { AIAssistantModal } from './components/AIAssistantModal';
 import { AuthModal } from './components/AuthModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SettingsModal } from './components/SettingsModal';
-import { ProfileEditModal } from './components/ProfileEditModal';
 import { VaultTabType } from './components/PersonalVaultHeader';
 import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
@@ -104,6 +102,7 @@ function MainApp() {
     closeAssetView,
     openEditEditor,
     closeEditor,
+    openCreateEditor,
     openReport,
     closeReport,
     openMoveToFolder,
@@ -113,9 +112,7 @@ function MainApp() {
   // Simple UI-only state stays local to App; asset selections live in the
   // focused asset modal hook above.
   const [isAIOpen, setIsAIOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
-  const [isCreatorWorkOpen, setIsCreatorWorkOpen] = useState(false);
   const [aiContext, setAiContext] = useState<{ type: string; context: string } | null>(null);
 
   useEffect(() => {
@@ -162,11 +159,34 @@ function MainApp() {
       openAuthModal('signup');
       return;
     }
-    setIsCreatorWorkOpen(true);
-  }, [authLoading, currentUser, openAuthModal]);
+    openCreateEditor();
+  }, [authLoading, currentUser, openAuthModal, openCreateEditor]);
 
   const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft) => {
-    if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนสร้างผลงาน' };
+    if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนบันทึกผลงาน' };
+
+    if (editingAssetId) {
+      const result = await updateAsset(editingAssetId, {
+        title: draft.title,
+        icon: draft.icon,
+        category: draft.category,
+        content: draft.content,
+        uiCodeSnippet: draft.uiCodeSnippet,
+        previewImage: draft.previewImages[0] || '',
+        previewImages: draft.previewImages,
+        isPublic: draft.visibility === 'public',
+        visibility: draft.visibility,
+        status: draft.status,
+        tags: draft.tags
+      });
+      if (result.data) {
+        setActiveView('vault');
+        setActiveVaultTab('my_assets');
+        return { success: true };
+      }
+      return { success: false, error: result.error || 'แก้ไขผลงานไม่สำเร็จ' };
+    }
+
     const result = await createAsset({
       title: draft.title,
       icon: draft.icon,
@@ -194,7 +214,7 @@ function MainApp() {
       return { success: true };
     }
     return { success: false, error: result.error || 'สร้างผลงานไม่สำเร็จ' };
-  }, [createAsset, currentUser]);
+  }, [createAsset, currentUser, editingAssetId, updateAsset]);
 
   const handleOpenAIModal = useCallback(() => {
     setAiContext(null);
@@ -208,6 +228,11 @@ function MainApp() {
   const handleEditVaultAsset = useCallback((asset: Asset) => {
     openEditEditor(asset.id);
   }, [openEditEditor]);
+
+  const handleOpenCreatorProfile = useCallback(() => {
+    if (!currentUser) return;
+    window.location.assign(`/creator/${encodeURIComponent(currentUser.username || currentUser.id)}`);
+  }, [currentUser]);
 
   const handleForkSuccess = useCallback(() => {
     setActiveView('vault');
@@ -225,7 +250,6 @@ function MainApp() {
   }, []);
 
   const {
-    handleSaveAsset,
     handleSoftDeleteAsset,
     handleRestoreAsset,
     handlePermanentDeleteAsset,
@@ -397,8 +421,10 @@ function MainApp() {
         <CreatorSpacePage
           slug={creatorSlug}
           onCreateAsset={handleOpenCreateModal}
+          onEditAsset={handleEditVaultAsset}
           onOpenAuth={() => openAuthModal('login')}
           onOpenFolderManager={() => setIsFolderManagerOpen(true)}
+          onOpenSettingsModal={() => setIsSettingsOpen(true)}
         />
       ) : (
         <>
@@ -411,7 +437,6 @@ function MainApp() {
             onOpenCreateModal={handleOpenCreateModal}
             onOpenAuthModal={() => openAuthModal('login')}
             onOpenSignUpModal={() => openAuthModal('signup')}
-            onOpenProfileModal={() => setIsProfileOpen(true)}
             onOpenSettingsModal={() => setIsSettingsOpen(true)}
           />
 
@@ -438,7 +463,7 @@ function MainApp() {
                 activeVaultTab={activeVaultTab}
                 onChangeVaultTab={handleVaultTabChange}
                 onOpenFolderManager={() => setIsFolderManagerOpen(true)}
-                onEditProfile={() => setIsProfileOpen(true)}
+                onOpenCreatorProfile={handleOpenCreatorProfile}
                 onCreateAsset={handleOpenCreateModal}
               />
             )}
@@ -477,19 +502,6 @@ function MainApp() {
         isOwner={viewingAsset?.userId === currentUser?.id}
         isBookmarked={viewingAsset ? bookmarkedAssetIds.includes(viewingAsset.id) : false}
         isTrashMode={activeVaultTab === 'trash'}
-      />
-
-      <AssetEditorModal
-        isOpen={isEditorOpen}
-        onClose={closeEditor}
-        onSave={handleSaveAsset}
-        initialData={editingAsset}
-        folders={folders}
-        availableAssets={assets.filter(a => a.userId === currentUser?.id && !a.deletedAt)}
-        onOpenAIModalWithContext={(type, ctx) => {
-          setAiContext({ type, context: ctx });
-          setIsAIOpen(true);
-        }}
       />
 
       <ReportModal
@@ -538,14 +550,10 @@ function MainApp() {
 
       <SettingsModal />
 
-      <ProfileEditModal
-        isOpen={isProfileOpen}
-        onClose={() => setIsProfileOpen(false)}
-      />
-
       <CreatorWorkWorkspace
-        isOpen={isCreatorWorkOpen}
-        onClose={() => setIsCreatorWorkOpen(false)}
+        isOpen={isEditorOpen}
+        onClose={closeEditor}
+        initialData={editingAsset}
         onSave={handleSaveCreatorWork}
       />
     </div>

@@ -15,7 +15,7 @@ interface VaultPageProps {
   activeVaultTab: VaultTabType;
   onChangeVaultTab: (tab: VaultTabType) => void;
   onOpenFolderManager: () => void;
-  onEditProfile: () => void;
+  onOpenCreatorProfile: () => void;
   onCreateAsset: () => void;
 }
 
@@ -30,7 +30,7 @@ export const VaultPage: React.FC<VaultPageProps> = ({
   activeVaultTab,
   onChangeVaultTab,
   onOpenFolderManager,
-  onEditProfile,
+  onOpenCreatorProfile,
   onCreateAsset
 }) => (
   <>
@@ -44,7 +44,7 @@ export const VaultPage: React.FC<VaultPageProps> = ({
       activeVaultTab={activeVaultTab}
       onChangeVaultTab={onChangeVaultTab}
       onOpenFolderManager={onOpenFolderManager}
-      onEditProfile={onEditProfile}
+      onOpenCreatorProfile={onOpenCreatorProfile}
       onCreateAsset={onCreateAsset}
     />
     <AssetCollectionView {...collectionProps} />

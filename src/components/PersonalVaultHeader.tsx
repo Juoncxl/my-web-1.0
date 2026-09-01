@@ -24,7 +24,7 @@ interface PersonalVaultHeaderProps {
   activeVaultTab: VaultTabType;
   onChangeVaultTab: (tab: VaultTabType) => void;
   onOpenFolderManager: () => void;
-  onEditProfile: () => void;
+  onOpenCreatorProfile: () => void;
   onCreateAsset: () => void;
 }
 
@@ -44,7 +44,7 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
   activeVaultTab,
   onChangeVaultTab,
   onOpenFolderManager,
-  onEditProfile,
+  onOpenCreatorProfile,
   onCreateAsset
 }) => {
   const { currentUser } = useAuth();
@@ -60,7 +60,7 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
             referrerPolicy="no-referrer"
           />
           <div className="min-w-0">
-            <h1 id="vault-title" className="cv-vault-title">คลังของฉัน</h1>
+            <h1 id="vault-title" className="cv-vault-title">คลังผลงาน</h1>
             <p className="cv-vault-description">
               {totalAssetsCount} ผลงาน · {publicCount} สาธารณะ · {privateCount} ส่วนตัว
             </p>
@@ -68,7 +68,7 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
         </div>
 
         <div className="cv-vault-intro-actions">
-          <button type="button" onClick={onEditProfile} className="cv-vault-profile-action" aria-label="แก้ไขโปรไฟล์" title="แก้ไขโปรไฟล์">
+          <button type="button" onClick={onOpenCreatorProfile} className="cv-vault-profile-action" aria-label="เปิดโปรไฟล์ครีเอเตอร์" title="เปิดโปรไฟล์ครีเอเตอร์">
             <Settings2 className="h-4 w-4" />
           </button>
           <button type="button" onClick={onCreateAsset} className="cv-create-button cv-vault-create-action">
@@ -78,7 +78,7 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
         </div>
       </div>
 
-      <nav className="cv-vault-navigation" aria-label="เมนูคลังของฉัน">
+      <nav className="cv-vault-navigation" aria-label="เมนูคลังผลงาน">
         <div className="cv-vault-primary-tabs">
           {primaryTabs.map(({ id, label, icon: Icon }) => {
             const count = id === 'my_assets' ? totalAssetsCount : id === 'bookmarks' ? bookmarksCount : folders.length;
