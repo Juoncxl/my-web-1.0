@@ -108,7 +108,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
 export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenSettingsModal }) => {
   const { currentUser, openAuthModal } = useAuth();
   const [activeSlug, setActiveSlug] = useState(slug);
-  const { profile, assets, folders, isLoading, error, refresh } = useCreatorSpaceData(activeSlug, currentUser?.id);
+  const { profile, assets, folders, isLoading, error, refresh } = useCreatorSpaceData(activeSlug, currentUser?.id, currentUser);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
