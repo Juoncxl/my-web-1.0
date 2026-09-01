@@ -134,9 +134,14 @@ export function useAssetData(currentUser: User | null, reportError: ReportError,
     setAssets(previous => previous.map(asset => asset.folderId === folderId ? { ...asset, folderId: null } : asset));
   }, []);
 
+  // Render the next account scope as loading immediately. Effects run after
+  // paint, so relying only on setIsLoadingAssets inside the effect can flash a
+  // stale/empty result for one frame during session restoration or re-login.
+  const isChangingAccountScope = previousUserId.current !== currentUser?.id;
+
   return {
     assets,
-    isLoadingAssets,
+    isLoadingAssets: isLoadingAssets || isChangingAccountScope,
     refreshAssets,
     createAsset,
     updateAsset,

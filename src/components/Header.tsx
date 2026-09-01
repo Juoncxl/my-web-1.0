@@ -42,7 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettingsModal,
   creatorMode = false
 }) => {
-  const { currentUser, isAuthenticated, logout } = useAuth();
+  const { currentUser, isAuthenticated, isLoading, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   const hasAvatar = Boolean(isAuthenticated && currentUser?.avatarUrl);
-  const displayName = isAuthenticated ? (currentUser?.displayName || 'Creator') : 'ผู้เยี่ยมชม';
+  const displayName = isLoading ? 'กำลังตรวจสอบบัญชี…' : isAuthenticated ? (currentUser?.displayName || 'Creator') : 'ผู้เยี่ยมชม';
 
   return (
     <header className="cv-shell-header sticky top-0 z-30 backdrop-blur-md transition-colors duration-200">
@@ -156,9 +156,11 @@ export const Header: React.FC<HeaderProps> = ({
             {/* User Profile Avatar with Dropdown Menu */}
             <div className="relative" ref={dropdownRef}>
               <button
-                onClick={() => setDropdownOpen(!dropdownOpen)}
+                onClick={() => { if (!isLoading) setDropdownOpen(!dropdownOpen); }}
+                disabled={isLoading}
                 className="cv-guest-trigger flex items-center gap-1.5 p-1 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-purple-300/50 cursor-pointer"
-                aria-label={isAuthenticated ? `เมนูบัญชีของ ${displayName}` : 'เมนูผู้เยี่ยมชม'}
+                aria-label={isLoading ? 'กำลังตรวจสอบบัญชี' : isAuthenticated ? `เมนูบัญชีของ ${displayName}` : 'เมนูผู้เยี่ยมชม'}
+                aria-busy={isLoading}
                 aria-haspopup="menu"
                 aria-expanded={dropdownOpen}
               >
@@ -174,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 )}
                 <span className="hidden sm:inline max-w-28 truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  {isAuthenticated ? displayName : 'ผู้เยี่ยมชม'}
+                  {displayName}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 pr-0.5" />
               </button>

@@ -11,8 +11,7 @@ import {
   readMockFolders,
   readMockLikes,
   readMockProfiles,
-  isMockAssetRemoved,
-  isMockFolderRemoved,
+  cacheMockProfileSnapshot,
   removeMockAsset,
   removeMockFolder,
   writeMockAsset,
@@ -284,21 +283,9 @@ async function fetchAssetsFromMock(options?: {
   includeDeleted?: boolean;
   onlyDeleted?: boolean;
 }): Promise<{ data: Asset[]; error: string | null }> {
-  let cloudAssets: Asset[] = [];
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data } = await supabase.from('assets').select('*').order('created_at', { ascending: false });
-      cloudAssets = (data || []).map(mapDbToAsset);
-    } catch (error) {
-      logServiceError('mock read assets', error);
-    }
-  }
-
-  const merged = new Map<string, Asset>();
-  cloudAssets.filter(asset => !isMockAssetRemoved(asset.id)).forEach(asset => merged.set(asset.id, asset));
-  readMockAssets().filter(asset => !isMockAssetRemoved(asset.id)).forEach(asset => merged.set(asset.id, asset));
-  let list = [...merged.values()];
+  // QA Sandbox is intentionally local-only. Cloud migration is an explicit
+  // Settings action; a normal read must never wait on or merge remote tables.
+  let list = readMockAssets();
 
   if (options?.userId) list = list.filter(asset => asset.userId === options.userId);
   else if (options?.currentUserId) list = list.filter(asset => asset.userId === options.currentUserId || (asset.visibility === 'public' && asset.isPublic));
@@ -317,20 +304,8 @@ async function fetchAssetsFromMock(options?: {
 }
 
 async function fetchFoldersFromMock(userId: string): Promise<{ data: Folder[]; error: string | null }> {
-  let cloudFolders: Folder[] = [];
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data } = await supabase.from('folders').select('*').eq('user_id', userId).order('created_at', { ascending: true });
-      cloudFolders = (data || []).map(mapDbToFolder);
-    } catch (error) {
-      logServiceError('mock read folders', error);
-    }
-  }
-  const merged = new Map<string, Folder>();
-  cloudFolders.filter(folder => !isMockFolderRemoved(folder.id)).forEach(folder => merged.set(folder.id, folder));
-  readMockFolders(userId).filter(folder => !isMockFolderRemoved(folder.id)).forEach(folder => merged.set(folder.id, folder));
-  return { data: [...merged.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()), error: null };
+  const folders = readMockFolders(userId);
+  return { data: folders.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()), error: null };
 }
 
 function isSafeProfileLink(value: string): boolean {
@@ -346,18 +321,23 @@ async function fetchProfileSocialLinks(userId: string): Promise<ProfileSocialLin
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
-    .from('profile_social_links')
-    .select('id, platform, label, url, visible, sort_order')
-    .eq('profile_id', userId)
-    .order('sort_order', { ascending: true });
+  try {
+    const { data, error } = await supabase
+      .from('profile_social_links')
+      .select('id, platform, label, url, visible, sort_order')
+      .eq('profile_id', userId)
+      .order('sort_order', { ascending: true });
 
-  if (error) {
-    logServiceError('fetchProfileSocialLinks', error);
+    if (error) {
+      logServiceError('fetchProfileSocialLinks', error);
+      return [];
+    }
+
+    return (data || []).map(mapDbToSocialLink);
+  } catch (error) {
+    logServiceError('fetchProfileSocialLinks:exception', error);
     return [];
   }
-
-  return (data || []).map(mapDbToSocialLink);
 }
 
 // DIRECT SUPABASE DATABASE SERVICE (CRUD & ADVANCED LOGIC)
@@ -1180,6 +1160,15 @@ export const supabaseService = {
     return profile?.id === userId ? profile : null;
   },
 
+  getCreatorProfileSnapshot(slug: string): User | null {
+    if (!slug || !isMockPersistence) return null;
+    try {
+      return resolveProfileBySlug(readMockProfiles(), decodeURIComponent(slug).trim());
+    } catch {
+      return null;
+    }
+  },
+
   async getProfile(userId: string): Promise<Partial<User> | null> {
     if (!userId) return null;
     const localProfile = isMockPersistence ? readMockProfile(userId, null) : null;
@@ -1192,11 +1181,15 @@ export const supabaseService = {
     if (!supabase) return null;
 
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      const [profileResult, socialLinks] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle(),
+        fetchProfileSocialLinks(userId)
+      ]);
+      const { data, error } = profileResult;
 
       if (error) {
         logServiceError('getProfile', error);
@@ -1204,16 +1197,17 @@ export const supabaseService = {
       }
 
       if (data) {
-        const profile = {
+        const profile: User = {
           id: data.id,
-          displayName: data.display_name || data.displayName,
+          displayName: data.display_name || data.displayName || 'Creator',
           username: data.username || undefined,
           bio: mapProfileBio(data.bio),
           avatarUrl: data.avatar_url || data.avatarUrl,
           coverUrl: data.cover_url || data.coverUrl,
-          socialLinks: await fetchProfileSocialLinks(userId),
-          createdAt: data.created_at
+          socialLinks,
+          createdAt: data.created_at || new Date().toISOString()
         };
+        if (isMockPersistence) cacheMockProfileSnapshot(profile);
         return isMockPersistence ? readMockProfile(userId, profile) : profile;
       }
     } catch (error) {
@@ -1238,14 +1232,16 @@ export const supabaseService = {
     if (!cleanSlug || cleanSlug.length > 128) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ', reason: 'not-found' };
 
     try {
+      const isProfileId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanSlug);
+      const socialLinksRequest = isProfileId ? fetchProfileSocialLinks(cleanSlug) : null;
       let { data, error } = await supabase
         .from('profiles')
         .select('id, display_name, username, bio, avatar_url, cover_url, created_at')
-        .eq('username', normalizeProfileUsername(cleanSlug) || cleanSlug)
+        .eq(isProfileId ? 'id' : 'username', isProfileId ? cleanSlug : normalizeProfileUsername(cleanSlug) || cleanSlug)
         .maybeSingle();
 
       if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ'), reason: 'error' };
-      if (!data) {
+      if (!data && !isProfileId) {
         const result = await supabase
           .from('profiles')
           .select('id, display_name, username, bio, avatar_url, cover_url, created_at')
@@ -1257,7 +1253,9 @@ export const supabaseService = {
       if (error) return { data: null, error: toServiceError(error, 'โหลดโปรไฟล์ไม่สำเร็จ'), reason: 'error' };
       if (!data) return { data: null, error: 'ไม่พบ Creator ที่ต้องการ', reason: 'not-found' };
 
-      const socialLinks = await fetchProfileSocialLinks(data.id);
+      const socialLinks = socialLinksRequest && data.id === cleanSlug
+        ? await socialLinksRequest
+        : await fetchProfileSocialLinks(data.id);
       const profile: User = {
         id: data.id,
         displayName: data.display_name || 'Creator',
@@ -1268,6 +1266,7 @@ export const supabaseService = {
         socialLinks,
         createdAt: data.created_at || new Date().toISOString()
       };
+      if (isMockPersistence) cacheMockProfileSnapshot(profile);
       const resolvedProfile = isMockPersistence ? readMockProfile(profile.id, profile) : profile;
       return { data: resolvedProfile, error: null, reason: null };
     } catch (error) {

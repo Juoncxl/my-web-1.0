@@ -1,37 +1,46 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Asset, Folder, User } from '../types';
 import { supabaseService } from '../lib/supabaseService';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
-import { isMockPersistence } from '../lib/persistenceMode';
 import { isGenuineProfileNotFound } from '../lib/profileIdentity';
 
-const CREATOR_PROFILE_LOAD_TIMEOUT_MS = 10000;
-
-function withTimeout<T>(promise: Promise<T>, operation: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${operation} timed out`)), CREATOR_PROFILE_LOAD_TIMEOUT_MS);
-    promise.then(
-      value => { clearTimeout(timer); resolve(value); },
-      error => { clearTimeout(timer); reject(error); }
-    );
-  });
+export interface CreatorSpaceSources {
+  assets: Asset[];
+  folders: Folder[];
+  isAssetsLoading: boolean;
+  isFoldersLoading: boolean;
 }
 
 export interface CreatorSpaceData {
   profile: User | null;
   assets: Asset[];
   folders: Folder[];
-  isLoading: boolean;
+  isProfileLoading: boolean;
+  isAssetsLoading: boolean;
+  isFoldersLoading: boolean;
   isNotFound: boolean;
   error: string | null;
   refresh: (options?: { background?: boolean }) => Promise<void>;
 }
 
-export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerFallback?: User | null): CreatorSpaceData {
-  const [profile, setProfile] = useState<User | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+export function selectCreatorAssets(source: Asset[], profileId: string | undefined, isOwner: boolean): Asset[] {
+  if (!profileId) return [];
+  return source.filter(asset => asset.userId === profileId && (isOwner || isPublicFeedVisibility(asset)));
+}
+
+export function selectCreatorFolders(source: Folder[], profileId: string | undefined, isOwner: boolean): Folder[] {
+  if (!profileId || !isOwner) return [];
+  return source.filter(folder => folder.userId === profileId);
+}
+
+export function useCreatorSpaceData(
+  slug: string,
+  currentUserId: string | undefined,
+  ownerFallback: User | null | undefined,
+  sources: CreatorSpaceSources
+): CreatorSpaceData {
+  const [profile, setProfile] = useState<User | null>(() => supabaseService.getCreatorProfileSnapshot(slug));
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isNotFound, setIsNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
@@ -59,19 +68,16 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
     const requestId = ++requestSequence.current;
     if (!background) {
       blockingLoadActive.current = true;
-      setIsLoading(true);
+      setIsProfileLoading(true);
       setIsNotFound(false);
       setError(null);
     }
     if (ownerProfileFallback) {
-      setProfile(current => current || ownerProfileFallback);
+      setProfile(current => current || supabaseService.getCreatorProfileSnapshot(slug) || ownerProfileFallback);
     }
 
     try {
-      const profileResult = await withTimeout(
-        supabaseService.getCreatorProfile(slug),
-        'Creator profile lookup'
-      );
+      const profileResult = await supabaseService.getCreatorProfile(slug);
       if (requestId !== requestSequence.current) return;
 
       // The restored owner session is a safe fallback while the profile row
@@ -80,8 +86,6 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
       if (!resolvedProfile) {
         if (!background) {
           setProfile(null);
-          setAssets([]);
-          setFolders([]);
         }
         setError(isOwnerSlug
           ? 'บัญชีของคุณยังไม่มี Creator Profile กรุณาลองใหม่หลังการ provision โปรไฟล์'
@@ -92,46 +96,15 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
 
       setIsNotFound(false);
       setProfile(resolvedProfile);
-      const isOwner = resolvedProfile.id === currentUserId;
-      const [assetResult, folderResult] = await withTimeout(
-        Promise.all([
-          supabaseService.fetchAssets({
-            userId: resolvedProfile.id,
-            currentUserId,
-            includeDeleted: isOwner
-          }),
-          isOwner ? supabaseService.fetchFolders(resolvedProfile.id) : Promise.resolve({ data: [], error: null })
-        ]),
-        'Creator profile content lookup'
-      );
-      if (requestId !== requestSequence.current) return;
-
-      if (assetResult.error) {
-        if (!background) {
-          setAssets([]);
-          setFolders([]);
-        }
-        setError(assetResult.error);
-        return;
-      }
-      setAssets(assetResult.data);
-      setFolders(folderResult.data);
-      if (folderResult.error) setError(folderResult.error);
     } catch (caughtError) {
       if (requestId !== requestSequence.current) return;
       console.error('Creator profile load error:', caughtError);
       setIsNotFound(false);
       if (ownerProfileFallback) {
         setProfile(ownerProfileFallback);
-        if (!background) {
-          setAssets([]);
-          setFolders([]);
-        }
-        setError('โหลดผลงานของคุณไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setError('โหลดโปรไฟล์ของคุณไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
       } else if (!background) {
         setProfile(null);
-        setAssets([]);
-        setFolders([]);
         setError('โหลดโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
       } else {
         setError('อัปเดตข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
@@ -139,7 +112,7 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
     } finally {
       if (requestId === requestSequence.current && !background) {
         blockingLoadActive.current = false;
-        setIsLoading(false);
+        setIsProfileLoading(false);
       }
     }
   }, [currentUserId, isOwnerSlug, ownerProfileFallback, slug]);
@@ -149,23 +122,38 @@ export function useCreatorSpaceData(slug: string, currentUserId?: string, ownerF
     const identityChanged = initializedSlug.current !== null;
     initializedSlug.current = slug;
     if (identityChanged) {
-      setProfile(null);
-      setAssets([]);
-      setFolders([]);
+      setProfile(current => {
+        if (current && (
+          decodedSlug === current.id ||
+          current.username?.trim().toLowerCase() === decodedSlug.toLowerCase()
+        )) return current;
+        return supabaseService.getCreatorProfileSnapshot(slug) || ownerProfileFallback;
+      });
     }
     void refresh();
-  }, [refresh, slug]);
+  }, [decodedSlug, ownerProfileFallback, refresh, slug]);
 
-  useEffect(() => {
-    const handleDataChanged = () => { void refresh({ background: true }); };
-    const eventName = isMockPersistence ? 'creator-vault-qa-data-changed' : 'creator-vault-cloud-data-changed';
-    window.addEventListener(eventName, handleDataChanged);
-    return () => {
-      window.removeEventListener(eventName, handleDataChanged);
-    };
-  }, [refresh]);
+  const isOwner = Boolean(profile && profile.id === currentUserId);
+  const assets = useMemo(
+    () => selectCreatorAssets(sources.assets, profile?.id, isOwner),
+    [isOwner, profile?.id, sources.assets]
+  );
+  const folders = useMemo(
+    () => selectCreatorFolders(sources.folders, profile?.id, isOwner),
+    [isOwner, profile?.id, sources.folders]
+  );
 
-  return { profile, assets, folders, isLoading, isNotFound, error, refresh };
+  return {
+    profile,
+    assets,
+    folders,
+    isProfileLoading,
+    isAssetsLoading: sources.isAssetsLoading,
+    isFoldersLoading: isOwner ? sources.isFoldersLoading : false,
+    isNotFound,
+    error,
+    refresh
+  };
 }
 
 export function getCreatorVisibleAssets(assets: Asset[], isOwner: boolean): Asset[] {

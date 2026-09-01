@@ -43,6 +43,11 @@ const emptyState = (): CreatorSandboxState => ({
 });
 
 let memoryState = emptyState();
+let cachedSandboxRaw: string | null | undefined;
+let cachedLocalProfilesRaw: string | null | undefined;
+let cachedSessionProfilesRaw: string | null | undefined;
+let cachedLocalProfiles: Record<string, User> = {};
+let cachedSessionProfiles: Record<string, User> = {};
 
 function parseStoredProfiles(raw: string | null): Record<string, User> {
   if (!raw) return {};
@@ -54,10 +59,22 @@ function parseStoredProfiles(raw: string | null): Record<string, User> {
   }
 }
 
-function readProfilesFrom(storage: Storage | undefined): Record<string, User> {
+function readProfilesFrom(storage: Storage | undefined, kind: 'localStorage' | 'sessionStorage'): Record<string, User> {
   if (!storage) return {};
   try {
-    return parseStoredProfiles(storage.getItem(PROFILE_STORAGE_KEY));
+    const raw = storage.getItem(PROFILE_STORAGE_KEY);
+    if (kind === 'localStorage') {
+      if (raw !== cachedLocalProfilesRaw) {
+        cachedLocalProfilesRaw = raw;
+        cachedLocalProfiles = parseStoredProfiles(raw);
+      }
+      return cachedLocalProfiles;
+    }
+    if (raw !== cachedSessionProfilesRaw) {
+      cachedSessionProfilesRaw = raw;
+      cachedSessionProfiles = parseStoredProfiles(raw);
+    }
+    return cachedSessionProfiles;
   } catch {
     return {};
   }
@@ -74,8 +91,8 @@ function getBrowserStorage(kind: 'localStorage' | 'sessionStorage'): Storage | u
 
 function readStoredProfiles(): Record<string, User> {
   if (typeof window === 'undefined') return {};
-  const localProfiles = readProfilesFrom(getBrowserStorage('localStorage'));
-  const sessionProfiles = readProfilesFrom(getBrowserStorage('sessionStorage'));
+  const localProfiles = readProfilesFrom(getBrowserStorage('localStorage'), 'localStorage');
+  const sessionProfiles = readProfilesFrom(getBrowserStorage('sessionStorage'), 'sessionStorage');
   // A session fallback represents the newest accepted write when localStorage
   // was unavailable, so it intentionally wins for the lifetime of this tab.
   return { ...localProfiles, ...sessionProfiles };
@@ -104,10 +121,16 @@ function readState(): CreatorSandboxState {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
+      cachedSandboxRaw = raw;
+      memoryState = { ...memoryState, profiles: { ...memoryState.profiles, ...storedProfiles } };
+      return memoryState;
+    }
+    if (raw === cachedSandboxRaw) {
       memoryState = { ...memoryState, profiles: { ...memoryState.profiles, ...storedProfiles } };
       return memoryState;
     }
     const parsed = JSON.parse(raw) as Partial<CreatorSandboxState>;
+    cachedSandboxRaw = raw;
     memoryState = {
       assets: Array.isArray(parsed.assets) ? parsed.assets : [],
       folders: Array.isArray(parsed.folders) ? parsed.folders : [],
@@ -133,7 +156,9 @@ function writeState(next: CreatorSandboxState, notifyDataListeners = true): bool
     return true;
   }
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    const serialized = JSON.stringify(next);
+    window.localStorage.setItem(STORAGE_KEY, serialized);
+    cachedSandboxRaw = serialized;
     memoryState = next;
   } catch (error) {
     console.warn('[creatorPersistence] local sandbox write failed', error);
@@ -219,6 +244,10 @@ export function writeMockProfile(user: User): MockProfileWriteResult {
 
   if (!localError) {
     try { window.sessionStorage?.removeItem(PROFILE_STORAGE_KEY); } catch { /* stale fallback cannot override this tab after memory update */ }
+    cachedLocalProfilesRaw = serialized;
+    cachedLocalProfiles = profiles;
+    cachedSessionProfilesRaw = null;
+    cachedSessionProfiles = {};
     memoryState = { ...state, profiles };
     notifyQaDataListeners();
     return { success: true, storage: 'localStorage', error: null };
@@ -232,6 +261,8 @@ export function writeMockProfile(user: User): MockProfileWriteResult {
   }
 
   if (!sessionError) {
+    cachedSessionProfilesRaw = serialized;
+    cachedSessionProfiles = profiles;
     memoryState = { ...state, profiles };
     console.warn('[creatorPersistence] QA Profile is using the same-tab session fallback because localStorage was unavailable', localError);
     notifyQaDataListeners();
@@ -246,6 +277,46 @@ export function writeMockProfile(user: User): MockProfileWriteResult {
       ? 'พื้นที่จัดเก็บของเบราว์เซอร์ไม่เพียงพอสำหรับบันทึกโปรไฟล์ QA กรุณาลดขนาดรูปภาพแล้วลองใหม่'
       : 'บันทึกโปรไฟล์ใน QA Sandbox ไม่สำเร็จ เบราว์เซอร์ไม่อนุญาตให้ใช้พื้นที่จัดเก็บภายในเครื่อง'
   };
+}
+
+/**
+ * Retains the first verified cloud Profile as a last-known browser snapshot.
+ * An explicitly saved QA Profile always wins and this read-through cache does
+ * not emit mutation events, so a read cannot create a refresh loop.
+ */
+export function cacheMockProfileSnapshot(user: User): boolean {
+  const state = readState();
+  if (!user.id || state.profiles[user.id]) return false;
+  const profiles = { ...state.profiles, [user.id]: user };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(profiles);
+  } catch {
+    return false;
+  }
+
+  if (typeof window === 'undefined') {
+    memoryState = { ...state, profiles };
+    return true;
+  }
+
+  try {
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, serialized);
+    cachedLocalProfilesRaw = serialized;
+    cachedLocalProfiles = profiles;
+    memoryState = { ...state, profiles };
+    return true;
+  } catch {
+    try {
+      window.sessionStorage?.setItem(PROFILE_STORAGE_KEY, serialized);
+      cachedSessionProfilesRaw = serialized;
+      cachedSessionProfiles = profiles;
+      memoryState = { ...state, profiles };
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function readCreatorSpaceSettings(userId: string): CreatorSpaceSettings | null {
@@ -283,5 +354,10 @@ export function resetCreatorSandbox(): void {
     try { window.localStorage.removeItem(PROFILE_STORAGE_KEY); } catch { /* memory reset still applies */ }
     try { window.sessionStorage?.removeItem(PROFILE_STORAGE_KEY); } catch { /* memory reset still applies */ }
   }
+  cachedSandboxRaw = undefined;
+  cachedLocalProfilesRaw = undefined;
+  cachedSessionProfilesRaw = undefined;
+  cachedLocalProfiles = {};
+  cachedSessionProfiles = {};
   writeState(emptyState());
 }

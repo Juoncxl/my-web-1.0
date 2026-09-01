@@ -6,15 +6,19 @@ type ReportError = (message: string) => void;
 
 export function useFolderData(currentUserId: string | undefined, reportError: ReportError) {
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [isLoadingFolders, setIsLoadingFolders] = useState(Boolean(currentUserId));
   const requestSequence = useRef(0);
   const scopeSequence = useRef(0);
   const previousUserId = useRef(currentUserId);
+  const hasLoadedFolders = useRef(false);
 
   const refreshFolders = useCallback(async () => {
     if (!currentUserId) return;
 
     const requestId = ++requestSequence.current;
     const requestScope = scopeSequence.current;
+    const isInitialLoad = !hasLoadedFolders.current;
+    if (isInitialLoad) setIsLoadingFolders(true);
     try {
       const res = await supabaseService.fetchFolders(currentUserId);
       if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
@@ -23,10 +27,15 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
         return;
       }
       setFolders(res.data);
+      hasLoadedFolders.current = true;
     } catch (error) {
       if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
       console.error('Error loading folders:', error);
       reportError('โหลดโฟลเดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      if (requestId === requestSequence.current && requestScope === scopeSequence.current && isInitialLoad) {
+        setIsLoadingFolders(false);
+      }
     }
   }, [currentUserId, reportError]);
 
@@ -34,6 +43,7 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
     if (previousUserId.current !== currentUserId) {
       previousUserId.current = currentUserId;
       scopeSequence.current += 1;
+      hasLoadedFolders.current = false;
       setFolders([]);
     }
     if (currentUserId) void refreshFolders();
@@ -60,5 +70,13 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
     return result;
   }, [currentUserId]);
 
-  return { folders, refreshFolders, createFolder, updateFolder, deleteFolder };
+  const isChangingAccountScope = previousUserId.current !== currentUserId;
+  return {
+    folders,
+    isLoadingFolders: isLoadingFolders || isChangingAccountScope,
+    refreshFolders,
+    createFolder,
+    updateFolder,
+    deleteFolder
+  };
 }

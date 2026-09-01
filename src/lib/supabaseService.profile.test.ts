@@ -15,7 +15,15 @@ vi.mock('./supabaseClient', () => ({
   getSupabaseClient: supabaseClientMocks.getSupabaseClient
 }));
 
-import { readMockProfile, resetCreatorSandbox, writeMockProfile } from './creatorPersistence';
+import type { Asset, Folder } from '../types';
+import {
+  cacheMockProfileSnapshot,
+  readMockProfile,
+  resetCreatorSandbox,
+  writeMockAsset,
+  writeMockFolder,
+  writeMockProfile
+} from './creatorPersistence';
 import { supabaseService } from './supabaseService';
 
 function makeProfile(overrides: Partial<User> = {}): User {
@@ -121,6 +129,47 @@ describe('Profile identity service in the QA persistence boundary', () => {
     const result = await supabaseService.getProfile('owner-uuid');
 
     expect(result).toEqual(profile);
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first verified Profile snapshot without overwriting an explicit QA Profile', () => {
+    const verified = makeProfile({ displayName: 'Juon', username: 'juoncxl' });
+    expect(cacheMockProfileSnapshot(verified)).toBe(true);
+    expect(cacheMockProfileSnapshot(makeProfile({ displayName: 'Stale remote value' }))).toBe(false);
+    expect(readMockProfile('owner-uuid', null)).toEqual(verified);
+
+    expect(writeMockProfile(makeProfile({ displayName: 'Explicit local edit', username: 'local-owner' })).success).toBe(true);
+    expect(cacheMockProfileSnapshot(verified)).toBe(false);
+    expect(readMockProfile('owner-uuid', null)).toMatchObject({ displayName: 'Explicit local edit', username: 'local-owner' });
+  });
+
+  it('reads QA Works and Folders strictly from local storage without constructing Supabase', async () => {
+    const now = '2026-01-01T00:00:00.000Z';
+    const asset: Asset = {
+      id: 'asset-1', userId: 'owner-uuid', authorName: 'Juon', title: 'Local work',
+      icon: { type: 'emoji', value: '🧪' }, category: 'lore', content: '', uiCodeSnippet: '',
+      previewImage: '', previewImages: [], folderId: null, isPublic: false, visibility: 'private',
+      status: 'finished', deletedAt: null, createdAt: now, updatedAt: now, likesCount: 0,
+      forkCount: 0, forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    };
+    const folder: Folder = {
+      id: 'folder-1', userId: 'owner-uuid', name: 'Local folder', icon: '📁', color: 'purple',
+      createdAt: now, updatedAt: now
+    };
+    writeMockAsset(asset);
+    writeMockFolder(folder);
+    supabaseClientMocks.getSupabaseClient.mockClear();
+
+    await expect(supabaseService.fetchAssets({ currentUserId: 'owner-uuid', includeDeleted: true }))
+      .resolves.toEqual({ data: [asset], error: null });
+    await expect(supabaseService.fetchFolders('owner-uuid'))
+      .resolves.toEqual({ data: [folder], error: null });
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
+
+  it('resolves zero local Works as a completed empty result without a cloud fallback', async () => {
+    await expect(supabaseService.fetchAssets({ currentUserId: 'owner-uuid', includeDeleted: true }))
+      .resolves.toEqual({ data: [], error: null });
     expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
   });
 });

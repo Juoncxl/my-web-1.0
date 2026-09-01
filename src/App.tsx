@@ -79,9 +79,10 @@ function MainApp() {
     moveAsset,
     updateAssetLikeCount,
     clearFolderAssignments
-  } = useAssetData(currentUser, reportOperationError, !authLoading);
+  } = useAssetData(currentUser, reportOperationError);
   const {
     folders,
+    isLoadingFolders,
     refreshFolders,
     createFolder,
     updateFolder,
@@ -428,17 +429,6 @@ function MainApp() {
     onCreateAsset: handleOpenCreateModal
   };
 
-  // Do not let account-only UI interpret the initial auth check as a guest
-  // session. The AuthProvider is the single source of truth, but its initial
-  // getSession/getUser round trip is asynchronous.
-  if (authLoading) {
-    return (
-      <div className="cv-app-shell min-h-screen flex items-center justify-center px-4 text-slate-600 dark:text-slate-300" aria-busy="true">
-        <span className="text-sm">กำลังตรวจสอบบัญชี...</span>
-      </div>
-    );
-  }
-
   return (
     <div className="cv-app-shell min-h-screen flex flex-col text-slate-800 dark:text-slate-100 transition-colors duration-200">
       {creatorSlug ? (
@@ -450,6 +440,9 @@ function MainApp() {
           onOpenFolderManager={() => setIsFolderManagerOpen(true)}
           onOpenSettingsModal={() => setIsSettingsOpen(true)}
           allKnownAssets={assets}
+          knownFolders={folders}
+          isLoadingAssets={isLoadingAssets}
+          isLoadingFolders={isLoadingFolders}
           bookmarkedAssetIds={bookmarkedAssetIds}
           recentlyViewedIds={recentlyViewedIds}
           onDeleteAsset={handleDeleteVaultAsset}
