@@ -37,7 +37,7 @@ export function resolveProfileView(
 ): { activeTab: ProfileTab; isPublicView: boolean } {
   const isPublicView = !isOwner || route.previewPublic;
   return {
-    activeTab: isPublicView ? 'profile' : route.requestedTab,
+    activeTab: isPublicView ? route.requestedTab === 'works' ? 'works' : 'profile' : route.requestedTab,
     isPublicView
   };
 }

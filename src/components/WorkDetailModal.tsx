@@ -11,6 +11,7 @@ import {
   FileText,
   Flag,
   Folder,
+  FolderInput,
   GitFork,
   Globe2,
   History,
@@ -22,7 +23,7 @@ import {
   Trash2,
   X
 } from 'lucide-react';
-import type { Asset, AssetIcon, User, WorkContentBlock } from '../types';
+import type { Asset, AssetIcon, Folder as WorkFolder, User, WorkContentBlock } from '../types';
 import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
 import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatShortDate, formatThaiDate } from '../lib/dateUtils';
@@ -103,6 +104,8 @@ export interface WorkDetailModalProps {
   isBookmarked?: boolean;
   isTrashMode?: boolean;
   creatorProfile?: User | null;
+  folders?: WorkFolder[];
+  onMoveToFolder?: (asset: Asset) => void;
 }
 
 /** The one canonical Work presentation for both legacy and newly-created data. */
@@ -122,7 +125,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   isOwner = false,
   isBookmarked = false,
   isTrashMode = false,
-  creatorProfile = null
+  creatorProfile = null,
+  folders = [],
+  onMoveToFolder
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codeView, setCodeView] = useState<CodeView>('split');
@@ -169,6 +174,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     ? mainBlocks.map(block => `${block.title}\n${block.body}`).join('\n\n')
     : legacyContent;
   const isPublic = asset.visibility === 'public' && asset.isPublic === true;
+  const assignedFolder = folders.find(folder => folder.id === asset.folderId);
 
   const copyToClipboard = (text: string, key: string) => {
     void navigator.clipboard?.writeText(text);
@@ -243,7 +249,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
               <span>{category.emoji} {category.name}</span>
               <span>{isPublic ? <Globe2 aria-hidden="true" /> : <LockKeyhole aria-hidden="true" />}{isPublic ? 'สาธารณะ' : asset.visibility === 'draft' ? 'แบบร่าง' : 'ส่วนตัว'}</span>
               <span>{status.emoji} {status.name}</span>
-              <span><Folder aria-hidden="true" />{asset.folderId || 'ไม่จัดโฟลเดอร์'}</span>
+              <span><Folder aria-hidden="true" />{assignedFolder?.name || (asset.folderId ? 'ไม่พบโฟลเดอร์' : 'ไม่จัดโฟลเดอร์')}</span>
             </div>
 
             <h3>{asset.title}</h3>
@@ -325,6 +331,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {onBookmark && <button type="button" className={`is-secondary ${isBookmarked ? 'is-selected' : ''}`} onClick={() => onBookmark(asset.id)}><Bookmark aria-hidden="true" className={isBookmarked ? 'is-filled' : ''} />{isBookmarked ? 'บันทึกแล้ว' : 'บันทึกไว้'}</button>}
             {!isOwner && onFork && <button type="button" className="is-secondary" onClick={() => onFork(asset)}><GitFork aria-hidden="true" />Fork</button>}
             {isOwner && onEdit && <button type="button" className="is-secondary" onClick={() => onEdit(asset)}><Edit3 aria-hidden="true" />แก้ไขผลงาน</button>}
+            {isOwner && onMoveToFolder && <button type="button" className="is-secondary" onClick={() => onMoveToFolder(asset)}><FolderInput aria-hidden="true" />ย้ายไปโฟลเดอร์</button>}
             {isOwner && onDelete && <button type="button" className="is-danger" onClick={() => { if (window.confirm('ต้องการย้ายผลงานนี้ไปยังถังขยะ (Trash) ใช่หรือไม่?')) { onDelete(asset.id); onClose(); } }}><Trash2 aria-hidden="true" />ย้ายลงถังขยะ</button>}
           </>}
           <button type="button" className="is-primary" onClick={onClose}>ปิด</button>

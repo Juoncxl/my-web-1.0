@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Code2, Eye, ImagePlus, Plus, X } from 'lucide-react';
-import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, User, WorkContentBlock, WorkContentBlockType } from '../../types';
+import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
 
 type WorkSection = 'details' | 'content' | 'media' | 'review';
@@ -14,6 +14,7 @@ export interface CreatorWorkDraft {
   description: string;
   visibility: AssetVisibility;
   status: AssetStatus;
+  folderId: string | null;
   icon: AssetIcon;
   content: string;
   contentBlocks: WorkContentBlock[];
@@ -24,7 +25,7 @@ export interface CreatorWorkDraft {
 
 export function createBlankCreatorWorkDraft(): CreatorWorkDraft {
   return {
-    title: '', category: 'prompts', description: '', visibility: 'private', status: 'in_progress',
+    title: '', category: 'prompts', description: '', visibility: 'private', status: 'in_progress', folderId: null,
     icon: { type: 'emoji', value: '✦' }, content: '', contentBlocks: [], uiCodeSnippet: '', previewImages: [], tags: []
   };
 }
@@ -47,6 +48,7 @@ interface CreatorWorkWorkspaceProps {
   onSave: (draft: CreatorWorkDraft) => Promise<{ success: boolean; error?: string }>;
   initialData?: Asset | null;
   creatorProfile?: User | null;
+  folders?: Folder[];
 }
 
 const PRESETS: Record<string, { label: string; description: string; blocks: WorkBlockType[] }> = {
@@ -92,6 +94,7 @@ export function createCreatorWorkDraftFromAsset(asset: Asset): CreatorWorkDraft 
     description: asset.shortDescription ?? '',
     visibility: asset.visibility || (asset.isPublic ? 'public' : 'private'),
     status: asset.status || 'finished',
+    folderId: asset.folderId || null,
     icon: { ...asset.icon },
     content: serializeMainContentBlocks(contentBlocks),
     contentBlocks,
@@ -101,13 +104,14 @@ export function createCreatorWorkDraftFromAsset(asset: Asset): CreatorWorkDraft 
   };
 }
 
-export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOpen, onClose, onSave, initialData = null, creatorProfile = null }) => {
+export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOpen, onClose, onSave, initialData = null, creatorProfile = null, folders = [] }) => {
   const [section, setSection] = useState<WorkSection>('details');
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('คำสั่งพรอมต์');
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState('ส่วนตัว');
   const [status, setStatus] = useState('กำลังทำ');
+  const [folderId, setFolderId] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<WorkBlock[]>([]);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -131,7 +135,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     setIsSaving(false);
     if (!initialData) {
       const blank = createBlankCreatorWorkDraft();
-      setTitle(blank.title); setCategory('คำสั่งพรอมต์'); setDescription(blank.description); setVisibility('ส่วนตัว'); setStatus('กำลังทำ');
+      setTitle(blank.title); setCategory('คำสั่งพรอมต์'); setDescription(blank.description); setVisibility('ส่วนตัว'); setStatus('กำลังทำ'); setFolderId(blank.folderId);
       setBlocks(blank.contentBlocks); setActiveBlockId(null);
       setTags(blank.tags); setTagInput(''); setIconKind('emoji'); setIconValue(blank.icon.value); setIconImage(''); setMediaImages(blank.previewImages);
       return;
@@ -143,6 +147,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     setDescription(draft.description);
     setVisibility(fromAssetVisibility(draft.visibility));
     setStatus(fromAssetStatus(draft.status));
+    setFolderId(draft.folderId);
     setTags(draft.tags);
     setTagInput('');
     const isGif = draft.icon.type === 'image' && draft.icon.value.startsWith('data:image/gif');
@@ -162,13 +167,14 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     description: description.trim(),
     visibility: toAssetVisibility(visibility),
     status: toAssetStatus(status),
+    folderId,
     icon: iconKind === 'emoji' ? { type: 'emoji' as const, value: iconValue || '✦' } : { type: 'image' as const, value: iconImage },
     content: draftContent,
     contentBlocks: blocks,
     uiCodeSnippet,
     previewImages: mediaImages,
     tags
-  }), [blocks, category, description, draftContent, iconImage, iconKind, iconValue, mediaImages, status, tags, title, uiCodeSnippet, visibility]);
+  }), [blocks, category, description, draftContent, folderId, iconImage, iconKind, iconValue, mediaImages, status, tags, title, uiCodeSnippet, visibility]);
   if (!isOpen) return null;
 
   const addBlock = (type: WorkBlockType) => { const block = makeBlock(type, blocks.length); setBlocks(previous => [...previous, block]); setActiveBlockId(block.id); setSection('content'); };
@@ -197,7 +203,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
       {section === 'content' && <><section className="csp-work-section"><div className="csp-section-heading"><div><h3>Starter Presets</h3><p>แม่แบบเพิ่ม Content Blocks เท่านั้น ไม่ใช่ writing area เอง</p></div><span>Optional</span></div><div className="csp-preset-grid">{Object.entries(PRESETS).map(([key, preset]) => <button type="button" key={key} className="csp-preset" onClick={() => applyPreset(key)}><strong>{preset.label}</strong><span>{preset.description}</span><small>{preset.blocks.length} blocks</small></button>)}</div></section><section className="csp-work-section" aria-labelledby="csp-blocks-title"><div className="csp-section-heading"><div><h3 id="csp-blocks-title">Main Content</h3><p>แถวที่ยุบจะแสดง summary · คลิกเพื่อเปิด large editor</p></div><span>{blocks.length} blocks</span></div><div className="csp-block-list">{blocks.length === 0 && <div className="csp-empty-inline"><Code2 className="h-5 w-5" /><span>ยังไม่มี block · เลือกชนิดด้านล่างเพื่อเริ่ม</span></div>}{blocks.map((block, index) => <div key={block.id} className={`csp-block-row ${activeBlockId === block.id ? 'is-active' : ''}`}><span className="csp-block-index">{String(index + 1).padStart(2, '0')}</span><button type="button" className="csp-block-summary" onClick={() => { setActiveBlockId(block.id); setNestedEditorOpen(true); }}><strong>{block.title}</strong><span>{BLOCK_LABELS[block.type]} · {block.body.slice(0, 80)}</span></button><div className="csp-row-actions"><button type="button" onClick={() => moveBlock(index, -1)} aria-label="เลื่อนขึ้น"><ChevronLeft className="h-4 w-4 -rotate-90" /></button><button type="button" onClick={() => moveBlock(index, 1)} aria-label="เลื่อนลง"><ChevronRight className="h-4 w-4 rotate-90" /></button><button type="button" className="is-danger" onClick={() => setBlocks(previous => previous.filter(item => item.id !== block.id))} aria-label="ลบ block">×</button></div></div>)}</div><div className="csp-add-blocks">{(['Text', 'Heading', 'Image', 'Prompt', 'UI Code', 'Divider', 'Note'] as WorkBlockType[]).map(type => <button type="button" key={type} onClick={() => addBlock(type)}><Plus className="h-3.5 w-3.5" />{BLOCK_LABELS[type]}</button>)}</div></section>{activeBlock && <section className="csp-work-section csp-block-editor"><div className="csp-section-heading"><div><h3>Block Editor · {activeBlock.title}</h3><p>แก้เนื้อหาของ block ที่เลือกใน session นี้</p></div><span>{activeBlock.type}</span></div><label className="csp-field">ชื่อ block<input value={activeBlock.title} onChange={event => updateActiveBlock({ title: event.target.value })} /></label><label className="csp-field">เนื้อหา<textarea value={activeBlock.body} onChange={event => updateActiveBlock({ body: event.target.value })} rows={activeBlock.type === 'UI Code' ? 10 : 7} /></label></section>}</>}
       {section === 'media' && <section className="csp-work-section"><div className="csp-section-heading"><div><h3>สื่อ</h3><p>ไฟล์ทั้งหมดเป็น data URL ใน QA Sandbox · ไม่อัปโหลด storage</p></div><span>Local only</span></div><div className="csp-media-placeholder"><ImagePlus className="h-7 w-7" /><strong>Cover / Gallery</strong><span>เลือกภาพชั่วคราวเพื่อใช้ใน review และ Work Card</span><label className="csp-secondary-button csp-file-button">เลือกภาพจากเครื่อง<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleImageFile} /></label></div>{mediaImages.length > 0 && <div className="csp-media-strip">{mediaImages.map((image, index) => <button type="button" key={`${image.slice(0, 20)}-${index}`} onClick={() => setMediaImages(previous => previous.filter((_, itemIndex) => itemIndex !== index))} aria-label={`ลบภาพที่ ${index + 1}`}><img src={image} alt="" /></button>)}</div>}</section>}
       {section === 'review' && <section className="csp-work-section"><div className="csp-section-heading"><div><h3>ตรวจสอบ</h3><p>Rendered preview จาก draft ในหน่วยความจำปัจจุบัน · ยังไม่บันทึก</p></div><div className="csp-review-switcher"><button type="button" className={reviewViewport === 'desktop' ? 'is-active' : ''} onClick={() => setReviewViewport('desktop')}>Desktop</button><button type="button" className={reviewViewport === 'mobile' ? 'is-active' : ''} onClick={() => setReviewViewport('mobile')}>Mobile</button></div></div><div className={`csp-review-card ${reviewViewport === 'mobile' ? 'is-mobile' : ''}`}><div className="csp-review-icon">{draftPreview.icon.type === 'emoji' ? draftPreview.icon.value : draftPreview.icon.value ? <img src={draftPreview.icon.value} alt="" /> : '✦'}</div><div><strong>{draftPreview.title}</strong><span>{category} · {visibility} · {status}</span>{creatorProfile && <small className="csp-preview-author">โดย {creatorProfile.displayName}{creatorProfile.username ? ` · @${creatorProfile.username}` : ''}</small>}<p data-preview-field="short-description">{draftPreview.description || 'ยังไม่มีคำอธิบายสั้น'}</p><div className="csp-tag-list">{draftPreview.tags.map(tag => <span key={tag}>#{tag}</span>)}</div>{draftPreview.previewImages.length > 0 && <div className="csp-media-strip">{draftPreview.previewImages.map((image, index) => <img key={`${image.slice(0, 20)}-${index}`} src={image} alt="" />)}</div>}</div></div><div className="csp-work-section" data-preview-section="content-blocks"><div className="csp-section-heading"><div><h3>Main Content</h3><p>Content Blocks จาก draft ปัจจุบัน</p></div><span>{draftPreview.contentBlocks.filter(block => block.type !== 'UI Code').length} blocks</span></div>{draftPreview.contentBlocks.filter(block => block.type !== 'UI Code').map(block => <article key={block.id} className="csp-preview-block"><small>{BLOCK_LABELS[block.type]}</small><strong>{block.title}</strong><p>{block.body}</p></article>)}{draftPreview.contentBlocks.every(block => block.type === 'UI Code') && <div className="csp-empty-inline">ยังไม่มี Main Content</div>}</div>{draftPreview.uiCodeSnippet && <div className="csp-code-preview-wrap" data-preview-section="ui-code"><div className="csp-section-heading"><div><h3>UI Code · CODE / PREVIEW</h3><p>Renderer เดียวกับ canonical Work Detail</p></div><Eye className="h-4 w-4" /></div><div className="csp-code-tabs"><button type="button" className={codeView === 'preview' ? 'is-active' : ''} onClick={() => setCodeView('preview')}>PREVIEW</button><button type="button" className={codeView === 'code' ? 'is-active' : ''} onClick={() => setCodeView('code')}>CODE</button></div>{codeView === 'preview' ? <SandboxedCodePreview code={draftPreview.uiCodeSnippet} minHeight="220px" /> : <pre className="csp-code-source">{draftPreview.uiCodeSnippet}</pre>}</div>}</section>}
-    </main><aside className="csp-work-sidebar"><section className="csp-work-section"><div className="csp-section-heading"><div><h3>Metadata</h3><p>ข้อมูลนี้จะถูกส่งให้ repository เมื่อกดสร้าง</p></div><span>Draft</span></div><label className="csp-field">Visibility<select value={visibility} onChange={event => setVisibility(event.target.value)}><option>ส่วนตัว</option><option>สาธารณะ</option><option>แบบร่าง</option></select></label><label className="csp-field">Workflow status<select value={status} onChange={event => setStatus(event.target.value)}><option>ไอเดีย</option><option>แบบร่าง</option><option>กำลังทำ</option><option>เสร็จสมบูรณ์</option><option>จัดเก็บแล้ว</option></select></label></section><section className="csp-work-section"><div className="csp-section-heading"><div><h3>Tags</h3><p>{tags.length}/10</p></div></div><div className="csp-tag-list">{tags.map(tag => <button type="button" key={tag} onClick={() => setTags(previous => previous.filter(item => item !== tag))}>#{tag} ×</button>)}</div><div className="csp-tag-entry"><input value={tagInput} onChange={event => setTagInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} placeholder="พิมพ์ tag แล้วกด Enter" /><button type="button" onClick={addTag}>เพิ่ม</button></div></section><section className="csp-work-section csp-persistence-note"><strong>QA Sandbox boundary</strong><p>Create Work, blocks, media และ asset ใหม่จะอยู่ใน local adapter เท่านั้น ไม่มี production write ในโหมดนี้</p></section></aside></div>
+    </main><aside className="csp-work-sidebar"><section className="csp-work-section"><div className="csp-section-heading"><div><h3>Metadata</h3><p>ข้อมูลนี้จะถูกส่งให้ repository เมื่อกดสร้าง</p></div><span>Draft</span></div><label className="csp-field">Visibility<select value={visibility} onChange={event => setVisibility(event.target.value)}><option>ส่วนตัว</option><option>สาธารณะ</option><option>แบบร่าง</option></select></label><label className="csp-field">Workflow status<select value={status} onChange={event => setStatus(event.target.value)}><option>ไอเดีย</option><option>แบบร่าง</option><option>กำลังทำ</option><option>เสร็จสมบูรณ์</option><option>จัดเก็บแล้ว</option></select></label><label className="csp-field">Folder<select value={folderId || ''} onChange={event => setFolderId(event.target.value || null)}><option value="">ไม่มีโฟลเดอร์</option>{folders.map(folder => <option value={folder.id} key={folder.id}>{folder.icon || '📁'} {folder.name}</option>)}</select></label></section><section className="csp-work-section"><div className="csp-section-heading"><div><h3>Tags</h3><p>{tags.length}/10</p></div></div><div className="csp-tag-list">{tags.map(tag => <button type="button" key={tag} onClick={() => setTags(previous => previous.filter(item => item !== tag))}>#{tag} ×</button>)}</div><div className="csp-tag-entry"><input value={tagInput} onChange={event => setTagInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} placeholder="พิมพ์ tag แล้วกด Enter" /><button type="button" onClick={addTag}>เพิ่ม</button></div></section><section className="csp-work-section csp-persistence-note"><strong>QA Sandbox boundary</strong><p>Create Work, blocks, media และ asset ใหม่จะอยู่ใน local adapter เท่านั้น ไม่มี production write ในโหมดนี้</p></section></aside></div>
     <footer className="csp-modal-footer"><span>{isSaving ? (initialData ? 'กำลังบันทึกใน local sandbox…' : 'กำลังสร้างใน local sandbox…') : (initialData ? 'พร้อมบันทึก · local only' : 'พร้อมสร้าง · local only')}</span><button type="button" className="csp-secondary-button" onClick={onClose}>ยกเลิก</button><button type="button" className="csp-primary-button" disabled={isSaving || !title.trim()} onClick={() => void saveWork()}>{isSaving ? 'กำลังบันทึก…' : initialData ? 'บันทึกการแก้ไข' : 'สร้างผลงาน'}</button></footer>
   </section>{nestedEditorOpen && activeBlock && <div className="csp-nested-modal" role="dialog" aria-modal="true" aria-label={`Block Editor ${activeBlock.title}`}><section className="csp-nested-modal-card"><header className="csp-modal-header"><div><p className="csp-eyebrow">MAIN CONTENT · LARGE EDITOR</p><h2>{activeBlock.title}</h2></div><button type="button" className="csp-icon-button" onClick={() => setNestedEditorOpen(false)} aria-label="ปิด editor"><X className="h-4 w-4" /></button></header><div className="csp-nested-modal-body"><label className="csp-field">ชื่อ block<input value={activeBlock.title} onChange={event => updateActiveBlock({ title: event.target.value })} /></label>{activeBlock.type === 'UI Code' ? <><label className="csp-field">CODE · HTML + CSS<textarea value={activeBlock.body} onChange={event => updateActiveBlock({ body: event.target.value })} rows={18} /></label><div className="csp-code-preview-wrap"><strong>PREVIEW</strong><SandboxedCodePreview code={activeBlock.body} minHeight="240px" /></div></> : <label className="csp-field">เนื้อหา<textarea value={activeBlock.body} onChange={event => updateActiveBlock({ body: event.target.value })} rows={14} /></label>}</div><footer className="csp-modal-footer"><span>กลับไปยังตำแหน่งเดิมใน workspace ได้โดยไม่หาย</span><button type="button" className="csp-primary-button" onClick={() => setNestedEditorOpen(false)}>เสร็จสิ้น</button></footer></section></div>}</div>;
 };

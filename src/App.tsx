@@ -207,6 +207,7 @@ function MainApp() {
         isPublic: draft.visibility === 'public',
         visibility: draft.visibility,
         status: draft.status,
+        folderId: draft.folderId,
         tags: draft.tags
       });
       if (result.data) {
@@ -226,7 +227,7 @@ function MainApp() {
       uiCodeSnippet: draft.uiCodeSnippet,
       previewImage: draft.previewImages[0],
       previewImages: draft.previewImages,
-      folderId: null,
+      folderId: draft.folderId,
       isPublic: draft.visibility === 'public',
       visibility: draft.visibility,
       status: draft.status,
@@ -460,6 +461,8 @@ function MainApp() {
           onEditAsset={handleEditVaultAsset}
           onOpenAuth={() => openAuthModal('login')}
           onOpenFolderManager={() => setIsFolderManagerOpen(true)}
+          onOpenMoveToFolder={handleOpenMoveToFolder}
+          onMoveAssetToFolder={handleMoveToFolder}
           onOpenSettingsModal={() => setIsSettingsOpen(true)}
           allKnownAssets={assets}
           knownFolders={folders}
@@ -516,7 +519,7 @@ function MainApp() {
         asset={viewingAsset}
         isOpen={!!viewingAsset}
         onClose={closeAssetView}
-        onEdit={asset => openEditEditor(asset.id)}
+        onEdit={asset => { closeAssetView(); openEditEditor(asset.id); }}
         onDelete={handleSoftDeleteAsset}
         onPermanentDelete={handlePermanentDeleteAsset}
         onRestore={handleRestoreAsset}
@@ -528,6 +531,8 @@ function MainApp() {
           if (target) handleOpenAssetView(target);
         }}
         allAssets={assets}
+        folders={folders}
+        onMoveToFolder={handleOpenMoveToFolder}
         isOwner={viewingAsset?.userId === currentUser?.id}
         creatorProfile={viewingAsset && viewingAsset.userId === currentUser?.id ? currentUser : null}
         isBookmarked={viewingAsset ? bookmarkedAssetIds.includes(viewingAsset.id) : false}
@@ -585,6 +590,7 @@ function MainApp() {
         onClose={closeEditor}
         initialData={editingAsset}
         creatorProfile={currentUser}
+        folders={folders}
         onSave={handleSaveCreatorWork}
       />
     </div>

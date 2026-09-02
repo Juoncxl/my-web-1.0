@@ -22,6 +22,14 @@ describe('canonical Profile routing', () => {
     expect(resolveProfileView(route!, true)).toEqual({ activeTab: 'works', isPublicView: false });
   });
 
+  it('allows the public Works library while keeping private owner tabs closed', () => {
+    const worksRoute = parseCanonicalProfileLocation('/@juoncxl', '?tab=works');
+    const trashRoute = parseCanonicalProfileLocation('/@juoncxl', '?tab=trash');
+
+    expect(resolveProfileView(worksRoute!, false)).toEqual({ activeTab: 'works', isPublicView: true });
+    expect(resolveProfileView(trashRoute!, false)).toEqual({ activeTab: 'profile', isPublicView: true });
+  });
+
   it('treats only malformed or non-Profile paths as unresolved', () => {
     expect(parseCanonicalProfileLocation('/@%E0%A4%A')).toBeNull();
     expect(parseCanonicalProfileLocation('/vault')).toBeNull();

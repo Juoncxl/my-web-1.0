@@ -1,4 +1,5 @@
 import type { Asset, Folder, User } from '../types';
+import type { FreeLayoutPlacement, FreeWidgetInstance } from './creatorLayout';
 
 const STORAGE_KEY = 'cxl_creator_space_qa_sandbox_v1';
 const PROFILE_STORAGE_KEY = 'cxl_creator_space_qa_profiles_v1';
@@ -16,8 +17,11 @@ export interface CreatorSpaceSettings {
   widgetRail?: Record<string, 'left' | 'right'>;
   spans?: Record<string, number>;
   freeOrder?: string[];
+  freePlacements?: FreeLayoutPlacement[];
+  portfolioDisplayLimit?: 3 | 6 | 9 | 12 | 'all';
   widgetTitles?: Record<string, string>;
   widgetConfigs?: Record<string, Record<string, unknown>>;
+  widgetInstances?: FreeWidgetInstance[];
 }
 
 interface CreatorSandboxState {
@@ -358,12 +362,12 @@ export function readCreatorSpaceSettings(userId: string): CreatorSpaceSettings |
   return readState().settings[userId] || null;
 }
 
-export function writeCreatorSpaceSettings(userId: string, settings: CreatorSpaceSettings): void {
+export function writeCreatorSpaceSettings(userId: string, settings: CreatorSpaceSettings): boolean {
   const state = readState();
   // Layout/widget settings are local presentation state. They must not notify
   // asset/profile data listeners: doing so creates a settings -> profile
   // refresh -> rerender -> settings feedback loop on the Profile route.
-  writeState({ ...state, settings: { ...state.settings, [userId]: settings } }, false);
+  return writeState({ ...state, settings: { ...state.settings, [userId]: settings } }, false);
 }
 
 export function readMockBookmarks(userId: string): string[] {

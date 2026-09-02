@@ -4,6 +4,7 @@ import { buildWorkDraftPreview, createBlankCreatorWorkDraft, createCreatorWorkDr
 
 const draft: CreatorWorkDraft = {
   title: '  Current draft  ', category: 'ui_code', description: ' Draft description ', visibility: 'public', status: 'in_progress',
+  folderId: 'folder-qa',
   icon: { type: 'emoji', value: '✦' }, content: 'Current content',
   contentBlocks: [
     { id: 'text-1', type: 'Text', title: 'Main', body: 'MAIN CONTENT TEST' },
@@ -14,7 +15,7 @@ const draft: CreatorWorkDraft = {
 
 describe('CreatorWorkWorkspace live draft preview', () => {
   it('starts Create mode from a clean draft without prior Work state', () => {
-    expect(createBlankCreatorWorkDraft()).toMatchObject({ title: '', description: '', content: '', contentBlocks: [], uiCodeSnippet: '', previewImages: [], tags: [] });
+    expect(createBlankCreatorWorkDraft()).toMatchObject({ title: '', description: '', folderId: null, content: '', contentBlocks: [], uiCodeSnippet: '', previewImages: [], tags: [] });
   });
 
   it('derives the preview from current draft values without mutating the input', () => {
@@ -25,6 +26,7 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(preview.contentBlocks).toEqual(draft.contentBlocks);
     expect(preview.contentBlocks).not.toBe(draft.contentBlocks);
     expect(preview.previewImages).toEqual(['data:image/png;base64,current']);
+    expect(preview.folderId).toBe('folder-qa');
     expect(preview).not.toBe(draft);
     expect(draft.title).toBe('  Current draft  ');
   });
@@ -50,12 +52,13 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     const persisted = {
       id: 'legacy-work', title: 'Legacy', category: 'prompts', content: 'LEGACY MAIN CONTENT',
       uiCodeSnippet: '<div>Legacy UI</div>', icon: { type: 'emoji', value: '✦' }, tags: ['saved'],
-      visibility: 'private', isPublic: false, status: 'finished', previewImages: []
+      visibility: 'private', isPublic: false, status: 'finished', previewImages: [], folderId: 'folder-legacy'
     } as unknown as Asset;
     const editable = createCreatorWorkDraftFromAsset(persisted);
 
     expect(editable.description).toBe('');
     expect(editable.contentBlocks.map(block => block.type)).toEqual(['Text', 'UI Code']);
+    expect(editable.folderId).toBe('folder-legacy');
     editable.contentBlocks[0].body = 'UNSAVED CHANGE';
     editable.tags.push('unsaved');
     expect(persisted.content).toBe('LEGACY MAIN CONTENT');
