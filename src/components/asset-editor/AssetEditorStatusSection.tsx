@@ -22,8 +22,8 @@ export const AssetEditorStatusSection: React.FC<AssetEditorStatusSectionProps> =
         <Globe className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
         <span>ระดับการมองเห็น (Visibility)</span>
       </label>
-      <div className="grid grid-cols-3 gap-1.5">
-        {(['public', 'private', 'draft'] as AssetVisibility[]).map((value) => (
+      <div className="grid grid-cols-2 gap-1.5">
+        {(['public', 'private'] as AssetVisibility[]).map((value) => (
           <button
             key={value}
             type="button"
@@ -35,10 +35,10 @@ export const AssetEditorStatusSection: React.FC<AssetEditorStatusSectionProps> =
             }`}
           >
             <span className="text-sm">
-              {value === 'public' ? '🌐' : value === 'private' ? '🔒' : '📝'}
+              {value === 'public' ? '🌐' : '🔒'}
             </span>
             <span className="text-[11px]">
-              {value === 'public' ? 'สาธารณะ' : value === 'private' ? 'ส่วนตัว' : 'แบบร่าง'}
+              {value === 'public' ? 'สาธารณะ' : 'ส่วนตัว'}
             </span>
           </button>
         ))}

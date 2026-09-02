@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, Folder as FolderIcon, FolderInput, Plus, X } from 'lucide-react';
 import type { Asset, Folder } from '../types';
 import { FOLDER_COLOR_PRESETS } from '../lib/constants';
+import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 
 interface MoveToFolderModalProps {
   isOpen: boolean;
@@ -22,12 +24,57 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
 }) => {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(asset?.folderId || null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (asset) setSelectedFolderId(asset.folderId || null);
   }, [asset]);
 
-  if (!isOpen || !asset) return null;
+  useEffect(() => {
+    if (!isOpen || !asset || typeof document === 'undefined') return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const releaseScrollLock = acquireViewportScrollLock(document);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(element => element.getAttribute('aria-hidden') !== 'true');
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+      if (!dialog.contains(activeElement) || (!event.shiftKey && activeElement === lastFocusable) || (event.shiftKey && (activeElement === firstFocusable || activeElement === dialog))) {
+        event.preventDefault();
+        (event.shiftKey ? lastFocusable : firstFocusable).focus({ preventScroll: true });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    dialogRef.current?.focus({ preventScroll: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      releaseScrollLock();
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
+    };
+  }, [asset?.id, isOpen]);
+
+  if (!isOpen || !asset || typeof document === 'undefined') return null;
 
   const handleSave = async () => {
     setIsSubmitting(true);
@@ -36,9 +83,9 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
     if (success) onClose();
   };
 
-  return (
-    <div className="cv-modal-backdrop fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-200" role="presentation">
-      <div className="cv-modal-panel relative flex max-w-md flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="move-folder-title">
+  return createPortal(
+    <div className="cv-modal-backdrop move-to-folder-modal-backdrop fixed inset-0 overflow-y-auto animate-in fade-in duration-200" role="presentation" data-move-to-folder-backdrop onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} tabIndex={-1} className="cv-modal-panel relative flex max-w-md flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="move-folder-title" data-move-to-folder-dialog>
         <div className="cv-modal-heading flex items-center justify-between p-4 sm:p-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="cv-modal-icon"><FolderInput className="h-4 w-4" /></div>
@@ -83,6 +130,7 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
           <button type="button" disabled={isSubmitting} onClick={handleSave} className="cv-create-button rounded-lg px-5 py-2 text-xs font-bold disabled:opacity-50">{isSubmitting ? 'กำลังย้าย...' : 'ยืนยันการย้าย'}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

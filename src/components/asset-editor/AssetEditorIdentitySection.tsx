@@ -33,7 +33,7 @@ export const AssetEditorIdentitySection: React.FC<AssetEditorIdentitySectionProp
 
     const reader = new FileReader();
     reader.onload = () => {
-      onIconChange({ type: 'image', value: reader.result as string });
+      onIconChange({ type: 'image', value: reader.result as string, mimeType: file.type });
     };
     reader.readAsDataURL(file);
   };

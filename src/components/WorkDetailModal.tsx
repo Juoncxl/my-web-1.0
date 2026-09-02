@@ -29,6 +29,7 @@ import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatShortDate, formatThaiDate } from '../lib/dateUtils';
 import { resolveWorkCreator } from '../lib/workPresentation';
 import { resolveWorkPresentationContent } from '../lib/workContent';
+import { isValidWorkIcon } from '../lib/assetVisibility';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 
 type CodeView = 'split' | 'preview' | 'code';
@@ -44,10 +45,10 @@ const BLOCK_LABELS: Record<WorkContentBlock['type'], string> = {
 };
 
 function WorkMark({ icon }: { icon?: AssetIcon }) {
-  if (icon?.type === 'image' && icon.value) {
+  if (isValidWorkIcon(icon) && icon?.type === 'image') {
     return <img src={icon.value} alt="" />;
   }
-  return <span>{icon?.value || '✦'}</span>;
+  return <span>{isValidWorkIcon(icon) ? icon?.value : '✦'}</span>;
 }
 
 function CreatorAvatar({ avatarUrl, displayName }: { avatarUrl?: string; displayName: string }) {
@@ -247,7 +248,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-copy">
             <div className="work-detail-meta" aria-label="ข้อมูลผลงาน">
               <span>{category.emoji} {category.name}</span>
-              <span>{isPublic ? <Globe2 aria-hidden="true" /> : <LockKeyhole aria-hidden="true" />}{isPublic ? 'สาธารณะ' : asset.visibility === 'draft' ? 'แบบร่าง' : 'ส่วนตัว'}</span>
+              <span>{isPublic ? <Globe2 aria-hidden="true" /> : <LockKeyhole aria-hidden="true" />}{isPublic ? 'สาธารณะ' : 'ส่วนตัว'}</span>
               <span>{status.emoji} {status.name}</span>
               <span><Folder aria-hidden="true" />{assignedFolder?.name || (asset.folderId ? 'ไม่พบโฟลเดอร์' : 'ไม่จัดโฟลเดอร์')}</span>
             </div>

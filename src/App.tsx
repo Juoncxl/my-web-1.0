@@ -465,13 +465,15 @@ function MainApp() {
           onMoveAssetToFolder={handleMoveToFolder}
           onOpenSettingsModal={() => setIsSettingsOpen(true)}
           allKnownAssets={assets}
-          knownFolders={folders}
+          knownFolders={foldersWithCounts}
           isLoadingAssets={isLoadingAssets}
           isLoadingFolders={isLoadingFolders}
           bookmarkedAssetIds={bookmarkedAssetIds}
           recentlyViewedIds={recentlyViewedIds}
+          onBookmark={handleToggleBookmark}
           onDeleteAsset={handleDeleteVaultAsset}
           onRestoreAsset={handleRestoreAsset}
+          onPermanentDeleteAsset={handlePermanentDeleteAsset}
         />
       ) : (
         <>
@@ -531,7 +533,7 @@ function MainApp() {
           if (target) handleOpenAssetView(target);
         }}
         allAssets={assets}
-        folders={folders}
+        folders={foldersWithCounts}
         onMoveToFolder={handleOpenMoveToFolder}
         isOwner={viewingAsset?.userId === currentUser?.id}
         creatorProfile={viewingAsset && viewingAsset.userId === currentUser?.id ? currentUser : null}
@@ -558,7 +560,7 @@ function MainApp() {
         isOpen={!!movingAsset}
         onClose={closeMoveToFolder}
         asset={movingAsset}
-        folders={folders}
+        folders={foldersWithCounts}
         onMoveToFolder={handleMoveToFolder}
         onOpenFolderManager={() => {
           closeMoveToFolder();

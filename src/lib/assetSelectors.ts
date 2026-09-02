@@ -148,9 +148,17 @@ export function selectFolderAssetCounts(
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const folder of folders) counts[folder.id] = 0;
-  for (const asset of assets) {
-    if (!isOwnedActiveAsset(asset, currentUserId) || !asset.folderId) continue;
-    if (counts[asset.folderId] !== undefined) counts[asset.folderId] += 1;
-  }
+  const ownedActiveAssets = assets.filter(asset => isOwnedActiveAsset(asset, currentUserId));
+  for (const folder of folders) counts[folder.id] = countActiveAssetsInFolder(ownedActiveAssets, folder.id);
   return counts;
+}
+
+/** Canonical Folder membership selection shared by every Folder surface. */
+export function selectActiveAssetsInFolder(assets: readonly Asset[], folderId: string): Asset[] {
+  return assets.filter(asset => asset.folderId === folderId && !asset.deletedAt);
+}
+
+/** Canonical Folder membership count shared by every Folder surface. */
+export function countActiveAssetsInFolder(assets: readonly Asset[], folderId: string): number {
+  return selectActiveAssetsInFolder(assets, folderId).length;
 }

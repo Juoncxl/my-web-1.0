@@ -76,4 +76,29 @@ describe('asset action coordination', () => {
     expect(options.onAssetDeleted).toHaveBeenCalledWith(asset.id);
     expect(options.clearOperationError).toHaveBeenCalledOnce();
   });
+
+  it('synchronizes a successful Like aggregate into the shared Asset source', async () => {
+    const options = makeOptions({
+      toggleLike: vi.fn(async () => ({ success: true, isLiked: true, likesCount: 1 }))
+    });
+    const actions = useAssetActions(options);
+
+    await actions.handleLikeAsset(asset.id);
+
+    expect(options.toggleLike).toHaveBeenCalledWith(asset.id);
+    expect(options.updateAssetLikeCount).toHaveBeenCalledWith(asset.id, 1);
+    expect(options.clearOperationError).toHaveBeenCalledOnce();
+  });
+
+  it('does not overwrite a displayed Like count when the canonical mutation fails', async () => {
+    const options = makeOptions({
+      toggleLike: vi.fn(async () => ({ success: false, isLiked: false, likesCount: null, error: 'like failed' }))
+    });
+    const actions = useAssetActions(options);
+
+    await actions.handleLikeAsset(asset.id);
+
+    expect(options.updateAssetLikeCount).not.toHaveBeenCalled();
+    expect(options.reportOperationError).toHaveBeenCalledWith('like failed');
+  });
 });

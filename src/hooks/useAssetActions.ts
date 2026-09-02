@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import type { Asset, User } from '../types';
 import { canForkAsset } from '../lib/accessPolicy';
+import { normalizeAssetVisibility } from '../lib/assetVisibility';
 
 type ReportError = (message: string) => void;
 type ClearError = () => void;
@@ -91,6 +92,10 @@ export function useAssetActions({
           return { success: true };
         }
       } else {
+        const normalizedVisibility = normalizeAssetVisibility({
+          visibility: assetData.visibility,
+          isPublic: assetData.isPublic
+        });
         const result = await createAsset({
           title: assetData.title || 'Untitled Asset',
           icon: assetData.icon || { type: 'emoji', value: '✨' },
@@ -99,8 +104,8 @@ export function useAssetActions({
           uiCodeSnippet: assetData.uiCodeSnippet || '',
           previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : []),
           folderId: assetData.folderId || null,
-          isPublic: assetData.visibility === 'public' || (assetData.isPublic !== undefined ? assetData.isPublic : true),
-          visibility: assetData.visibility || 'public',
+          isPublic: normalizedVisibility.isPublic,
+          visibility: normalizedVisibility.visibility,
           status: assetData.status || 'finished',
           linkedAssetIds: assetData.linkedAssetIds || [],
           tags: assetData.tags || []

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Asset, Folder, User } from '../types';
 import { supabaseService } from '../lib/supabaseService';
+import { isPublicFeedAsset } from '../lib/accessPolicy';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
 import { isGenuineProfileNotFound } from '../lib/profileIdentity';
 
@@ -25,12 +26,26 @@ export interface CreatorSpaceData {
 
 export function selectCreatorAssets(source: Asset[], profileId: string | undefined, isOwner: boolean): Asset[] {
   if (!profileId) return [];
-  return source.filter(asset => asset.userId === profileId && (isOwner || isPublicFeedVisibility(asset)));
+  return source.filter(asset => asset.userId === profileId && (isOwner || isPublicFeedAsset(asset)));
 }
 
 export function selectCreatorFolders(source: Folder[], profileId: string | undefined, isOwner: boolean): Folder[] {
   if (!profileId || !isOwner) return [];
   return source.filter(folder => folder.userId === profileId);
+}
+
+/** Saved is an ID-based relationship, but the card still needs the canonical asset source. */
+export function selectCreatorSavedAssets(
+  source: Asset[],
+  bookmarkedAssetIds: readonly string[],
+  currentUserId: string | undefined
+): Asset[] {
+  if (!currentUserId) return [];
+  return source.filter(asset =>
+    bookmarkedAssetIds.includes(asset.id) &&
+    !asset.deletedAt &&
+    (asset.userId === currentUserId || isPublicFeedVisibility(asset))
+  );
 }
 
 export function useCreatorSpaceData(
@@ -157,5 +172,5 @@ export function useCreatorSpaceData(
 }
 
 export function getCreatorVisibleAssets(assets: Asset[], isOwner: boolean): Asset[] {
-  return isOwner ? assets.filter(asset => !asset.deletedAt) : assets.filter(isPublicFeedVisibility);
+  return isOwner ? assets.filter(asset => !asset.deletedAt) : assets.filter(isPublicFeedAsset);
 }

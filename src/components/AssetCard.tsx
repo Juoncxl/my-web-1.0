@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Asset, AssetCategory, User } from '../types';
 import { resolveWorkCreator } from '../lib/workPresentation';
+import { isPublicFeedVisibility, isValidWorkIcon } from '../lib/assetVisibility';
 import { useAuth } from '../context/AuthContext';
 import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
 import { formatShortDate } from '../lib/dateUtils';
@@ -174,12 +175,16 @@ export const AssetCard: React.FC<AssetCardProps> = ({
         <div className="cv-card-meta-row">
           <button type="button" onClick={handleCategoryClick} className="cv-card-category"><span>{categoryMeta.emoji}</span>{categoryMeta.name}</button>
           <span className="cv-card-visibility">
-            {asset.visibility === 'public' || asset.isPublic ? <><Globe className="w-3 h-3" />สาธารณะ</> : asset.visibility === 'draft' ? <><FileEdit className="w-3 h-3" />ฉบับร่าง</> : <><Lock className="w-3 h-3" />ส่วนตัว</>}
+            {isPublicFeedVisibility(asset) ? <><Globe className="w-3 h-3" />สาธารณะ</> : <><Lock className="w-3 h-3" />ส่วนตัว</>}
           </span>
         </div>
 
         <div className="cv-card-title-row">
-          <div className="cv-card-icon" aria-hidden="true">{asset.icon.type === 'emoji' ? asset.icon.value || categoryMeta.emoji : categoryMeta.emoji}</div>
+          <div className="cv-card-icon" aria-hidden="true">{isValidWorkIcon(asset.icon)
+            ? asset.icon.type === 'emoji' || asset.icon.type === 'kaomoji'
+              ? asset.icon.value
+              : <img src={asset.icon.value} alt="" referrerPolicy="no-referrer" />
+            : categoryMeta.emoji}</div>
           <div className="min-w-0 flex-1">
             <h3>{asset.title}</h3>
             {asset.forkedFromAuthor && <p className="cv-fork-note"><GitFork className="w-3 h-3" />โคลนจาก @{asset.forkedFromAuthor}</p>}
@@ -222,7 +227,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                   {!isTrashMode && <button type="button" onClick={handleQuickCopy}>{copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}{copied ? 'คัดลอกแล้ว' : 'คัดลอกเนื้อหา'}</button>}
                   {!isTrashMode && isOwner && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}
                   {isTrashMode && onRestore && <button type="button" onClick={handleMenuAction(() => onRestore(asset.id))}><RotateCcw className="w-3.5 h-3.5" />กู้คืนผลงาน</button>}
-                  {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => onPermanentDelete(asset.id))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
+                  {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => { if (window.confirm('คุณต้องการลบผลงานนี้ถาวรใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้')) onPermanentDelete(asset.id); })} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
                   {folderName && <span className="cv-card-menu-folder">{folderIcon || '📁'} {folderName}</span>}
                 </div>
               )}

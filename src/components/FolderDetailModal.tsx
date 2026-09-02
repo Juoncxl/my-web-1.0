@@ -4,6 +4,7 @@ import { FolderInput, Pencil, Unlink, X } from 'lucide-react';
 import type { Asset, Folder, User } from '../types';
 import { AssetCard } from './AssetCard';
 import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
+import { selectActiveAssetsInFolder } from '../lib/assetSelectors';
 
 interface FolderDetailModalProps {
   isOpen: boolean;
@@ -36,7 +37,7 @@ export const FolderDetailModal: React.FC<FolderDetailModalProps> = ({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const folderAssets = useMemo(
-    () => folder ? assets.filter(asset => asset.folderId === folder.id && !asset.deletedAt) : [],
+    () => folder ? selectActiveAssetsInFolder(assets, folder.id) : [],
     [assets, folder]
   );
 

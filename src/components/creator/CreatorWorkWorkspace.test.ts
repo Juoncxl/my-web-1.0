@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { Asset } from '../../types';
-import { buildWorkDraftPreview, createBlankCreatorWorkDraft, createCreatorWorkDraftFromAsset, type CreatorWorkDraft } from './CreatorWorkWorkspace';
+import { buildWorkDraftPreview, createBlankCreatorWorkDraft, createCreatorWorkDraftFromAsset, limitWorkIconInput, type CreatorWorkDraft } from './CreatorWorkWorkspace';
 
 const draft: CreatorWorkDraft = {
   title: '  Current draft  ', category: 'ui_code', description: ' Draft description ', visibility: 'public', status: 'in_progress',
@@ -12,6 +13,7 @@ const draft: CreatorWorkDraft = {
   ],
   uiCodeSnippet: '<p>Current</p><style>p{color:red}</style>', previewImages: ['data:image/png;base64,current'], tags: ['live']
 };
+const workspaceSource = readFileSync(new URL('./CreatorWorkWorkspace.tsx', import.meta.url), 'utf8');
 
 describe('CreatorWorkWorkspace live draft preview', () => {
   it('starts Create mode from a clean draft without prior Work state', () => {
@@ -39,6 +41,27 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(preview.content).toBe('');
   });
 
+  it('keeps compound emoji sequences intact while applying the icon input limit', () => {
+    expect(limitWorkIconInput('❤️‍🔥')).toBe('❤️‍🔥');
+    expect(limitWorkIconInput('❤️')).toBe('❤️');
+    expect(limitWorkIconInput('👍')).toBe('👍');
+    expect(limitWorkIconInput('👨‍💻')).toBe('👨‍💻');
+    expect(limitWorkIconInput('❤️‍🔥👍👨‍💻✨🙂')).toBe('❤️‍🔥👍👨‍💻✨');
+  });
+
+  it('retains a hydrated GIF icon key and mode when reopening a Work for edit', () => {
+    const persisted = {
+      id: 'gif-work', title: 'GIF Work', category: 'lore', content: '', uiCodeSnippet: '', tags: [],
+      icon: { type: 'image', value: 'blob:hydrated-gif', storageKey: 'work-icon:gif-work:stored', mimeType: 'image/gif' },
+      visibility: 'private', isPublic: false, status: 'finished', previewImages: [], folderId: null
+    } as unknown as Asset;
+
+    expect(createCreatorWorkDraftFromAsset(persisted).icon).toMatchObject({
+      type: 'image', value: 'blob:hydrated-gif', storageKey: 'work-icon:gif-work:stored', mimeType: 'image/gif'
+    });
+    expect(workspaceSource).toContain("draft.icon.mimeType === 'image/gif'");
+  });
+
   it('derives each Review Preview render from the latest unsaved block state', () => {
     const editedDraft = {
       ...draft,
@@ -63,5 +86,18 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     editable.tags.push('unsaved');
     expect(persisted.content).toBe('LEGACY MAIN CONTENT');
     expect(persisted.tags).toEqual(['saved']);
+  });
+
+  it('keeps legacy draft visibility compatible while exposing only the two-axis visibility choices', () => {
+    const persisted = {
+      id: 'legacy-draft-visibility', title: 'Legacy draft visibility', category: 'prompts', content: '',
+      uiCodeSnippet: '', icon: { type: 'emoji', value: '✦' }, tags: [],
+      visibility: 'draft', isPublic: false, status: 'draft', previewImages: [], folderId: null
+    } as unknown as Asset;
+    expect(createCreatorWorkDraftFromAsset(persisted).visibility).toBe('private');
+    const visibilityControl = workspaceSource.match(/Visibility<select[\s\S]*?<\/select>/)?.[0] || '';
+    expect(visibilityControl).toContain('<option>ส่วนตัว</option>');
+    expect(visibilityControl).toContain('<option>สาธารณะ</option>');
+    expect(visibilityControl).not.toContain('แบบร่าง');
   });
 });

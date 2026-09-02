@@ -3,11 +3,13 @@ import type { Asset, Folder } from '../types';
 import {
   selectCategoryCounts,
   selectFilteredAssets,
+  selectActiveAssetsInFolder,
+  countActiveAssetsInFolder,
   selectFolderAssetCounts,
   selectVaultStats
 } from './assetSelectors';
 import { isPublicFeedAsset } from './accessPolicy';
-import { isPublicFeedVisibility, normalizeAssetVisibility } from './assetVisibility';
+import { isPublicFeedVisibility, isValidWorkIcon, normalizeAssetVisibility } from './assetVisibility';
 
 function makeAsset(overrides: Partial<Asset> = {}): Asset {
   return {
@@ -66,6 +68,21 @@ describe('asset visibility compatibility', () => {
       visibility: 'public',
       isPublic: true
     });
+  });
+
+  it('normalizes legacy draft visibility to private without changing workflow status', () => {
+    expect(normalizeAssetVisibility({ visibility: 'draft', isPublic: true })).toEqual({
+      visibility: 'private',
+      isPublic: false
+    });
+  });
+
+  it('accepts only valid persisted Work Icon values', () => {
+    expect(isValidWorkIcon({ type: 'emoji', value: '🧪' })).toBe(true);
+    expect(isValidWorkIcon({ type: 'image', value: 'data:image/png;base64,abc' })).toBe(true);
+    expect(isValidWorkIcon({ type: 'image', value: 'https://cdn.example/icon.gif' })).toBe(true);
+    expect(isValidWorkIcon({ type: 'image', value: 'not-a-media-url' })).toBe(false);
+    expect(isValidWorkIcon({ type: 'image', value: '' })).toBe(false);
   });
 });
 
@@ -164,5 +181,33 @@ describe('asset selectors', () => {
       'folder-1': 1,
       'folder-2': 0
     });
+    expect(selectActiveAssetsInFolder(assets, 'folder-1').map(asset => asset.id)).toEqual(['one']);
+    expect(countActiveAssetsInFolder(assets, 'folder-1')).toBe(1);
+    expect(countActiveAssetsInFolder(assets, 'folder-2')).toBe(0);
+    expect(countActiveAssetsInFolder([
+      makeAsset({ id: 'moved-a', folderId: 'folder-2' }),
+      makeAsset({ id: 'moved-b', folderId: 'folder-2' }),
+      makeAsset({ id: 'removed', folderId: 'folder-2', deletedAt: '2026-03-01T00:00:00.000Z' })
+    ], 'folder-2')).toBe(2);
+  });
+
+  it('keeps every folderId count synchronized through move, unassign, trash, restore, and permanent removal', () => {
+    const folders: Folder[] = [
+      { id: 'folder-a', userId: 'owner-1', name: 'A', createdAt: '', updatedAt: '' },
+      { id: 'folder-b', userId: 'owner-1', name: 'B', createdAt: '', updatedAt: '' }
+    ];
+    const initial = makeAsset({ id: 'moving-work', folderId: 'folder-a' });
+    const counts = (assets: Asset[]) => selectFolderAssetCounts(assets, folders, 'owner-1');
+
+    expect(counts([initial])).toEqual({ 'folder-a': 1, 'folder-b': 0 });
+    const moved = { ...initial, folderId: 'folder-b' };
+    expect(counts([moved])).toEqual({ 'folder-a': 0, 'folder-b': 1 });
+    const unassigned = { ...moved, folderId: null };
+    expect(counts([unassigned])).toEqual({ 'folder-a': 0, 'folder-b': 0 });
+    const trashed = { ...moved, deletedAt: '2026-03-01T00:00:00.000Z' };
+    expect(counts([trashed])).toEqual({ 'folder-a': 0, 'folder-b': 0 });
+    const restored = { ...trashed, deletedAt: null };
+    expect(counts([restored])).toEqual({ 'folder-a': 0, 'folder-b': 1 });
+    expect(counts([])).toEqual({ 'folder-a': 0, 'folder-b': 0 });
   });
 });

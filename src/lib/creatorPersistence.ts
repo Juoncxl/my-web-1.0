@@ -1,5 +1,6 @@
 import type { Asset, Folder, User } from '../types';
 import type { FreeLayoutPlacement, FreeWidgetInstance } from './creatorLayout';
+import { normalizeAssetVisibility } from './assetVisibility';
 
 const STORAGE_KEY = 'cxl_creator_space_qa_sandbox_v1';
 const PROFILE_STORAGE_KEY = 'cxl_creator_space_qa_profiles_v1';
@@ -33,6 +34,8 @@ interface CreatorSandboxState {
   settings: Record<string, CreatorSpaceSettings>;
   bookmarks: Record<string, string[]>;
   likes: Record<string, string[]>;
+  /** Immutable QA baseline copied from legacy asset counters before relation-backed likes. */
+  likeBaselines: Record<string, number>;
 }
 
 const emptyState = (): CreatorSandboxState => ({
@@ -43,8 +46,21 @@ const emptyState = (): CreatorSandboxState => ({
   profiles: {},
   settings: {},
   bookmarks: {},
-  likes: {}
+  likes: {},
+  likeBaselines: {}
 });
+
+function normalizeLikeCount(value: unknown): number {
+  const count = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+}
+
+function countLikesForAsset(likes: Record<string, string[]>, assetId: string): number {
+  return Object.values(likes).reduce(
+    (count, assetIds) => count + (Array.isArray(assetIds) && assetIds.includes(assetId) ? 1 : 0),
+    0
+  );
+}
 
 let memoryState = emptyState();
 let cachedSandboxRaw: string | null | undefined;
@@ -123,7 +139,13 @@ function readState(): CreatorSandboxState {
   if (typeof window === 'undefined') return memoryState;
   const storedProfiles = readStoredProfiles();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const localStorage = getBrowserStorage('localStorage');
+    const sessionStorage = getBrowserStorage('sessionStorage');
+    const localRaw = localStorage?.getItem(STORAGE_KEY) ?? null;
+    const sessionRaw = sessionStorage?.getItem(STORAGE_KEY) ?? null;
+    // A session fallback represents the newest accepted asset write when the
+    // local sandbox has hit its quota, so it intentionally wins for this tab.
+    const raw = sessionRaw ?? localRaw;
     if (!raw) {
       cachedSandboxRaw = raw;
       memoryState = { ...memoryState, profiles: { ...memoryState.profiles, ...storedProfiles } };
@@ -135,8 +157,16 @@ function readState(): CreatorSandboxState {
     }
     const parsed = JSON.parse(raw) as Partial<CreatorSandboxState>;
     cachedSandboxRaw = raw;
+    const assets = Array.isArray(parsed.assets) ? parsed.assets : [];
+    const storedLikeBaselines = parsed.likeBaselines && typeof parsed.likeBaselines === 'object'
+      ? parsed.likeBaselines as Record<string, unknown>
+      : {};
+    const likeBaselines = Object.fromEntries(assets.map(asset => [
+      asset.id,
+      normalizeLikeCount(storedLikeBaselines[asset.id] ?? asset.likesCount)
+    ]));
     memoryState = {
-      assets: Array.isArray(parsed.assets) ? parsed.assets : [],
+      assets,
       folders: Array.isArray(parsed.folders) ? parsed.folders : [],
       removedAssetIds: Array.isArray(parsed.removedAssetIds) ? parsed.removedAssetIds : [],
       removedFolderIds: Array.isArray(parsed.removedFolderIds) ? parsed.removedFolderIds : [],
@@ -146,7 +176,8 @@ function readState(): CreatorSandboxState {
       },
       settings: parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {},
       bookmarks: parsed.bookmarks && typeof parsed.bookmarks === 'object' ? parsed.bookmarks : {},
-      likes: parsed.likes && typeof parsed.likes === 'object' ? parsed.likes : {}
+      likes: parsed.likes && typeof parsed.likes === 'object' ? parsed.likes : {},
+      likeBaselines
     };
   } catch {
     // Keep the in-memory state if storage is unavailable or corrupted.
@@ -159,37 +190,104 @@ function writeState(next: CreatorSandboxState, notifyDataListeners = true): bool
     memoryState = next;
     return true;
   }
+  let serialized: string;
   try {
-    const serialized = JSON.stringify(next);
-    window.localStorage.setItem(STORAGE_KEY, serialized);
+    serialized = JSON.stringify(next);
+  } catch (error) {
+    console.warn('[creatorPersistence] local sandbox serialization failed', error);
+    return false;
+  }
+  const localStorage = getBrowserStorage('localStorage');
+  const sessionStorage = getBrowserStorage('sessionStorage');
+  try {
+    if (!localStorage) throw new Error('localStorage unavailable');
+    localStorage.setItem(STORAGE_KEY, serialized);
+    if (sessionStorage) {
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* localStorage remains the accepted copy */ }
+    }
     cachedSandboxRaw = serialized;
     memoryState = next;
-  } catch (error) {
-    console.warn('[creatorPersistence] local sandbox write failed', error);
-    return false;
+  } catch (localError) {
+    try {
+      if (!sessionStorage) throw new Error('sessionStorage unavailable');
+      sessionStorage.setItem(STORAGE_KEY, serialized);
+      cachedSandboxRaw = serialized;
+      memoryState = next;
+    } catch (sessionError) {
+      console.warn('[creatorPersistence] local sandbox write failed', localError, sessionError);
+      return false;
+    }
   }
   if (notifyDataListeners) notifyQaDataListeners();
   return true;
 }
 
 export function readMockAssets(userId?: string): Asset[] {
-  const assets = readState().assets;
+  const state = readState();
+  const assets = state.assets.map(asset => ({
+    ...asset,
+    ...normalizeAssetVisibility({ visibility: asset.visibility, isPublic: asset.isPublic }),
+    likesCount: normalizeLikeCount(state.likeBaselines[asset.id] ?? asset.likesCount) + countLikesForAsset(state.likes, asset.id)
+  }));
   return userId ? assets.filter(asset => asset.userId === userId) : assets;
 }
 
-export function writeMockAsset(asset: Asset): void {
+export function writeMockAsset(asset: Asset): boolean {
   const state = readState();
-  const index = state.assets.findIndex(item => item.id === asset.id);
+  const baseline = normalizeLikeCount(state.likeBaselines[asset.id] ?? asset.likesCount);
+  const normalizedAsset = {
+    ...asset,
+    ...normalizeAssetVisibility({ visibility: asset.visibility, isPublic: asset.isPublic }),
+    // Keep the stored counter as a compatibility baseline. `readMockAssets`
+    // exposes the canonical relation-backed aggregate instead.
+    likesCount: baseline
+  };
+  const index = state.assets.findIndex(item => item.id === normalizedAsset.id);
   const assets = [...state.assets];
-  if (index >= 0) assets[index] = asset;
-  else assets.unshift(asset);
-  writeState({ ...state, assets, removedAssetIds: state.removedAssetIds.filter(id => id !== asset.id) });
+  if (index >= 0) assets[index] = normalizedAsset;
+  else assets.unshift(normalizedAsset);
+  return writeState({
+    ...state,
+    assets,
+    likeBaselines: { ...state.likeBaselines, [normalizedAsset.id]: baseline },
+    removedAssetIds: state.removedAssetIds.filter(id => id !== normalizedAsset.id)
+  });
 }
 
 export function removeMockAsset(id: string, userId: string): boolean {
   const state = readState();
-  writeState({ ...state, assets: state.assets.filter(asset => asset.id !== id), removedAssetIds: [...new Set([...state.removedAssetIds, id])] });
+  const assets = state.assets
+    .filter(asset => asset.id !== id)
+    .map(asset => asset.linkedAssetIds?.includes(id)
+      ? { ...asset, linkedAssetIds: asset.linkedAssetIds.filter(linkedId => linkedId !== id) }
+      : asset);
+  const bookmarks = Object.fromEntries(
+    Object.entries(state.bookmarks).map(([ownerId, assetIds]) => [ownerId, assetIds.filter(assetId => assetId !== id)])
+  );
+  const likes = Object.fromEntries(
+    Object.entries(state.likes).map(([ownerId, assetIds]) => [ownerId, assetIds.filter(assetId => assetId !== id)])
+  );
+  const likeBaselines = Object.fromEntries(
+    Object.entries(state.likeBaselines).filter(([assetId]) => assetId !== id)
+  );
+  const settings = Object.fromEntries(
+    Object.entries(state.settings).map(([ownerId, ownerSettings]) => [ownerId, {
+      ...ownerSettings,
+      freePlacements: ownerSettings.freePlacements?.filter(placement => !(placement.kind === 'work' && placement.refId === id))
+    }])
+  );
+  writeState({ ...state, assets, bookmarks, likes, likeBaselines, settings, removedAssetIds: [...new Set([...state.removedAssetIds, id])] });
   return true;
+}
+
+/** Remove a deleted Work from any local Creator Space placement (cloud or QA). */
+export function removeAssetFromCreatorSpaceSettings(userId: string, assetId: string): boolean {
+  const state = readState();
+  const current = state.settings[userId];
+  if (!current?.freePlacements) return true;
+  const nextPlacements = current.freePlacements.filter(placement => !(placement.kind === 'work' && placement.refId === assetId));
+  if (nextPlacements.length === current.freePlacements.length) return true;
+  return writeState({ ...state, settings: { ...state.settings, [userId]: { ...current, freePlacements: nextPlacements } } }, false);
 }
 
 export function isMockAssetRemoved(id: string): boolean { return readState().removedAssetIds.includes(id); }
@@ -388,8 +486,48 @@ export function writeMockLikes(userId: string, assetIds: string[]): void {
   writeState({ ...state, likes: { ...state.likes, [userId]: [...new Set(assetIds)] } });
 }
 
+/**
+ * QA counterpart to the database's asset_likes trigger: the user-to-Work
+ * relationship is canonical, while the old stored likesCount stays a baseline.
+ */
+export function setMockAssetLike(
+  userId: string,
+  assetId: string,
+  shouldLike: boolean
+): { success: boolean; isLiked: boolean; likesCount: number | null; error: string | null } {
+  const state = readState();
+  const asset = state.assets.find(candidate => candidate.id === assetId);
+  if (!asset || asset.deletedAt) {
+    return { success: false, isLiked: false, likesCount: null, error: 'ไม่พบผลงานที่สามารถกดถูกใจได้' };
+  }
+
+  const currentIds = state.likes[userId] || [];
+  const nextIds = shouldLike
+    ? [...new Set([...currentIds, assetId])]
+    : currentIds.filter(id => id !== assetId);
+  const likes = { ...state.likes, [userId]: nextIds };
+  const baseline = normalizeLikeCount(state.likeBaselines[assetId] ?? asset.likesCount);
+  const persisted = writeState({
+    ...state,
+    likes,
+    likeBaselines: { ...state.likeBaselines, [assetId]: baseline }
+  });
+  if (!persisted) {
+    return { success: false, isLiked: currentIds.includes(assetId), likesCount: null, error: 'บันทึกสถานะถูกใจใน QA Sandbox ไม่สำเร็จ' };
+  }
+
+  return {
+    success: true,
+    isLiked: nextIds.includes(assetId),
+    likesCount: baseline + countLikesForAsset(likes, assetId),
+    error: null
+  };
+}
+
 export function resetCreatorSandbox(): void {
   if (typeof window !== 'undefined') {
+    try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* memory reset still applies */ }
+    try { window.sessionStorage?.removeItem(STORAGE_KEY); } catch { /* memory reset still applies */ }
     try { window.localStorage.removeItem(PROFILE_STORAGE_KEY); } catch { /* memory reset still applies */ }
     try { window.sessionStorage?.removeItem(PROFILE_STORAGE_KEY); } catch { /* memory reset still applies */ }
   }

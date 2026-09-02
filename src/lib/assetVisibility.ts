@@ -1,4 +1,4 @@
-import type { Asset, AssetVisibility } from '../types';
+import type { Asset, AssetIcon, AssetVisibility } from '../types';
 
 const ASSET_VISIBILITIES: AssetVisibility[] = ['public', 'private', 'draft'];
 
@@ -32,16 +32,28 @@ export function normalizeAssetVisibility(input: AssetVisibilityInput): Normalize
   const legacyFlag = coerceLegacyPublicFlag(
     input.isPublic !== undefined ? input.isPublic : input.is_public
   );
-  const visibility = isAssetVisibility(input.visibility)
+  const rawVisibility = isAssetVisibility(input.visibility)
     ? input.visibility
     : legacyFlag === true
       ? 'public'
       : 'private';
 
+  // `draft` was historically stored as a visibility value, but it never had
+  // distinct access-policy semantics from a private Work. Keep accepting it
+  // for old records while exposing the canonical two-axis model as private
+  // visibility + the existing workflow status.
+  const visibility = rawVisibility === 'draft' ? 'private' : rawVisibility;
+
   return {
     visibility,
-    isPublic: legacyFlag ?? visibility === 'public'
+    isPublic: rawVisibility === 'draft' ? false : legacyFlag ?? visibility === 'public'
   };
+}
+
+export function isValidWorkIcon(icon?: AssetIcon | null): boolean {
+  if (!icon || typeof icon.value !== 'string' || !icon.value.trim()) return false;
+  if (icon.type === 'emoji' || icon.type === 'kaomoji') return true;
+  return /^(?:data:image\/[a-z0-9.+-]+;base64,|blob:|https?:\/\/)/i.test(icon.value.trim());
 }
 
 export function isPublicFeedVisibility(asset: Pick<Asset, 'visibility' | 'isPublic'>): boolean {

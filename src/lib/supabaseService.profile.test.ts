@@ -196,6 +196,38 @@ describe('Profile identity service in the QA persistence boundary', () => {
     expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
   });
 
+  it('persists a GIF Work Icon outside localStorage and rehydrates it through the Edit Work save path', async () => {
+    const now = '2026-01-01T00:00:00.000Z';
+    const work: Asset = {
+      id: 'gif-work', userId: 'owner-uuid', authorName: 'Juon', title: 'GIF work',
+      icon: { type: 'emoji', value: '✨' }, category: 'lore', content: '', uiCodeSnippet: '',
+      previewImage: '', previewImages: [], folderId: null, isPublic: false, visibility: 'private',
+      status: 'finished', deletedAt: null, createdAt: now, updatedAt: now, likesCount: 0,
+      forkCount: 0, forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    };
+    writeMockAsset(work);
+    supabaseClientMocks.getSupabaseClient.mockReturnValue({
+      auth: { getSession: async () => ({ data: { session: { user: { id: 'owner-uuid' } } } }) }
+    });
+    const gifDataUrl = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+
+    const saved = await supabaseService.updateAsset(work.id, {
+      icon: { type: 'image', value: gifDataUrl, mimeType: 'image/gif' }
+    });
+
+    expect(saved.error).toBeNull();
+    expect(saved.data?.icon).toMatchObject({ type: 'image', storageKey: expect.stringMatching(/^work-icon:/), mimeType: 'image/gif' });
+    expect(saved.data?.icon.value).toMatch(/^blob:/);
+    expect([...storage.values()].some(value => value.includes(gifDataUrl))).toBe(false);
+
+    const reloaded = await supabaseService.fetchAssets({ currentUserId: 'owner-uuid', includeDeleted: true });
+    expect(reloaded.error).toBeNull();
+    expect(reloaded.data[0].icon).toMatchObject({
+      type: 'image', storageKey: saved.data?.icon.storageKey, mimeType: 'image/gif'
+    });
+    expect(reloaded.data[0].icon.value).toMatch(/^blob:/);
+  });
+
   it('resolves zero local Works as a completed empty result without a cloud fallback', async () => {
     await expect(supabaseService.fetchAssets({ currentUserId: 'owner-uuid', includeDeleted: true }))
       .resolves.toEqual({ data: [], error: null });

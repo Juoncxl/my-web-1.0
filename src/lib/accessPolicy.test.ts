@@ -69,6 +69,8 @@ describe('asset visibility filters', () => {
     expect(canViewAssetDetail(makeAsset({ visibility: 'private', isPublic: false }), false)).toBe(false);
     expect(canViewAssetDetail(makeAsset({ visibility: 'draft', isPublic: false }), false)).toBe(false);
     expect(canViewAssetDetail(makeAsset({ visibility: 'public', isPublic: false }), false)).toBe(false);
+    expect(canViewAssetDetail(makeAsset({ deletedAt: '2026-02-01T00:00:00.000Z' }), false)).toBe(false);
+    expect(canViewAssetDetail(makeAsset({ deletedAt: '2026-02-01T00:00:00.000Z' }), true)).toBe(true);
   });
 
   it('keeps private, inconsistent, and deleted assets out of the public feed', () => {

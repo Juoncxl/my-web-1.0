@@ -5,6 +5,7 @@ const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
 const cardSource = readFileSync(new URL('./AssetCard.tsx', import.meta.url), 'utf8');
 const detailSource = readFileSync(new URL('./WorkDetailModal.tsx', import.meta.url), 'utf8');
+const detailCss = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 const legacyEntrySource = readFileSync(new URL('./AssetViewModal.tsx', import.meta.url), 'utf8');
 
 describe('canonical Work Detail routing', () => {
@@ -17,6 +18,8 @@ describe('canonical Work Detail routing', () => {
     expect(creatorSource).not.toContain("from '../components/AssetViewModal'");
     expect(cardSource).toContain('onClick={() => onClick(asset)}');
     expect(creatorSource).toContain('onClick={setSelectedAsset}');
+    expect(creatorSource).toContain('onBookmark={onBookmark}');
+    expect(creatorSource).toContain('isBookmarked={bookmarkedAssetIds.includes(asset.id)}');
   });
 
   it('keeps the legacy entry as a compatibility alias without a second presentation', () => {
@@ -47,5 +50,15 @@ describe('canonical Work Detail routing', () => {
     expect(detailSource).toContain('onReport(asset)');
     expect(detailSource).toContain('copyToClipboard(mainContentCopy');
     expect(detailSource).toContain('copyToClipboard(uiCode');
+    expect(creatorSource).toContain("onRestore={activeTab === 'trash' ? onRestoreAsset : undefined}");
+    expect(creatorSource).toContain("onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined}");
+  });
+
+  it('keeps long Work content bounded without changing sandbox semantics', () => {
+    expect(detailCss).toMatch(/\.work-detail-modal\s*\{[^}]*max-width:\s*calc\(100vw - 2rem\)/s);
+    expect(detailCss).toMatch(/\.work-detail-summary p\s*\{[^}]*overflow-wrap:\s*anywhere[^}]*word-break:\s*break-word/s);
+    expect(detailCss).toMatch(/\.work-detail-block > pre\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*auto/s);
+    expect(detailCss).toMatch(/\.work-detail-code-panel > pre\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*auto/s);
+    expect(detailSource).toContain('<SandboxedCodePreview code={uiCode}');
   });
 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Asset, User } from '../types';
 import { supabaseService } from '../lib/supabaseService';
+import { removeAssetFromCreatorSpaceSettings } from '../lib/creatorPersistence';
 
 type ReportError = (message: string) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
@@ -97,7 +98,10 @@ export function useAssetData(currentUser: User | null, reportError: ReportError,
   const permanentDeleteAsset = useCallback(async (id: string) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
     const result = await supabaseService.permanentDeleteAsset(id);
-    if (result.success) setAssets(previous => previous.filter(asset => asset.id !== id));
+    if (result.success) {
+      removeAssetFromCreatorSpaceSettings(currentUser.id, id);
+      setAssets(previous => previous.filter(asset => asset.id !== id));
+    }
     return result;
   }, [currentUser]);
 

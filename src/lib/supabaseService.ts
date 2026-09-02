@@ -11,6 +11,14 @@ import {
   validateQaProfileImage
 } from './qaProfileImageStore';
 import {
+  dataUrlToQaWorkIconBlob,
+  deleteQaWorkIcon,
+  getQaWorkIcon,
+  hydrateQaWorkIcons,
+  isQaWorkIconKeyForAsset,
+  saveQaWorkIcon
+} from './qaWorkIconStore';
+import {
   readMockAssets,
   readMockBookmarks,
   readMockFolders,
@@ -19,10 +27,10 @@ import {
   cacheMockProfileSnapshot,
   removeMockAsset,
   removeMockFolder,
+  setMockAssetLike,
   writeMockAsset,
   writeMockBookmarks,
   writeMockFolder,
-  writeMockLikes,
   readMockProfile,
   writeMockProfile
 } from './creatorPersistence';
@@ -190,12 +198,13 @@ function mapAssetToDb(asset: Partial<Asset>) {
   if (asset.previewImages !== undefined) dbPayload.preview_images = asset.previewImages || [];
   if (asset.folderId !== undefined) dbPayload.folder_id = asset.folderId || null;
   
-  if (asset.visibility !== undefined) {
-    dbPayload.visibility = asset.visibility;
-    dbPayload.is_public = asset.visibility === 'public';
-  } else if (asset.isPublic !== undefined) {
-    dbPayload.is_public = asset.isPublic;
-    dbPayload.visibility = asset.isPublic ? 'public' : 'private';
+  if (asset.visibility !== undefined || asset.isPublic !== undefined) {
+    const normalizedVisibility = normalizeAssetVisibility({
+      visibility: asset.visibility,
+      isPublic: asset.isPublic
+    });
+    dbPayload.visibility = normalizedVisibility.visibility;
+    dbPayload.is_public = normalizedVisibility.isPublic;
   }
 
   if (asset.status !== undefined) dbPayload.status = asset.status;
@@ -250,12 +259,12 @@ function createClientId(prefix: string): string {
 
 function buildMockAsset(assetData: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>): Asset {
   const now = new Date().toISOString();
-  const visibility = assetData.visibility || (assetData.isPublic === false ? 'private' : 'public');
+  const normalizedVisibility = normalizeAssetVisibility({ visibility: assetData.visibility, isPublic: assetData.isPublic });
   return {
     ...assetData,
     id: createClientId('qa_asset'),
-    visibility,
-    isPublic: visibility === 'public',
+    visibility: normalizedVisibility.visibility,
+    isPublic: normalizedVisibility.isPublic,
     status: assetData.status || 'finished',
     createdAt: now,
     updatedAt: now,
@@ -268,6 +277,49 @@ function buildMockAsset(assetData: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>
     versions: [{ version: 1, updatedAt: now, title: assetData.title || 'Untitled Asset', summary: 'สร้างผลงานใน QA Sandbox' }],
     previewImages: assetData.previewImages || (assetData.previewImage ? [assetData.previewImage] : [])
   };
+}
+
+/** Store binary Work Icon media outside the JSON QA state before writing it. */
+async function prepareQaWorkIconForWrite(asset: Asset): Promise<{ asset: Asset; createdStorageKey?: string }> {
+  if (asset.icon.type !== 'image') {
+    const { storageKey: _storageKey, mimeType: _mimeType, ...icon } = asset.icon;
+    return { asset: { ...asset, icon } };
+  }
+
+  const blob = dataUrlToQaWorkIconBlob(asset.icon.value);
+  if (blob) {
+    const stored = await saveQaWorkIcon({ assetId: asset.id, blob });
+    return {
+      asset: {
+        ...asset,
+        icon: { type: 'image', value: stored.url, storageKey: stored.key, mimeType: stored.mimeType }
+      },
+      createdStorageKey: stored.key
+    };
+  }
+
+  // A fork must own an independent binary key instead of sharing its source
+  // Work's icon. Existing Work updates retain their own key untouched.
+  if (asset.icon.storageKey && !isQaWorkIconKeyForAsset(asset.icon.storageKey, asset.id)) {
+    const source = await getQaWorkIcon(asset.icon.storageKey);
+    if (source) {
+      const stored = await saveQaWorkIcon({ assetId: asset.id, blob: source.blob });
+      return {
+        asset: {
+          ...asset,
+          icon: { type: 'image', value: stored.url, storageKey: stored.key, mimeType: stored.mimeType }
+        },
+        createdStorageKey: stored.key
+      };
+    }
+  }
+
+  return { asset };
+}
+
+async function removeQaWorkIconQuietly(storageKey?: string): Promise<void> {
+  if (!storageKey) return;
+  try { await deleteQaWorkIcon(storageKey); } catch { /* orphan cleanup must not undo a saved Work mutation */ }
 }
 
 async function getSessionUserId(): Promise<string | null> {
@@ -292,13 +344,16 @@ async function fetchAssetsFromMock(options?: {
 }): Promise<{ data: Asset[]; error: string | null }> {
   // QA Sandbox is intentionally local-only. Cloud migration is an explicit
   // Settings action; a normal read must never wait on or merge remote tables.
-  let list = readMockAssets();
+  let list = await hydrateQaWorkIcons(readMockAssets().map(asset => ({
+    ...asset,
+    ...normalizeAssetVisibility({ visibility: asset.visibility, isPublic: asset.isPublic })
+  })));
 
   if (options?.userId) list = list.filter(asset => asset.userId === options.userId);
-  else if (options?.currentUserId) list = list.filter(asset => asset.userId === options.currentUserId || (asset.visibility === 'public' && asset.isPublic));
-  else list = list.filter(asset => asset.visibility === 'public' && asset.isPublic);
+  else if (options?.currentUserId) list = list.filter(asset => asset.userId === options.currentUserId || (asset.visibility === 'public' && asset.isPublic && !asset.deletedAt));
+  else list = list.filter(asset => asset.visibility === 'public' && asset.isPublic && !asset.deletedAt);
 
-  if (options?.userId && options.currentUserId !== options.userId) list = list.filter(asset => asset.visibility === 'public' && asset.isPublic);
+  if (options?.userId && options.currentUserId !== options.userId) list = list.filter(asset => asset.visibility === 'public' && asset.isPublic && !asset.deletedAt);
   if (options?.onlyDeleted) list = list.filter(asset => Boolean(asset.deletedAt));
   else if (!options?.includeDeleted) list = list.filter(asset => !asset.deletedAt);
   if (options?.category && options.category !== 'all') list = list.filter(asset => asset.category === options.category);
@@ -435,8 +490,17 @@ export const supabaseService = {
   ): Promise<{ data: Asset | null; error: string | null }> {
     if (isMockPersistence) {
       const asset = buildMockAsset(assetData);
-      writeMockAsset(asset);
-      return { data: asset, error: null };
+      let prepared: { asset: Asset; createdStorageKey?: string };
+      try {
+        prepared = await prepareQaWorkIconForWrite(asset);
+      } catch (error) {
+        return { data: null, error: toServiceError(error, 'บันทึก GIF หรือรูปไอคอนใน QA Sandbox ไม่สำเร็จ') };
+      }
+      if (!writeMockAsset(prepared.asset)) {
+        await removeQaWorkIconQuietly(prepared.createdStorageKey);
+        return { data: null, error: 'บันทึกผลงานใน QA Sandbox ไม่สำเร็จ กรุณาลองใหม่' };
+      }
+      return { data: prepared.asset, error: null };
     }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(assetData.userId);
@@ -534,8 +598,21 @@ export const supabaseService = {
           ? [...(existing.versions || []), { version: (existing.versions?.at(-1)?.version || 0) + 1, updatedAt: now, title: updates.title || existing.title, summary: 'บันทึกการแก้ไขใน QA Sandbox' }]
           : existing.versions
       };
-      writeMockAsset(next);
-      return { data: next, error: null };
+      const previousStorageKey = existing.icon.type === 'image' ? existing.icon.storageKey : undefined;
+      let prepared: { asset: Asset; createdStorageKey?: string };
+      try {
+        prepared = await prepareQaWorkIconForWrite(next);
+      } catch (error) {
+        return { data: null, error: toServiceError(error, 'บันทึก GIF หรือรูปไอคอนใน QA Sandbox ไม่สำเร็จ') };
+      }
+      if (!writeMockAsset(prepared.asset)) {
+        await removeQaWorkIconQuietly(prepared.createdStorageKey);
+        return { data: null, error: 'บันทึกการแก้ไขใน QA Sandbox ไม่สำเร็จ กรุณาลองใหม่' };
+      }
+      if (previousStorageKey && previousStorageKey !== prepared.asset.icon.storageKey) {
+        await removeQaWorkIconQuietly(previousStorageKey);
+      }
+      return { data: prepared.asset, error: null };
     }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser();
@@ -700,6 +777,7 @@ export const supabaseService = {
       const existing = result.data.find(asset => asset.id === id && asset.deletedAt);
       if (!existing) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
       if (!removeMockAsset(id, userId)) return { success: false, error: 'ลบผลงานใน QA Sandbox ไม่สำเร็จ' };
+      await removeQaWorkIconQuietly(existing.icon.type === 'image' ? existing.icon.storageKey : undefined);
       return { success: true, error: null };
     }
     const supabase = getSupabaseClient();
@@ -852,12 +930,7 @@ export const supabaseService = {
     shouldLike: boolean
   ): Promise<{ success: boolean; isLiked: boolean; likesCount: number | null; error: string | null }> {
     if (isMockPersistence) {
-      const ids = readMockLikes(userId);
-      const nextIds = shouldLike ? [...ids, assetId] : ids.filter(id => id !== assetId);
-      writeMockLikes(userId, nextIds);
-      const related = (await fetchAssetsFromMock({ currentUserId: userId, includeDeleted: true })).data.find(asset => asset.id === assetId);
-      const likesCount = related?.likesCount ?? (shouldLike ? 1 : 0);
-      return { success: true, isLiked: shouldLike, likesCount, error: null };
+      return setMockAssetLike(userId, assetId, shouldLike);
     }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(userId);

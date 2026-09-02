@@ -10,6 +10,7 @@ import { AssetEditorLinkedAssetsSection } from './asset-editor/AssetEditorLinked
 import { AssetEditorMediaSection } from './asset-editor/AssetEditorMediaSection';
 import { AssetEditorTagsSection } from './asset-editor/AssetEditorTagsSection';
 import { AssetEditorActions } from './asset-editor/AssetEditorActions';
+import { normalizeAssetVisibility } from '../lib/assetVisibility';
 
 export { QUICK_APP_TAGS } from './asset-editor/AssetEditorTagsSection';
 
@@ -39,7 +40,7 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   const [content, setContent] = useState(initialData?.content || '');
   const [uiCodeSnippet, setUiCodeSnippet] = useState(initialData?.uiCodeSnippet || '');
   const [visibility, setVisibility] = useState<AssetVisibility>(
-    initialData?.visibility || (initialData?.isPublic === false ? 'private' : 'public')
+    normalizeAssetVisibility({ visibility: initialData?.visibility, isPublic: initialData?.isPublic }).visibility
   );
   const [status, setStatus] = useState<AssetStatus>(initialData?.status || 'finished');
   const [tags, setTags] = useState<string[]>(initialData?.tags || []);
@@ -48,6 +49,8 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
   const [linkedAssetIds, setLinkedAssetIds] = useState<string[]>(initialData?.linkedAssetIds || []);
   const [iconType, setIconType] = useState<'emoji' | 'kaomoji' | 'image'>(initialData?.icon?.type || 'emoji');
   const [iconValue, setIconValue] = useState(initialData?.icon?.value || '🌸');
+  const [iconStorageKey, setIconStorageKey] = useState<string | undefined>(initialData?.icon?.storageKey);
+  const [iconMimeType, setIconMimeType] = useState<string | undefined>(initialData?.icon?.mimeType);
   const [previewImages, setPreviewImages] = useState<string[]>(
     initialData?.previewImages && initialData.previewImages.length > 0
       ? initialData.previewImages
@@ -62,12 +65,14 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setCategory(initialData.category);
       setContent(initialData.content);
       setUiCodeSnippet(initialData.uiCodeSnippet || '');
-      setVisibility(initialData.visibility || (initialData.isPublic ? 'public' : 'private'));
+      setVisibility(normalizeAssetVisibility({ visibility: initialData.visibility, isPublic: initialData.isPublic }).visibility);
       setStatus(initialData.status || 'finished');
       setTags(initialData.tags || []);
       setTagInputValue('');
       setIconType(initialData.icon?.type || 'emoji');
       setIconValue(initialData.icon?.value || '🌸');
+      setIconStorageKey(initialData.icon?.storageKey);
+      setIconMimeType(initialData.icon?.mimeType);
       setFolderId(initialData.folderId || null);
       setLinkedAssetIds(initialData.linkedAssetIds || []);
 
@@ -86,6 +91,8 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       setTagInputValue('');
       setIconType('emoji');
       setIconValue('🌸');
+      setIconStorageKey(undefined);
+      setIconMimeType(undefined);
       setFolderId(null);
       setLinkedAssetIds([]);
       setPreviewImages([]);
@@ -203,7 +210,9 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
       const finalTags = tags.map((tag) => tag.trim().replace(/^#/, '')).filter(Boolean);
       const icon: AssetIcon = {
         type: iconType,
-        value: iconValue
+        value: iconValue,
+        storageKey: iconType === 'image' ? iconStorageKey : undefined,
+        mimeType: iconType === 'image' ? iconMimeType : undefined
       };
       const payload: Partial<Asset> = {
         title: title.trim(),
@@ -315,6 +324,8 @@ export const AssetEditorModal: React.FC<AssetEditorModalProps> = ({
             onIconChange={(icon) => {
               setIconType(icon.type);
               setIconValue(icon.value);
+              setIconStorageKey(icon.storageKey);
+              setIconMimeType(icon.mimeType);
             }}
             onError={setErrorMsg}
           />

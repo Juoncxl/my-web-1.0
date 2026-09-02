@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { User } from '../types';
-import { readCreatorSpaceSettings, readMockAssets, readMockFolders, readMockProfile, resetCreatorSandbox, writeCreatorSpaceSettings, writeMockAsset, writeMockFolder, writeMockProfile } from './creatorPersistence';
+import type { Asset, User } from '../types';
+import { readCreatorSpaceSettings, readMockAssets, readMockBookmarks, readMockFolders, readMockLikes, readMockProfile, removeMockAsset, resetCreatorSandbox, setMockAssetLike, writeCreatorSpaceSettings, writeMockAsset, writeMockBookmarks, writeMockFolder, writeMockLikes, writeMockProfile } from './creatorPersistence';
 
 describe('creator persistence event boundaries', () => {
   const storage = new Map<string, string>();
@@ -74,6 +74,86 @@ describe('creator persistence event boundaries', () => {
       freePlacements: [expect.objectContaining({ w: 9, heightMode: 'auto' })]
     });
     expect(dispatched).toHaveLength(0);
+  });
+
+  it('round-trips image and GIF Work Icons after persistence module hydration', async () => {
+    const sessionStorage = new Map<string, string>();
+    (globalThis as { window: Window }).window = {
+      localStorage: {
+        getItem: key => storage.get(key) ?? null,
+        setItem: (key, value) => { storage.set(key, value); },
+        removeItem: key => { storage.delete(key); },
+        clear: () => storage.clear(),
+        key: index => [...storage.keys()][index] ?? null,
+        length: storage.size
+      } as Storage,
+      sessionStorage: {
+        getItem: key => sessionStorage.get(key) ?? null,
+        setItem: (key, value) => { sessionStorage.set(key, value); },
+        removeItem: key => { sessionStorage.delete(key); },
+        clear: () => sessionStorage.clear(),
+        key: index => [...sessionStorage.keys()][index] ?? null,
+        length: sessionStorage.size
+      } as Storage,
+      dispatchEvent: () => true
+    } as unknown as Window;
+    const base = {
+      userId: 'owner-1', authorName: 'Owner', category: 'lore' as const, content: '',
+      uiCodeSnippet: '', previewImage: '', previewImages: [], folderId: null,
+      isPublic: false, visibility: 'private' as const, status: 'finished' as const, deletedAt: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), likesCount: 0, forkCount: 0,
+      forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    };
+    writeMockAsset({ ...base, id: 'image-work', title: 'Image', icon: { type: 'image', value: 'data:image/png;base64,image' } } as Asset);
+    writeMockAsset({ ...base, id: 'gif-work', title: 'GIF', icon: { type: 'image', value: 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=' } } as Asset);
+
+    expect(readMockAssets().map(asset => asset.icon.value)).toEqual([
+      'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=',
+      'data:image/png;base64,image'
+    ]);
+
+    vi.resetModules();
+    const freshPersistence = await import('./creatorPersistence');
+    expect(freshPersistence.readMockAssets().map(asset => asset.icon.value)).toEqual([
+      'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=',
+      'data:image/png;base64,image'
+    ]);
+  });
+
+  it('uses session storage when the local sandbox cannot persist a GIF icon', async () => {
+    const sessionStorage = new Map<string, string>();
+    (globalThis as { window: Window }).window = {
+      localStorage: {
+        getItem: key => storage.get(key) ?? null,
+        setItem: () => { throw new Error('quota exceeded'); },
+        removeItem: key => { storage.delete(key); },
+        clear: () => storage.clear(),
+        key: index => [...storage.keys()][index] ?? null,
+        length: storage.size
+      } as Storage,
+      sessionStorage: {
+        getItem: key => sessionStorage.get(key) ?? null,
+        setItem: (key, value) => { sessionStorage.set(key, value); },
+        removeItem: key => { sessionStorage.delete(key); },
+        clear: () => sessionStorage.clear(),
+        key: index => [...sessionStorage.keys()][index] ?? null,
+        length: sessionStorage.size
+      } as Storage,
+      dispatchEvent: () => true
+    } as unknown as Window;
+    const gif = { type: 'image' as const, value: 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=' };
+    expect(writeMockAsset({
+      id: 'quota-gif', userId: 'owner-1', authorName: 'Owner', title: 'Quota GIF', icon: gif,
+      category: 'lore', content: '', uiCodeSnippet: '', previewImage: '', previewImages: [], folderId: null,
+      isPublic: false, visibility: 'private', status: 'finished', deletedAt: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), likesCount: 0, forkCount: 0,
+      forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    } as Asset)).toBe(true);
+    expect(readMockAssets()[0].icon).toEqual(gif);
+
+    vi.resetModules();
+    const freshPersistence = await import('./creatorPersistence');
+    expect(freshPersistence.readMockAssets()[0].icon).toEqual(gif);
   });
 
   it('preserves Free Portfolio placement while switching through Locked layout', () => {
@@ -184,6 +264,44 @@ describe('creator persistence event boundaries', () => {
     expect(dispatched).toHaveLength(1);
   });
 
+  it('derives the QA Like aggregate from idempotent user-to-Work relations and preserves it across rehydration', async () => {
+    (globalThis as { window: Window }).window = {
+      localStorage: {
+        getItem: key => storage.get(key) ?? null,
+        setItem: (key, value) => { storage.set(key, value); },
+        removeItem: key => { storage.delete(key); },
+        clear: () => storage.clear(),
+        key: index => [...storage.keys()][index] ?? null,
+        length: storage.size
+      } as Storage,
+      dispatchEvent: () => true
+    } as unknown as Window;
+    const now = new Date().toISOString();
+    writeMockAsset({
+      id: 'likeable-work', userId: 'owner-1', authorName: 'Owner', title: 'Likeable', icon: { type: 'emoji', value: '♥' },
+      category: 'lore', content: '', uiCodeSnippet: '', previewImages: [], folderId: null,
+      // Simulate a legacy aggregate retained before relational Likes existed.
+      likesCount: 2, isPublic: true, visibility: 'public', status: 'finished', deletedAt: null,
+      createdAt: now, updatedAt: now, forkCount: 0, forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    });
+
+    expect(readMockAssets().find(asset => asset.id === 'likeable-work')?.likesCount).toBe(2);
+    expect(setMockAssetLike('user-a', 'likeable-work', true)).toMatchObject({ success: true, isLiked: true, likesCount: 3 });
+    expect(setMockAssetLike('user-a', 'likeable-work', true)).toMatchObject({ success: true, isLiked: true, likesCount: 3 });
+    expect(setMockAssetLike('user-b', 'likeable-work', true)).toMatchObject({ success: true, isLiked: true, likesCount: 4 });
+    expect(readMockAssets().find(asset => asset.id === 'likeable-work')?.likesCount).toBe(4);
+    expect(setMockAssetLike('user-a', 'likeable-work', false)).toMatchObject({ success: true, isLiked: false, likesCount: 3 });
+    expect(readMockLikes('user-a')).toEqual([]);
+    expect(readMockLikes('user-b')).toEqual(['likeable-work']);
+    writeMockBookmarks('user-a', ['likeable-work']);
+
+    vi.resetModules();
+    const freshPersistence = await import('./creatorPersistence');
+    expect(freshPersistence.readMockLikes('user-b')).toEqual(['likeable-work']);
+    expect(freshPersistence.readMockAssets().find(asset => asset.id === 'likeable-work')?.likesCount).toBe(3);
+    expect(freshPersistence.readMockBookmarks('user-a')).toEqual(['likeable-work']);
+  });
+
   it('persists canonical Profile identity across state rehydration', () => {
     (globalThis as { window: Window }).window = {
       localStorage: {
@@ -214,6 +332,51 @@ describe('creator persistence event boundaries', () => {
     expect(writeMockProfile({ id: 'owner-1', displayName: 'Owner', username: 'juoncxl' } as User).success).toBe(false);
     expect(readMockProfile('owner-1', null)).toBeNull();
     expect(dispatched).toHaveLength(0);
+  });
+
+  it('permanently removes a Work and cleans every local relationship that can reference it', () => {
+    (globalThis as { window: Window }).window = {
+      localStorage: {
+        getItem: key => storage.get(key) ?? null,
+        setItem: (key, value) => { storage.set(key, value); },
+        removeItem: key => { storage.delete(key); },
+        clear: () => storage.clear(),
+        key: index => [...storage.keys()][index] ?? null,
+        length: storage.size
+      } as Storage,
+      dispatchEvent: () => true
+    } as unknown as Window;
+    const now = new Date().toISOString();
+    const deletedWork = {
+      id: 'work-delete', userId: 'owner-1', authorName: 'Owner', title: 'Delete me',
+      icon: { type: 'image', value: 'data:image/png;base64,deleted' }, category: 'lore', content: '',
+      uiCodeSnippet: '', previewImages: [], folderId: 'folder-1', isPublic: true, visibility: 'public',
+      status: 'finished', deletedAt: now, createdAt: now, updatedAt: now, likesCount: 0, forkCount: 0,
+      forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    } as Asset;
+    const linkedWork = { ...deletedWork, id: 'work-linked', folderId: null, deletedAt: null, linkedAssetIds: ['work-delete'] };
+    writeMockAsset(deletedWork);
+    writeMockAsset(linkedWork);
+    writeMockBookmarks('owner-1', ['work-delete', 'work-linked']);
+    writeMockBookmarks('owner-2', ['work-delete']);
+    writeMockLikes('owner-1', ['work-delete']);
+    writeMockLikes('owner-2', ['work-delete']);
+    const placements = [
+      { id: 'work:work-delete', kind: 'work' as const, refId: 'work-delete', x: 0, y: 0, w: 4, h: 4 },
+      { id: 'widget:note', kind: 'widget' as const, refId: 'note', x: 4, y: 0, w: 4, h: 2 }
+    ];
+    expect(writeCreatorSpaceSettings('owner-1', { layout: 'free', freePlacements: placements })).toBe(true);
+    expect(writeCreatorSpaceSettings('owner-2', { layout: 'free', freePlacements: [{ id: 'work:work-delete', kind: 'work', refId: 'work-delete', x: 0, y: 0, w: 4, h: 4 }] })).toBe(true);
+
+    expect(removeMockAsset('work-delete', 'owner-1')).toBe(true);
+    expect(readMockAssets().map(asset => asset.id)).toEqual(['work-linked']);
+    expect(readMockAssets()[0].linkedAssetIds).toEqual([]);
+    expect(readMockBookmarks('owner-1')).toEqual(['work-linked']);
+    expect(readMockBookmarks('owner-2')).toEqual([]);
+    expect(readMockLikes('owner-1')).toEqual([]);
+    expect(readMockLikes('owner-2')).toEqual([]);
+    expect(readCreatorSpaceSettings('owner-1')?.freePlacements).toEqual([placements[1]]);
+    expect(readCreatorSpaceSettings('owner-2')?.freePlacements).toEqual([]);
   });
 
   it('uses same-tab session storage when localStorage quota blocks a QA Profile save', () => {

@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
+const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const detailSource = readFileSync(new URL('./FolderDetailModal.tsx', import.meta.url), 'utf8');
+const moveToFolderSource = readFileSync(new URL('./MoveToFolderModal.tsx', import.meta.url), 'utf8');
 const detailCss = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 
 describe('Folder Detail canonical viewport routing', () => {
@@ -28,8 +30,28 @@ describe('Folder Detail canonical viewport routing', () => {
   });
 
   it('preserves the canonical one-Work-to-one-Folder field for list and unassign operations', () => {
-    expect(detailSource).toContain('asset.folderId === folder.id');
+    expect(detailSource).toContain('selectActiveAssetsInFolder(assets, folder.id)');
     expect(creatorSource).toContain('onMoveAssetToFolder(assetId, null)');
     expect(detailSource).not.toContain('deletedAt:');
+  });
+
+  it('passes the same derived folderId counts into the Move-to-Folder selector', () => {
+    expect(appSource).toContain('const foldersWithCounts = folders.map(folder => ({');
+    expect(appSource).toContain('assetsCount: folderAssetCounts[folder.id] || 0');
+    const appMoveToFolderSource = appSource.match(/<MoveToFolderModal[\s\S]*?\/>/)?.[0] || '';
+    expect(appMoveToFolderSource).toContain('folders={foldersWithCounts}');
+  });
+
+  it('keeps Move-to-Folder above Work Detail with nested-dialog focus handling', () => {
+    expect(moveToFolderSource).toContain('createPortal(');
+    expect(moveToFolderSource).toContain('data-move-to-folder-backdrop');
+    expect(moveToFolderSource).toContain('data-move-to-folder-dialog');
+    expect(moveToFolderSource).not.toContain('z-50');
+    expect(moveToFolderSource).toContain('acquireViewportScrollLock(document)');
+    expect(moveToFolderSource).toContain("window.addEventListener('keydown', handleKeyDown, true)");
+    expect(moveToFolderSource).toContain('dialogRef.current?.focus({ preventScroll: true });');
+    expect(moveToFolderSource).toContain('previouslyFocused?.isConnected');
+    expect(detailCss).toMatch(/\.work-detail-backdrop\s*\{[^}]*z-index:\s*100;/s);
+    expect(detailCss).toMatch(/\.move-to-folder-modal-backdrop\s*\{[^}]*z-index:\s*130;/s);
   });
 });

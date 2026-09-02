@@ -26,6 +26,10 @@ export type IconType = 'emoji' | 'kaomoji' | 'image';
 export interface AssetIcon {
   type: IconType;
   value: string;
+  /** QA Sandbox key for binary image/GIF data held outside localStorage. */
+  storageKey?: string;
+  /** Original media type, retained so the editor can restore the GIF mode. */
+  mimeType?: string;
 }
 
 export interface Folder {
