@@ -17,13 +17,13 @@ import { getCreatorVisibleAssets, selectCreatorSavedAssets, useCreatorSpaceData 
 import { isMockPersistence } from '../lib/persistenceMode';
 import { readCreatorSpaceSettings, writeCreatorSpaceSettings } from '../lib/creatorPersistence';
 import { anchorFreeGridCell, canAddFreePlacement, compactFreeLayout, constrainFreePlacementWidth, createFreeWidgetInstance, estimatePortfolioHeightRows, estimateWorkHeightRows, getFreePlacementId, getFreePlacementWidthOptions, getPortfolioShowcaseItems, getWorkCardSize, hydrateFreeWidgetInstances, hydrateSavedFreeLayout, materializeDerivedHeights, migrateFreeOrder, moveFreePlacement, normalizeFreePlacement, pixelsToFreeGridRows, pointerToFreeGridCell, removeFreePlacement, resolveFreePlacementPosition, resizeFreePlacement, shouldShowFreePlacementControls, updateFreeWidgetInstance, type FreeLayoutPlacement, type FreePlacementKind, type FreeWidgetInstance, type PortfolioDisplayLimit } from '../lib/creatorLayout';
-import { parseCanonicalProfileLocation, resolveProfileView, type ProfileTab } from '../lib/profileRouting';
+import { parseCanonicalProfileLocation, resolveProfileView, shouldNormalizeOwnerProfileContext, type ProfileTab } from '../lib/profileRouting';
 import { getCanonicalProfilePath, getCanonicalProfileSlug } from '../lib/profileIdentity';
 
 interface CreatorSpacePageProps {
   // The canonical profile is the home for profile identity editing.
   onCreateAsset: () => void;
-  onEditAsset?: (asset: Asset) => void;
+  onEditAsset?: (asset: Asset, onEditorClose?: () => void) => void;
   slug: string;
   onOpenAuth: () => void;
   onOpenFolderManager?: () => void;
@@ -163,7 +163,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
 };
 
 export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenMoveToFolder, onMoveAssetToFolder, onOpenSettingsModal, allKnownAssets = [], knownFolders = [], isLoadingAssets = false, isLoadingFolders = false, bookmarkedAssetIds = [], recentlyViewedIds = [], onBookmark, onDeleteAsset, onRestoreAsset, onPermanentDeleteAsset }) => {
-  const { currentUser, openAuthModal } = useAuth();
+  const { currentUser, openAuthModal, isLoading: authLoading } = useAuth();
   const [activeSlug, setActiveSlug] = useState(slug);
   const { profile, assets, folders, isProfileLoading, isAssetsLoading: isProfileAssetsLoading, isFoldersLoading: isProfileFoldersLoading, isNotFound, error, refresh } = useCreatorSpaceData(
     activeSlug,
@@ -174,8 +174,24 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const openFolderDetail = React.useCallback((folderId: string) => setSelectedFolderId(folderId), []);
+  const [selectedAssetOriginFolderId, setSelectedAssetOriginFolderId] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => parseCanonicalProfileLocation(window.location.pathname, window.location.search)?.folderId || null);
+  const openFolderDetail = React.useCallback((folderId: string) => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('folder') !== folderId) {
+      url.searchParams.set('folder', folderId);
+      window.history.pushState({}, '', `${url.pathname}${url.search}`);
+    }
+    setSelectedFolderId(folderId);
+  }, []);
+  const closeFolderDetail = React.useCallback(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('folder')) {
+      url.searchParams.delete('folder');
+      window.history.pushState({}, '', `${url.pathname}${url.search}`);
+    }
+    setSelectedFolderId(null);
+  }, []);
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
   const [visibility, setVisibility] = useState<'all' | 'public' | 'private'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -216,6 +232,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       setActiveSlug(route.slug);
       setRequestedTab(route.requestedTab);
       setPreviewViewer(route.previewPublic ? 'public' : 'owner');
+      setSelectedFolderId(route.folderId);
     };
     window.addEventListener('popstate', syncFromLocation);
     return () => window.removeEventListener('popstate', syncFromLocation);
@@ -242,13 +259,15 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     // Query parameters are not authority. A visitor who manually supplies an
     // owner tab must receive the public presentation, without a blank state or
     // any owner-only metadata.
-    if (profile && resolvedView.isPublicView && requestedTab !== 'profile' && requestedTab !== 'works') {
+    if (profile && shouldNormalizeOwnerProfileContext({ requestedTab, folderId: selectedFolderId }, resolvedView.isPublicView, authLoading)) {
       const url = new URL(window.location.href);
-      url.searchParams.delete('tab');
+      if (requestedTab !== 'profile' && requestedTab !== 'works') url.searchParams.delete('tab');
+      url.searchParams.delete('folder');
       window.history.replaceState({}, '', `${url.pathname}${url.search}`);
-      setRequestedTab('profile');
+      if (requestedTab !== 'profile' && requestedTab !== 'works') setRequestedTab('profile');
+      setSelectedFolderId(null);
     }
-  }, [profile, requestedTab, resolvedView.isPublicView]);
+  }, [authLoading, profile, requestedTab, resolvedView.isPublicView, selectedFolderId]);
 
   useEffect(() => {
     if (!isMockPersistence || !profile) return;
@@ -339,8 +358,8 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   }, [activeSlug]);
 
   useEffect(() => {
-    if (!isEditing || (activeTab !== 'profile' && activeTab !== 'folders')) setSelectedFolderId(null);
-  }, [activeTab, isEditing]);
+    if (!authLoading && (!isEditing || (activeTab !== 'profile' && activeTab !== 'folders'))) closeFolderDetail();
+  }, [activeTab, authLoading, closeFolderDetail, isEditing]);
 
   useEffect(() => {
     if (activeTab !== 'profile' || layout !== 'free' || typeof ResizeObserver === 'undefined') return;
@@ -415,18 +434,20 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const selectTab = (tab: ProfileTab) => {
     const url = new URL(window.location.href);
     if (tab === 'profile') url.searchParams.delete('tab'); else url.searchParams.set('tab', tab);
+    url.searchParams.delete('folder');
     if (previewViewer === 'public') url.searchParams.set('preview', 'public');
     window.history.pushState({}, '', `${url.pathname}${url.search}`);
     setRequestedTab(tab);
+    setSelectedFolderId(null);
     if (tab !== 'profile') setAddItemOpen(false);
   };
   const setPublicPreview = (enabled: boolean) => {
     const url = new URL(window.location.href);
     if (enabled) url.searchParams.set('preview', 'public'); else url.searchParams.delete('preview');
-    if (enabled) url.searchParams.delete('tab');
+    if (enabled) { url.searchParams.delete('tab'); url.searchParams.delete('folder'); }
     window.history.pushState({}, '', `${url.pathname}${url.search}`);
     setPreviewViewer(enabled ? 'public' : 'owner');
-    if (enabled) { setRequestedTab('profile'); setIsCustomizeOpen(false); setEditingWidget(null); setAddItemOpen(false); }
+    if (enabled) { setRequestedTab('profile'); setSelectedFolderId(null); setIsCustomizeOpen(false); setEditingWidget(null); setAddItemOpen(false); }
   };
   const handleLayoutChange = (nextLayout: CreatorLayout) => {
     setLayout(nextLayout);
@@ -736,8 +757,8 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
        {(['works', 'drafts', 'saved', 'recent', 'trash'] as const).includes(activeTab as 'works' | 'drafts' | 'saved' | 'recent' | 'trash') && (isEditing || activeTab === 'works') && <section className="csp-portfolio"><div className="csp-section-heading"><div><p className="csp-eyebrow">{isEditing ? 'MANAGE' : 'WORKS'}</p><h2>{activeTab === 'works' ? 'ผลงาน' : activeTab === 'drafts' ? 'แบบร่าง' : activeTab === 'saved' ? 'บันทึกไว้' : activeTab === 'recent' ? 'ล่าสุด' : 'ถังขยะ'}</h2><p>{!isEditing && activeTab === 'works' ? 'ผลงานสาธารณะทั้งหมดของ Creator' : activeTab === 'saved' ? 'ผลงานที่คุณบันทึกไว้' : activeTab === 'recent' ? 'ผลงานที่คุณเปิดล่าสุด' : activeTab === 'trash' ? 'ผลงานที่ลบแล้วของคุณ' : 'จัดการผลงานของคุณ'}</p></div><span>{managementAssets.length} รายการ</span></div>{isProfileAssetsLoading ? <div className="csp-empty" aria-busy="true"><h3>กำลังโหลดผลงาน...</h3></div> : managementAssets.length ? <div className="csp-asset-grid">{managementAssets.map(asset => <AssetCard key={asset.id} asset={asset} onClick={setSelectedAsset} onBookmark={activeTab === 'trash' ? undefined : onBookmark} isBookmarked={bookmarkedAssetIds.includes(asset.id)} onDelete={isEditing && activeTab !== 'trash' ? onDeleteAsset : undefined} onEdit={isEditing && (activeTab === 'works' || activeTab === 'drafts') ? onEditAsset : undefined} isOwner={isEditing && asset.userId === currentUser?.id} isTrashMode={activeTab === 'trash'} onRestore={activeTab === 'trash' ? onRestoreAsset : undefined} onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined} />)}</div> : <div className="csp-empty"><h3>ยังไม่มีรายการ</h3><p>{activeTab === 'saved' ? 'ผลงานที่บันทึกไว้จะแสดงที่นี่' : activeTab === 'recent' ? 'ผลงานที่เปิดล่าสุดจะแสดงที่นี่' : activeTab === 'works' && !isEditing ? 'ยังไม่มีผลงานสาธารณะ' : 'ไม่มีผลงานในส่วนนี้'}</p></div>}</section>}
       </>}
     </main>
-    <WorkDetailModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => setSelectedAsset(null)} onBookmark={activeTab === 'trash' ? undefined : onBookmark} isBookmarked={selectedAsset ? bookmarkedAssetIds.includes(selectedAsset.id) : false} onDelete={isEditing && activeTab !== 'trash' ? assetId => { const target = selectedAsset?.id === assetId ? selectedAsset : allKnownAssets.find(asset => asset.id === assetId); if (target) onDeleteAsset?.(target); } : undefined} onEdit={isEditing && onEditAsset ? asset => { setSelectedAsset(null); onEditAsset(asset); } : undefined} onMoveToFolder={isEditing && onOpenMoveToFolder ? asset => { setSelectedAsset(null); onOpenMoveToFolder(asset); } : undefined} onRestore={activeTab === 'trash' ? onRestoreAsset : undefined} onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined} isTrashMode={activeTab === 'trash'} folders={folders} allAssets={visibleAssets} isOwner={isEditing} creatorProfile={presentationProfile} />
-    <FolderDetailModal isOpen={Boolean(selectedFolder)} folder={selectedFolder} assets={visibleAssets} isOwner={isEditing} creatorProfile={presentationProfile} onClose={() => setSelectedFolderId(null)} onOpenWork={asset => { setSelectedFolderId(null); setSelectedAsset(asset); }} onEditWork={onEditAsset ? asset => { setSelectedFolderId(null); onEditAsset(asset); } : undefined} onMoveWork={onOpenMoveToFolder ? asset => { setSelectedFolderId(null); onOpenMoveToFolder(asset); } : undefined} onRemoveWork={onMoveAssetToFolder ? assetId => onMoveAssetToFolder(assetId, null) : undefined} />
+    <WorkDetailModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => { const originFolderId = selectedAssetOriginFolderId; setSelectedAsset(null); setSelectedAssetOriginFolderId(null); if (originFolderId) closeFolderDetail(); }} onBookmark={activeTab === 'trash' ? undefined : onBookmark} isBookmarked={selectedAsset ? bookmarkedAssetIds.includes(selectedAsset.id) : false} onDelete={isEditing && activeTab !== 'trash' ? assetId => { const target = selectedAsset?.id === assetId ? selectedAsset : allKnownAssets.find(asset => asset.id === assetId); if (target) onDeleteAsset?.(target); } : undefined} onEdit={isEditing && onEditAsset ? asset => { const originFolderId = selectedAssetOriginFolderId; setSelectedAsset(null); setSelectedAssetOriginFolderId(null); onEditAsset(asset, originFolderId ? () => openFolderDetail(originFolderId) : undefined); } : undefined} onMoveToFolder={isEditing && onOpenMoveToFolder ? asset => { const originFolderId = selectedAssetOriginFolderId; setSelectedAsset(null); setSelectedAssetOriginFolderId(null); if (originFolderId) closeFolderDetail(); onOpenMoveToFolder(asset); } : undefined} onRestore={activeTab === 'trash' ? onRestoreAsset : undefined} onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined} isTrashMode={activeTab === 'trash'} folders={folders} allAssets={visibleAssets} isOwner={isEditing} creatorProfile={presentationProfile} />
+    <FolderDetailModal isOpen={Boolean(selectedFolder)} folder={selectedFolder} assets={visibleAssets} isOwner={isEditing} creatorProfile={presentationProfile} onClose={closeFolderDetail} onOpenWork={asset => { const originFolderId = selectedFolderId; setSelectedFolderId(null); setSelectedAsset(asset); setSelectedAssetOriginFolderId(originFolderId); }} onEditWork={onEditAsset ? asset => { const originFolderId = selectedFolderId; setSelectedFolderId(null); onEditAsset(asset, originFolderId ? () => openFolderDetail(originFolderId) : undefined); } : undefined} onMoveWork={onOpenMoveToFolder ? asset => { closeFolderDetail(); onOpenMoveToFolder(asset); } : undefined} onRemoveWork={onMoveAssetToFolder ? assetId => onMoveAssetToFolder(assetId, null) : undefined} />
     {isCustomizeOpen && isEditing && editingWidget && <CreatorWidgetEditor type={editingWidget.type} config={editingWidgetConfig} displayName={editingWidgetDisplayName} contextual instanceId={editingWidget.instanceId} onChange={updateEditingWidget} onDisplayNameChange={updateEditingWidgetDisplayName} onClose={() => setEditingWidget(null)} />}
     <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = getCanonicalProfileSlug(savedUser); if (nextSlug === activeSlug) void refresh(); setActiveSlug(nextSlug); window.history.replaceState({}, '', getCanonicalProfilePath(savedUser)); }} />
   </div>;

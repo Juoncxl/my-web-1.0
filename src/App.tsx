@@ -211,7 +211,6 @@ function MainApp() {
         tags: draft.tags
       });
       if (result.data) {
-        navigate(getCanonicalProfilePath(currentUser, '?tab=works'));
         return { success: true };
       }
       return { success: false, error: result.error || 'แก้ไขผลงานไม่สำเร็จ' };
@@ -256,9 +255,17 @@ function MainApp() {
     openMoveToFolder(asset.id);
   }, [openMoveToFolder]);
 
-  const handleEditVaultAsset = useCallback((asset: Asset) => {
-    openEditEditor(asset.id);
+  const handleEditVaultAsset = useCallback((asset: Asset, onEditorClose?: () => void) => {
+    openEditEditor(asset.id, onEditorClose);
   }, [openEditEditor]);
+
+  const handleCloseEditor = useCallback(() => {
+    closeEditor();
+    if (workRoute?.[2] === 'edit' && workRoute[1]) {
+      const detailPath = `${window.location.pathname.replace(/\/edit\/?$/i, '')}${window.location.search}${window.location.hash}`;
+      navigate(detailPath);
+    }
+  }, [closeEditor, navigate, workRoute?.[1], workRoute?.[2]]);
 
   const handleOpenCreatorProfile = useCallback(() => {
     if (!currentUser) return;
@@ -589,7 +596,7 @@ function MainApp() {
 
       <CreatorWorkWorkspace
         isOpen={isEditorOpen}
-        onClose={closeEditor}
+        onClose={handleCloseEditor}
         initialData={editingAsset}
         creatorProfile={currentUser}
         folders={folders}

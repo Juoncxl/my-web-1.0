@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileView } from './profileRouting';
+import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileView, shouldNormalizeOwnerProfileContext } from './profileRouting';
 
 describe('canonical Profile routing', () => {
   it('preserves Profile identity in public preview', () => {
     const route = parseCanonicalProfileLocation('/@juoncxl', '?preview=public');
 
-    expect(route).toEqual({ slug: 'juoncxl', requestedTab: 'profile', previewPublic: true });
+    expect(route).toEqual({ slug: 'juoncxl', requestedTab: 'profile', previewPublic: true, folderId: null });
     expect(resolveProfileView(route!, true)).toEqual({ activeTab: 'profile', isPublicView: true });
   });
 
@@ -34,8 +34,25 @@ describe('canonical Profile routing', () => {
     expect(parseCanonicalProfileLocation('/@%E0%A4%A')).toBeNull();
     expect(parseCanonicalProfileLocation('/vault')).toBeNull();
     expect(parseCanonicalProfileLocation('/@juoncxl', '?tab=unknown')).toEqual({
-      slug: 'juoncxl', requestedTab: 'profile', previewPublic: false
+      slug: 'juoncxl', requestedTab: 'profile', previewPublic: false, folderId: null
     });
+  });
+
+  it('parses Folder Detail context from the canonical Profile query', () => {
+    expect(parseCanonicalProfileLocation('/@juoncxl', '?tab=folders&folder=folder-qa')).toEqual({
+      slug: 'juoncxl', requestedTab: 'folders', previewPublic: false, folderId: 'folder-qa'
+    });
+    expect(parseCanonicalProfileLocation('/@juoncxl', '?folder=%20')).toMatchObject({ folderId: null });
+  });
+
+  it('waits for auth hydration before stripping owner-only route context', () => {
+    const draftRoute = { requestedTab: 'drafts' as const, folderId: null };
+    const folderRoute = { requestedTab: 'profile' as const, folderId: 'folder-qa' };
+
+    expect(shouldNormalizeOwnerProfileContext(draftRoute, true, true)).toBe(false);
+    expect(shouldNormalizeOwnerProfileContext(draftRoute, true, false)).toBe(true);
+    expect(shouldNormalizeOwnerProfileContext(folderRoute, true, false)).toBe(true);
+    expect(shouldNormalizeOwnerProfileContext({ requestedTab: 'works', folderId: null }, true, false)).toBe(false);
   });
 });
 

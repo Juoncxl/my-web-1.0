@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Asset } from '../types';
 import { findAssetById } from '../lib/assetSelection';
 
@@ -9,6 +9,7 @@ export type AssetEditorState =
 export function useAssetModalState(assets: readonly Asset[]) {
   const [viewingAssetId, setViewingAssetId] = useState<string | null>(null);
   const [editorState, setEditorState] = useState<AssetEditorState | null>(null);
+  const editorReturnActionRef = useRef<(() => void) | null>(null);
   const [reportingAssetId, setReportingAssetId] = useState<string | null>(null);
   const [movingAssetId, setMovingAssetId] = useState<string | null>(null);
 
@@ -49,16 +50,21 @@ export function useAssetModalState(assets: readonly Asset[]) {
   }, []);
 
   const openCreateEditor = useCallback(() => {
+    editorReturnActionRef.current = null;
     setEditorState({ mode: 'create' });
   }, []);
 
-  const openEditEditor = useCallback((assetId: string) => {
+  const openEditEditor = useCallback((assetId: string, onEditorClose?: () => void) => {
+    editorReturnActionRef.current = onEditorClose || null;
     setEditorState({ mode: 'edit', assetId });
     setViewingAssetId(null);
   }, []);
 
   const closeEditor = useCallback(() => {
     setEditorState(null);
+    const onEditorClose = editorReturnActionRef.current;
+    editorReturnActionRef.current = null;
+    onEditorClose?.();
   }, []);
 
   const openReport = useCallback((assetId: string) => {

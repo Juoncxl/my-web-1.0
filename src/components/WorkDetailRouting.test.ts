@@ -54,6 +54,15 @@ describe('canonical Work Detail routing', () => {
     expect(creatorSource).toContain("onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined}");
   });
 
+  it('keeps Edit Work on its originating surface after a successful update', () => {
+    const editSaveSource = appSource.match(/if \(editingAssetId\) \{[\s\S]*?return \{ success: false, error: result\.error \|\| 'แก้ไขผลงานไม่สำเร็จ' \};/)?.[0] || '';
+    expect(editSaveSource).toContain('if (result.data) {');
+    expect(editSaveSource).not.toContain("navigate(getCanonicalProfilePath(currentUser, '?tab=works'))");
+    expect(appSource).toContain('const handleCloseEditor = useCallback(() => {');
+    expect(appSource).toContain("window.location.pathname.replace(/\\/edit\\/?$/i, '')");
+    expect(appSource).toContain('onClose={handleCloseEditor}');
+  });
+
   it('keeps long Work content bounded without changing sandbox semantics', () => {
     expect(detailCss).toMatch(/\.work-detail-modal\s*\{[^}]*max-width:\s*calc\(100vw - 2rem\)/s);
     expect(detailCss).toMatch(/\.work-detail-summary p\s*\{[^}]*overflow-wrap:\s*anywhere[^}]*word-break:\s*break-word/s);

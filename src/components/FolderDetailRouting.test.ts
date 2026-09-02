@@ -26,7 +26,22 @@ describe('Folder Detail canonical viewport routing', () => {
   it('cleans modal state when route ownership or supported Profile tabs change', () => {
     expect(creatorSource).toContain('setSelectedFolderId(null);\n  }, [activeSlug]);');
     expect(creatorSource).toContain("activeTab !== 'profile' && activeTab !== 'folders'");
-    expect(creatorSource).toContain('onClose={() => setSelectedFolderId(null)}');
+    expect(creatorSource).toContain('onClose={closeFolderDetail}');
+  });
+
+  it('restores the originating Folder after Edit Work closes', () => {
+    const modalStateSource = readFileSync(new URL('../hooks/useAssetModalState.ts', import.meta.url), 'utf8');
+    expect(modalStateSource).toContain('editorReturnActionRef');
+    expect(modalStateSource).toContain('onEditorClose?.();');
+    expect(creatorSource).toContain('selectedAssetOriginFolderId');
+    expect(creatorSource).toContain('onEditAsset(asset, originFolderId ? () => openFolderDetail(originFolderId) : undefined)');
+  });
+
+  it('persists the open Folder in the canonical Profile query for reload restoration', () => {
+    expect(creatorSource).toContain("parseCanonicalProfileLocation(window.location.pathname, window.location.search)?.folderId || null");
+    expect(creatorSource).toContain("url.searchParams.set('folder', folderId)");
+    expect(creatorSource).toContain("url.searchParams.delete('folder')");
+    expect(creatorSource).toContain('setSelectedFolderId(route.folderId);');
   });
 
   it('preserves the canonical one-Work-to-one-Folder field for list and unassign operations', () => {

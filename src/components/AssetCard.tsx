@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Asset, AssetCategory, User } from '../types';
 import { resolveWorkCreator } from '../lib/workPresentation';
 import { isPublicFeedVisibility, isValidWorkIcon } from '../lib/assetVisibility';
@@ -76,6 +76,32 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const { currentUser } = useAuth();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const closeWhenAnotherMenuOpens = (event: Event) => {
+      const otherAssetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
+      if (otherAssetId !== asset.id) setMenuOpen(false);
+    };
+    window.addEventListener('creator-vault:card-menu-open', closeWhenAnotherMenuOpens);
+    return () => window.removeEventListener('creator-vault:card-menu-open', closeWhenAnotherMenuOpens);
+  }, [asset.id]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [menuOpen]);
 
   const categoryMeta = CATEGORIES[asset.category] || CATEGORIES.character;
   const statusMeta = STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished;
@@ -86,6 +112,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
 
   const handleQuickCopy = (event: React.MouseEvent) => {
     event.stopPropagation();
+    setMenuOpen(false);
     void navigator.clipboard.writeText(asset.uiCodeSnippet || asset.content);
     setCopied(true);
     confetti({ particleCount: 20, spread: 45, origin: { y: 0.8 }, colors: ['#A78BFA', '#F472B6', '#FBBF24'] });
@@ -104,7 +131,12 @@ export const AssetCard: React.FC<AssetCardProps> = ({
 
   const handleMenuToggle = (event: React.MouseEvent) => {
     event.stopPropagation();
-    setMenuOpen(previous => !previous);
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('creator-vault:card-menu-open', { detail: { assetId: asset.id } }));
+    setMenuOpen(true);
   };
 
   const handleMenuAction = (callback: (() => void) | undefined) => (event: React.MouseEvent) => {
@@ -216,7 +248,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                 <span>{asset.likesCount || 0}</span>
               </button>
             )}
-            <div className="cv-card-menu-wrap">
+            <div ref={menuRef} className="cv-card-menu-wrap">
               <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
               {menuOpen && (
                 <div className="cv-card-menu" onClick={event => event.stopPropagation()}>

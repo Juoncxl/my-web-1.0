@@ -8,6 +8,7 @@ export interface CanonicalProfileRoute {
   slug: string;
   requestedTab: ProfileTab;
   previewPublic: boolean;
+  folderId: string | null;
 }
 
 export function parseCanonicalProfileLocation(pathname: string, search = ''): CanonicalProfileRoute | null {
@@ -24,11 +25,23 @@ export function parseCanonicalProfileLocation(pathname: string, search = ''): Ca
 
   const params = new URLSearchParams(search);
   const requested = params.get('tab') as ProfileTab | null;
+  const folderId = params.get('folder')?.trim() || null;
   return {
     slug,
     requestedTab: requested && OWNER_TABS.has(requested) ? requested : 'profile',
-    previewPublic: params.get('preview') === 'public'
+    previewPublic: params.get('preview') === 'public',
+    folderId
   };
+}
+
+/** Do not discard an owner route before the auth session has resolved. */
+export function shouldNormalizeOwnerProfileContext(
+  route: Pick<CanonicalProfileRoute, 'requestedTab' | 'folderId'>,
+  isPublicView: boolean,
+  isAuthLoading: boolean
+): boolean {
+  if (isAuthLoading || !isPublicView) return false;
+  return (route.requestedTab !== 'profile' && route.requestedTab !== 'works') || Boolean(route.folderId);
 }
 
 export function resolveProfileView(
