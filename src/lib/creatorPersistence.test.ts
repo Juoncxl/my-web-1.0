@@ -113,8 +113,8 @@ describe('creator persistence event boundaries', () => {
       { id: 'portfolio:portfolio', kind: 'portfolio' as const, refId: 'portfolio', x: 2, y: 21, w: 10, h: 12, heightMode: 'auto' as const }
     ];
     const widgetInstances = [
-      { id: 'decoration-a', widgetType: 'decoration', config: { text: 'A', opacity: 60 } },
-      { id: 'decoration-b', widgetType: 'decoration', config: { text: 'B', opacity: 100 } }
+      { id: 'decoration-a', widgetType: 'decoration', title: 'Narrow A', config: { text: 'A', opacity: 60 } },
+      { id: 'decoration-b', widgetType: 'decoration', title: 'Narrow B', config: { text: 'B', opacity: 100 } }
     ];
 
     expect(writeCreatorSpaceSettings('owner-1', { layout: 'free', freePlacements, widgetInstances })).toBe(true);

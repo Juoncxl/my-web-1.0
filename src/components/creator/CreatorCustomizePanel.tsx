@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronDown, ChevronUp, Grid2X2, Plus, Settings2, Sparkles, X } from 'lucide-react';
 import { getFreePlacementWidthOptions } from '../../lib/creatorLayout';
+import { CreatorCompactItemControls, shouldUseCompactOwnerControls } from './CreatorCompactItemControls';
 
 export type CreatorLayout = 'locked' | 'free';
 export type LockedPreset = 'left' | 'right' | 'split';
@@ -79,8 +80,13 @@ interface CreatorWidgetControlsProps {
   onSpan: (span: number) => void;
   height?: number;
   onHeight?: (height: number) => void;
+  instanceId?: string;
 }
 
-export const CreatorWidgetControls: React.FC<CreatorWidgetControlsProps> = ({ type, layout, lockedPreset, span, rail, onMove, onEdit, onRemove, onRail, onSpan, height, onHeight }) => (
-  <div className="csp-widget-edit-bar"><span className="csp-drag-handle" aria-hidden="true">⋮⋮</span><strong>{CREATOR_WIDGET_ICONS[type]} {CREATOR_WIDGET_LABELS[type]}</strong>{layout === 'free' && <><select value={span} onChange={event => onSpan(Number(event.target.value))} aria-label={`ความกว้าง ${CREATOR_WIDGET_LABELS[type]}`}>{getFreePlacementWidthOptions('widget', type).map(value => <option value={value} key={value}>{spanLabel(value)}</option>)}</select>{height && onHeight && <select value={height} onChange={event => onHeight(Number(event.target.value))} aria-label={`ความสูง ${CREATOR_WIDGET_LABELS[type]}`}>{[1, 2, 3, 4, 5, 6, 8].map(value => <option value={value} key={value}>{value} แถว</option>)}</select>}</>}<button type="button" onClick={() => onMove(-1)} aria-label={`เลื่อน ${CREATOR_WIDGET_LABELS[type]} ขึ้น`}><ChevronUp className="h-3.5 w-3.5" /></button><button type="button" onClick={() => onMove(1)} aria-label={`เลื่อน ${CREATOR_WIDGET_LABELS[type]} ลง`}><ChevronDown className="h-3.5 w-3.5" /></button>{layout === 'locked' && lockedPreset === 'split' && <><button type="button" className={rail === 'left' ? 'is-selected' : ''} onClick={() => onRail('left')} aria-label="ย้ายไป rail ซ้าย">←</button><button type="button" className={rail === 'right' ? 'is-selected' : ''} onClick={() => onRail('right')} aria-label="ย้ายไป rail ขวา">→</button></>}<button type="button" onClick={onEdit} aria-label={`แก้ไข ${CREATOR_WIDGET_LABELS[type]}`}><Settings2 className="h-3.5 w-3.5" /></button><button type="button" className="is-danger csp-remove-from-profile" onClick={onRemove} aria-label={`นำ ${CREATOR_WIDGET_LABELS[type]} ออกจากหน้าโปรไฟล์`} title="ลบเฉพาะตำแหน่ง เนื้อหาต้นฉบับยังอยู่">นำออก</button></div>
-);
+export const CreatorWidgetControls: React.FC<CreatorWidgetControlsProps> = ({ type, layout, lockedPreset, span, rail, onMove, onEdit, onRemove, onRail, onSpan, height, onHeight, instanceId }) => {
+  if (shouldUseCompactOwnerControls(layout, span)) {
+    return <CreatorCompactItemControls label={CREATOR_WIDGET_LABELS[type]} itemId={`widget:${instanceId || type}`} widgetInstanceId={instanceId} span={span} widthOptions={getFreePlacementWidthOptions('widget', type)} height={height} heightOptions={[1, 2, 3, 4, 5, 6, 8]} onSpan={onSpan} onHeight={onHeight} onMove={onMove} onEdit={onEdit} onRemove={onRemove} />;
+  }
+
+  return <div className="csp-widget-edit-bar"><span className="csp-drag-handle" aria-hidden="true">⋮⋮</span><strong>{CREATOR_WIDGET_ICONS[type]} {CREATOR_WIDGET_LABELS[type]}</strong>{layout === 'free' && <><select value={span} onChange={event => onSpan(Number(event.target.value))} aria-label={`ความกว้าง ${CREATOR_WIDGET_LABELS[type]}`}>{getFreePlacementWidthOptions('widget', type).map(value => <option value={value} key={value}>{spanLabel(value)}</option>)}</select>{height && onHeight && <select value={height} onChange={event => onHeight(Number(event.target.value))} aria-label={`ความสูง ${CREATOR_WIDGET_LABELS[type]}`}>{[1, 2, 3, 4, 5, 6, 8].map(value => <option value={value} key={value}>{value} แถว</option>)}</select>}</>}<button type="button" onClick={() => onMove(-1)} aria-label={`เลื่อน ${CREATOR_WIDGET_LABELS[type]} ขึ้น`}><ChevronUp className="h-3.5 w-3.5" /></button><button type="button" onClick={() => onMove(1)} aria-label={`เลื่อน ${CREATOR_WIDGET_LABELS[type]} ลง`}><ChevronDown className="h-3.5 w-3.5" /></button>{layout === 'locked' && lockedPreset === 'split' && <><button type="button" className={rail === 'left' ? 'is-selected' : ''} onClick={() => onRail('left')} aria-label="ย้ายไป rail ซ้าย">←</button><button type="button" className={rail === 'right' ? 'is-selected' : ''} onClick={() => onRail('right')} aria-label="ย้ายไป rail ขวา">→</button></>}<button type="button" onClick={onEdit} aria-label={`แก้ไข ${CREATOR_WIDGET_LABELS[type]}`}><Settings2 className="h-3.5 w-3.5" /></button><button type="button" className="is-danger csp-remove-from-profile" onClick={onRemove} aria-label={`นำ ${CREATOR_WIDGET_LABELS[type]} ออกจากหน้าโปรไฟล์`} title="ลบเฉพาะตำแหน่ง เนื้อหาต้นฉบับยังอยู่">นำออก</button></div>;
+};
