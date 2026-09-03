@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { Settings2, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../context/AuthContext';
 import { supabaseService } from '../lib/supabaseService';
@@ -152,11 +152,11 @@ export const SettingsModal: React.FC = () => {
   };
 
   if (!isSettingsOpen) return null;
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-    <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-purple-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
-      <div className="p-6 pb-4 border-b border-purple-50 dark:border-slate-800 bg-gradient-to-r from-purple-50/80 via-pink-50/50 to-white dark:from-slate-800/80 dark:via-purple-950/30 dark:to-slate-900 flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-2xl bg-purple-600 dark:bg-purple-700 text-white flex items-center justify-center text-lg shadow-md shadow-purple-500/20">⚙️</div><div><h2 className="text-base font-bold text-slate-800 dark:text-slate-100">ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)</h2><p className="text-xs text-slate-500 dark:text-slate-400">จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน</p></div></div><button onClick={() => setIsSettingsOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X className="w-4 h-4" /></button></div>
+  return <div className="cv-settings-backdrop">
+    <div className="cv-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div className="cv-settings-heading"><div className="cv-settings-heading-copy"><div className="cv-settings-heading-icon"><Settings2 className="w-5 h-5" /></div><div><h2 id="settings-modal-title">ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)</h2><p>จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน</p></div></div><button type="button" onClick={() => setIsSettingsOpen(false)} className="cv-settings-close" aria-label="ปิดหน้าตั้งค่า"><X className="w-4 h-4" /></button></div>
       <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
-      <div className="flex-1 overflow-y-auto">
+      <div className="cv-settings-content">
         {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarChange={value => { revokeTemporaryAvatarPreview(); setAvatarFile(null); setAvatarImageKey(null); setAvatarUrl(value); }} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
         {activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}

@@ -14,6 +14,7 @@ const draft: CreatorWorkDraft = {
   uiCodeSnippet: '<p>Current</p><style>p{color:red}</style>', previewImages: ['data:image/png;base64,current'], tags: ['live']
 };
 const workspaceSource = readFileSync(new URL('./CreatorWorkWorkspace.tsx', import.meta.url), 'utf8');
+const workspaceStyles = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
 
 describe('CreatorWorkWorkspace live draft preview', () => {
   it('starts Create mode from a clean draft without prior Work state', () => {
@@ -99,5 +100,27 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(visibilityControl).toContain('<option>ส่วนตัว</option>');
     expect(visibilityControl).toContain('<option>สาธารณะ</option>');
     expect(visibilityControl).not.toContain('แบบร่าง');
+  });
+
+  it('keeps the four-tab workspace anatomy while applying scoped visual cleanup', () => {
+    expect(workspaceSource).toContain("[['details', 'ข้อมูลหลัก'], ['content', 'เนื้อหา'], ['media', 'สื่อ'], ['review', 'ตรวจสอบ']]");
+    expect(workspaceSource).toContain('className="csp-work-main"');
+    expect(workspaceSource).toContain('className="csp-work-sidebar"');
+    expect(workspaceSource).toContain('className="csp-modal-footer"');
+    expect(workspaceSource).toContain('className="csp-icon-picker"');
+    expect(workspaceSource).toContain('className="csp-preset-grid"');
+    expect(workspaceSource).toContain('className="csp-media-placeholder"');
+    expect(workspaceSource).toContain('data-preview-section="content-blocks"');
+    expect(workspaceSource).toContain('data-preview-section="ui-code"');
+    expect(workspaceSource).toContain('disabled={isSaving || !title.trim()}');
+    expect(workspaceSource).toContain('onClick={onClose}>ยกเลิก</button>');
+
+    expect(workspaceStyles).toContain('.csp-work-modal > .csp-modal-header');
+    expect(workspaceStyles).toContain('.csp-work-modal > .csp-work-nav');
+    expect(workspaceStyles).toContain('.csp-work-modal .csp-work-main > .csp-work-section');
+    expect(workspaceStyles).toContain('.csp-work-modal .csp-work-sidebar > .csp-work-section');
+    expect(workspaceStyles).toContain('.csp-work-modal [data-preview-section="ui-code"]');
+    expect(workspaceStyles).toContain('.csp-work-modal > .csp-modal-footer');
+    expect(workspaceStyles).toContain('@media (max-width: 520px)');
   });
 });

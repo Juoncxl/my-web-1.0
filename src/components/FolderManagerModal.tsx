@@ -4,6 +4,7 @@ import type { Folder } from '../types';
 import { FolderForm } from './folder-manager/FolderForm';
 import type { FolderIconMode } from './folder-manager/FolderIconPicker';
 import { FolderList } from './folder-manager/FolderList';
+import { ConfirmationDialog } from './ConfirmationDialog';
 
 interface FolderManagerModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
   const [iconMode, setIconMode] = useState<FolderIconMode>('presets');
   const [customEmojiInput, setCustomEmojiInput] = useState('');
   const [imageUrlInput, setImageUrlInput] = useState('');
+  const [folderPendingDeletion, setFolderPendingDeletion] = useState<Folder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -106,58 +108,74 @@ export const FolderManagerModal: React.FC<FolderManagerModalProps> = ({
   };
 
   const handleDelete = (folder: Folder) => {
-    if (window.confirm(`ต้องการลบโฟลเดอร์ "${folder.name}" ใช่หรือไม่? (ผลงานข้างในจะไม่ถูกลบ)`)) {
-      void onDeleteFolder(folder.id);
-    }
+    setFolderPendingDeletion(folder);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!folderPendingDeletion) return;
+    const folderId = folderPendingDeletion.id;
+    setFolderPendingDeletion(null);
+    void onDeleteFolder(folderId);
   };
 
   return (
-    <div className="cv-modal-backdrop fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-200" role="presentation">
-      <div className="cv-modal-panel relative flex max-h-[90vh] max-w-xl flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="folder-manager-title">
-        <div className="cv-modal-heading flex items-center justify-between p-4 sm:p-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="cv-modal-icon"><FolderIcon className="h-5 w-5" /></div>
-            <div className="min-w-0">
-              <h2 id="folder-manager-title" className="text-sm font-bold text-slate-800 dark:text-white">จัดการโฟลเดอร์</h2>
-              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">สร้างและจัดระเบียบคอลเลกชันของคุณ</p>
+    <>
+      <div className="cv-modal-backdrop fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-200" role="presentation">
+        <div className="cv-modal-panel cv-folder-manager-modal relative flex max-h-[90vh] max-w-xl flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="folder-manager-title">
+          <div className="cv-modal-heading flex items-center justify-between p-4 sm:p-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="cv-modal-icon"><FolderIcon className="h-5 w-5" /></div>
+              <div className="min-w-0">
+                <h2 id="folder-manager-title" className="text-sm font-bold text-slate-800 dark:text-white">จัดการโฟลเดอร์</h2>
+                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">สร้างและจัดระเบียบคอลเลกชันของคุณ</p>
+              </div>
             </div>
+            <button type="button" onClick={onClose} className="cv-modal-close" aria-label="ปิดหน้าต่างจัดการโฟลเดอร์"><X className="h-4 w-4" /></button>
           </div>
-          <button type="button" onClick={onClose} className="cv-modal-close" aria-label="ปิดหน้าต่างจัดการโฟลเดอร์"><X className="h-4 w-4" /></button>
-        </div>
 
-        <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-5">
-          <FolderForm
-            editing={Boolean(editingFolderId)}
-            folderName={folderName}
-            selectedIcon={selectedIcon}
-            selectedColor={selectedColor}
-            iconMode={iconMode}
-            customEmojiInput={customEmojiInput}
-            imageUrlInput={imageUrlInput}
-            error={error}
-            isSubmitting={isSubmitting}
-            fileInputRef={fileInputRef}
-            onFolderNameChange={setFolderName}
-            onIconChange={setSelectedIcon}
-            onColorChange={setSelectedColor}
-            onIconModeChange={setIconMode}
-            onCustomEmojiChange={setCustomEmojiInput}
-            onImageUrlChange={setImageUrlInput}
-            onApplyEmoji={() => {
-              if (customEmojiInput.trim()) {
-                setSelectedIcon(customEmojiInput.trim());
-                setCustomEmojiInput('');
-              }
-            }}
-            onApplyUrl={handleApplyImageUrl}
-            onFileUpload={handleFileUpload}
-            onResetIcon={() => setSelectedIcon('📁')}
-            onCancel={handleCancelEdit}
-            onSubmit={handleSubmit}
-          />
-          <FolderList folders={folders} onEdit={handleStartEdit} onDelete={handleDelete} />
+          <div className="cv-folder-manager-content flex-1 space-y-6 overflow-y-auto p-4 sm:p-5">
+            <FolderForm
+              editing={Boolean(editingFolderId)}
+              folderName={folderName}
+              selectedIcon={selectedIcon}
+              selectedColor={selectedColor}
+              iconMode={iconMode}
+              customEmojiInput={customEmojiInput}
+              imageUrlInput={imageUrlInput}
+              error={error}
+              isSubmitting={isSubmitting}
+              fileInputRef={fileInputRef}
+              onFolderNameChange={setFolderName}
+              onIconChange={setSelectedIcon}
+              onColorChange={setSelectedColor}
+              onIconModeChange={setIconMode}
+              onCustomEmojiChange={setCustomEmojiInput}
+              onImageUrlChange={setImageUrlInput}
+              onApplyEmoji={() => {
+                if (customEmojiInput.trim()) {
+                  setSelectedIcon(customEmojiInput.trim());
+                  setCustomEmojiInput('');
+                }
+              }}
+              onApplyUrl={handleApplyImageUrl}
+              onFileUpload={handleFileUpload}
+              onResetIcon={() => setSelectedIcon('📁')}
+              onCancel={handleCancelEdit}
+              onSubmit={handleSubmit}
+            />
+            <FolderList folders={folders} onEdit={handleStartEdit} onDelete={handleDelete} />
+          </div>
         </div>
       </div>
-    </div>
+
+      <ConfirmationDialog
+        isOpen={Boolean(folderPendingDeletion)}
+        title="ลบโฟลเดอร์?"
+        description={folderPendingDeletion ? `ต้องการลบโฟลเดอร์ "${folderPendingDeletion.name}" ใช่หรือไม่? (ผลงานข้างในจะไม่ถูกลบ)` : ''}
+        confirmLabel="ลบโฟลเดอร์"
+        onCancel={() => setFolderPendingDeletion(null)}
+        onConfirm={handleConfirmDelete}
+      />
+    </>
   );
 };

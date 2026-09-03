@@ -7,6 +7,8 @@ const cardSource = readFileSync(new URL('./AssetCard.tsx', import.meta.url), 'ut
 const detailSource = readFileSync(new URL('./WorkDetailModal.tsx', import.meta.url), 'utf8');
 const detailCss = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 const legacyEntrySource = readFileSync(new URL('./AssetViewModal.tsx', import.meta.url), 'utf8');
+const confirmationSource = readFileSync(new URL('./ConfirmationDialog.tsx', import.meta.url), 'utf8');
+const actionsSource = readFileSync(new URL('../hooks/useAssetActions.ts', import.meta.url), 'utf8');
 
 describe('canonical Work Detail routing', () => {
   it('mounts WorkDetailModal from both primary Work Card flows', () => {
@@ -69,5 +71,76 @@ describe('canonical Work Detail routing', () => {
     expect(detailCss).toMatch(/\.work-detail-block > pre\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*auto/s);
     expect(detailCss).toMatch(/\.work-detail-code-panel > pre\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*auto/s);
     expect(detailSource).toContain('<SandboxedCodePreview code={uiCode}');
+  });
+
+  it('keeps compact and code-heavy Work Details in one restrained visual system', () => {
+    expect(detailCss).toMatch(/\.work-detail-header,\s*\.work-detail-footer\s*\{[^}]*background:\s*var\(--cv-surface-soft\)/s);
+    expect(detailCss).toMatch(/\.work-detail-creator\s*\{[^}]*border-left:\s*3px solid var\(--cv-iridescent-border\)[^}]*background:\s*var\(--cv-surface-soft\)/s);
+    expect(detailCss).toMatch(/\.work-detail-block\s*\{[^}]*border:\s*0[^}]*border-top:\s*1px solid var\(--cv-line\)/s);
+    expect(detailCss).toMatch(/\.work-detail-code\s*\{[^}]*border:\s*1px solid var\(--cv-line\)[^}]*border-radius:\s*\.9rem[^}]*background:\s*var\(--cv-surface-soft\)/s);
+    expect(detailCss).toMatch(/\.work-detail-code-tabs button\.is-active\s*\{[^}]*background:\s*var\(--cv-lilac\)[^}]*color:\s*var\(--cv-purple-dark\)/s);
+    expect(detailCss).toMatch(/\.work-detail-code-panel > iframe\s*\{[^}]*max-width:\s*100%[^}]*min-width:\s*0/s);
+    expect(detailCss).toMatch(/\.work-detail-footer-actions \.is-primary\s*\{[^}]*background:\s*var\(--cv-purple-dark\)/s);
+    expect(detailCss).toMatch(/\.work-detail-body\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(detailCss).toMatch(/\.work-detail-code-panel > pre\s*\{[^}]*overflow:\s*auto/s);
+    expect(detailCss).toMatch(/\.work-detail-footer-actions button\s*\{[^}]*min-height:\s*1\.95rem/s);
+    expect(detailCss).toMatch(/\.work-detail-footer-actions button\s*\{[^}]*min-width:\s*max-content/s);
+    expect(detailSource).toContain('data-work-detail-section="main-content"');
+    expect(detailSource).toContain('data-work-detail-section="ui-code"');
+    expect(detailSource).toContain('{uiCode && <section className="work-detail-section work-detail-code"');
+    expect(detailSource).toContain('downloadText(markdown, `${safeFilename}.md`');
+    expect(detailSource).toContain('downloadText(JSON.stringify(asset, null, 2)');
+    expect(detailSource).toContain('onMoveToFolder(asset)');
+    expect(detailSource).toContain('onClick={onClose}');
+  });
+
+  it('keeps Image/GIF Work Icons inside square crop frames', () => {
+    expect(cardSource).toContain('className="cv-card-icon"');
+    expect(detailSource).toContain("className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}");
+    expect(detailCss).toMatch(/\.cv-card-icon\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
+    expect(detailCss).toMatch(/\.cv-card-icon img\s*\{[^}]*width:\s*100%[^}]*height:\s*100%[^}]*object-fit:\s*cover[^}]*\}/s);
+    expect(detailCss).toMatch(/\.work-detail-mark\.is-media\s*\{[^}]*width:\s*3rem[^}]*max-width:\s*3rem[^}]*\}/s);
+    expect(detailCss).toMatch(/\.work-detail-mark img\s*\{[^}]*width:\s*100%[^}]*height:\s*100%[^}]*object-fit:\s*cover[^}]*\}/s);
+  });
+
+  it('routes Work trash confirmation through the in-app dialog and preserves the existing handler', () => {
+    const vaultTrashHandler = appSource.match(/const handleDeleteVaultAsset[\s\S]*?\/\/ Folder CRUD/)?.[0] || '';
+    const detailTrashButton = detailSource.match(/\{isOwner && onDelete && <button[\s\S]*?<\/button>\}/)?.[0] || '';
+    const cancelButton = confirmationSource.match(/<button ref=\{cancelButtonRef\}[\s\S]*?data-confirmation-cancel>/)?.[0] || '';
+    const confirmButton = confirmationSource.match(/<button type="button" onClick=\{handleConfirm\}[\s\S]*?data-confirmation-confirm>/)?.[0] || '';
+
+    expect(vaultTrashHandler).toContain('setTrashConfirmationAsset(asset)');
+    expect(vaultTrashHandler).not.toContain('window.confirm');
+    expect(appSource).toContain('void handleSoftDeleteAsset(assetId)');
+    expect(detailTrashButton).toContain('setIsTrashConfirmationOpen(true)');
+    expect(detailTrashButton).not.toContain('window.confirm');
+    expect(detailSource).toContain('onDelete(asset.id)');
+    expect(confirmationSource).toContain('data-confirmation-dialog');
+    expect(confirmationSource).toContain('data-confirmation-cancel');
+    expect(confirmationSource).toContain('data-confirmation-confirm');
+    expect(cancelButton).toContain('onClick={onCancel}');
+    expect(cancelButton).not.toContain('onConfirm');
+    expect(confirmButton).toContain('onClick={handleConfirm}');
+    expect(confirmationSource).toContain('if (confirmClickRef.current) return;');
+    expect(confirmationSource).toContain('closeRef.current();');
+    expect(confirmationSource).toContain('onConfirm();');
+  });
+
+  it('routes Permanent Delete through the same confirmation dialog without changing deletion semantics', () => {
+    const cardPermanentDeleteButton = cardSource.match(/\{isTrashMode && onPermanentDelete && <button[\s\S]*?<\/button>\}/)?.[0] || '';
+    const detailPermanentDeleteButton = detailSource.match(/\{onPermanentDelete && <button[\s\S]*?<\/button>\}/)?.[0] || '';
+
+    expect(cardPermanentDeleteButton).toContain('setIsPermanentDeleteConfirmationOpen(true)');
+    expect(cardPermanentDeleteButton).not.toContain('window.confirm');
+    expect(detailPermanentDeleteButton).toContain('setIsPermanentDeleteConfirmationOpen(true)');
+    expect(detailPermanentDeleteButton).not.toContain('window.confirm');
+    expect(actionsSource).toContain('const handlePermanentDeleteAsset = useCallback');
+    expect(actionsSource).toContain('permanentDeleteAsset(assetId)');
+    expect(actionsSource).toContain('onAssetDeleted(assetId)');
+    expect(cardSource).toContain('onPermanentDelete(asset.id);');
+    expect(detailSource).toContain('onPermanentDelete(asset.id);');
+    expect(cardSource).toContain('confirmLabel="ลบถาวร"');
+    expect(detailSource).toContain('confirmLabel="ลบถาวร"');
+    expect(confirmationSource).toContain('if (confirmClickRef.current) return;');
   });
 });

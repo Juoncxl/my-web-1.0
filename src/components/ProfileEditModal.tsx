@@ -258,7 +258,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
 
   return (
     <div className="cv-modal-backdrop fixed inset-0 z-50 overflow-y-auto animate-in fade-in duration-200" role="presentation">
-      <div className="cv-modal-panel relative flex max-h-[92vh] w-full max-w-2xl flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="profile-edit-title">
+      <div className="cv-modal-panel cv-profile-edit-modal relative flex max-h-[92vh] w-full max-w-2xl flex-col animate-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="profile-edit-title">
         <div className="cv-modal-heading flex items-center justify-between p-4 sm:p-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="cv-modal-icon"><User className="h-5 w-5" /></div>
@@ -271,7 +271,8 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
         </div>
 
         <form onSubmit={handleSave} className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
-          <div className="grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)]">
+          <div className="cv-profile-media-editor grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)]">
+            <div className="cv-profile-media-heading" aria-hidden="true"><strong>Profile Media</strong><span>รูปโปรไฟล์และภาพปก</span></div>
             <ProfileAvatarPicker
               avatarUrl={avatarUrl}
               fileInputRef={fileInputRef}
@@ -282,7 +283,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
               hasStoredImage={Boolean(currentUser?.avatarImageKey)}
               onValidationError={setErrorMsg}
             />
-            <div className="space-y-3">
+            <div className="cv-profile-cover-controls space-y-3">
               <div className="cv-profile-cover-editor">
                 {coverUrl ? <img src={coverUrl} alt="ตัวอย่างภาพปก" referrerPolicy="no-referrer" /> : <span>ภาพปกโปรไฟล์</span>}
               </div>
@@ -295,7 +296,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="cv-profile-details-fields grid gap-4 md:grid-cols-2">
             <ProfileFields
               displayName={displayName}
               bio={bio}
@@ -317,10 +318,10 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
                 <div key={`${link.platform}-${index}`} className="cv-profile-social-row">
                   <label className="sr-only" htmlFor={`social-label-${index}`}>ชื่อช่องทาง</label>
                   <input id={`social-label-${index}`} value={link.label} onChange={event => updateSocialLink(index, { label: event.target.value })} placeholder="ชื่อช่องทาง" aria-label="ชื่อช่องทาง" />
-                  <label className="relative min-w-0 flex-1">
+                  <label className="cv-profile-social-url-field relative min-w-0 flex-1">
                     <Link2 className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
                     <span className="sr-only">URL</span>
-                    <input value={link.url} onChange={event => updateSocialLink(index, { url: event.target.value })} placeholder="https://..." aria-label={`ลิงก์ ${link.label || 'ช่องทาง'}`} className="w-full pl-8" />
+                    <input value={link.url} onChange={event => updateSocialLink(index, { url: event.target.value })} placeholder="https://..." aria-label={`ลิงก์ ${link.label || 'ช่องทาง'}`} className="cv-profile-social-url-input w-full pl-8" />
                   </label>
                   <label className="cv-profile-social-visible"><input type="checkbox" checked={link.visible} onChange={event => updateSocialLink(index, { visible: event.target.checked })} />แสดง</label>
                 </div>

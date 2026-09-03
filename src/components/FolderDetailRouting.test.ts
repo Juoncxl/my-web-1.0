@@ -69,4 +69,22 @@ describe('Folder Detail canonical viewport routing', () => {
     expect(detailCss).toMatch(/\.work-detail-backdrop\s*\{[^}]*z-index:\s*100;/s);
     expect(detailCss).toMatch(/\.move-to-folder-modal-backdrop\s*\{[^}]*z-index:\s*130;/s);
   });
+
+  it('keeps Folder Detail identity, canonical Work Cards, and actions intact while polishing the shell', () => {
+    expect(detailSource).toContain('className="cv-modal-panel csp-folder-detail-modal"');
+    expect(detailSource).toContain('className="csp-folder-detail-header"');
+    expect(detailSource).toContain('className="csp-folder-detail-identity"');
+    expect(detailSource).toContain('className="csp-folder-detail-icon"');
+    expect(detailSource).toContain('FOLDER DETAIL');
+    expect(detailSource).toContain('<AssetCard asset={asset}');
+    expect(detailSource).toContain('onMoveWork(asset)');
+    expect(detailSource).toContain('onRemoveWork(assetId)');
+    expect(detailSource).toContain('className="csp-folder-detail-work-actions"');
+    expect(detailCss).toContain('.csp-folder-detail-header');
+    expect(detailCss).toContain('.csp-folder-detail-body');
+    expect(detailCss).toContain('.csp-folder-detail-work-actions button');
+    expect(creatorSource).toContain('csp-folder-directory ${folderView ===');
+    expect(creatorSource).toContain('className="csp-folder-card"');
+    expect(creatorSource).toContain('onClick={() => openFolderDetail(folder.id)}');
+  });
 });

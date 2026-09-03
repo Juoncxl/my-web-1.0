@@ -15,6 +15,7 @@ import { VaultTabType } from './components/PersonalVaultHeader';
 import { FolderManagerModal } from './components/FolderManagerModal';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { ReportModal } from './components/ReportModal';
+import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AlertCircle, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -135,6 +136,7 @@ function MainApp() {
   // focused asset modal hook above.
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
+  const [trashConfirmationAsset, setTrashConfirmationAsset] = useState<Asset | null>(null);
   const [aiContext, setAiContext] = useState<{ type: string; context: string } | null>(null);
 
   useEffect(() => {
@@ -336,10 +338,15 @@ function MainApp() {
   });
 
   const handleDeleteVaultAsset = useCallback((asset: Asset) => {
-    if (window.confirm(`ย้ายผลงาน "${asset.title}" ไปถังขยะใช่หรือไม่?`)) {
-      void handleSoftDeleteAsset(asset.id);
-    }
-  }, [handleSoftDeleteAsset]);
+    setTrashConfirmationAsset(asset);
+  }, []);
+
+  const handleConfirmVaultTrash = useCallback(() => {
+    if (!trashConfirmationAsset) return;
+    const assetId = trashConfirmationAsset.id;
+    setTrashConfirmationAsset(null);
+    void handleSoftDeleteAsset(assetId);
+  }, [handleSoftDeleteAsset, trashConfirmationAsset]);
 
   // Folder CRUD
   const handleCreateFolder = async (name: string, icon = '📁', color = 'purple'): Promise<boolean> => {
@@ -573,6 +580,15 @@ function MainApp() {
           closeMoveToFolder();
           setIsFolderManagerOpen(true);
         }}
+      />
+
+      <ConfirmationDialog
+        isOpen={Boolean(trashConfirmationAsset)}
+        title="ย้ายผลงานไปถังขยะ?"
+        description={trashConfirmationAsset ? `ย้ายผลงาน “${trashConfirmationAsset.title}” ไปยังถังขยะหรือไม่?` : ''}
+        confirmLabel="ย้ายไปถังขยะ"
+        onCancel={() => setTrashConfirmationAsset(null)}
+        onConfirm={handleConfirmVaultTrash}
       />
 
       <AIAssistantModal

@@ -31,6 +31,7 @@ import { resolveWorkCreator } from '../lib/workPresentation';
 import { resolveWorkPresentationContent } from '../lib/workContent';
 import { isValidWorkIcon } from '../lib/assetVisibility';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
+import { ConfirmationDialog } from './ConfirmationDialog';
 
 type CodeView = 'split' | 'preview' | 'code';
 
@@ -135,6 +136,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [shareToast, setShareToast] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
+  const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   const canRender = Boolean(isOpen && asset && canViewAssetDetail(asset, isOwner));
 
   useEffect(() => {
@@ -155,6 +158,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     setActiveImageIndex(0);
     setShowVersionHistory(false);
     setCodeView('split');
+    setIsTrashConfirmationOpen(false);
+    setIsPermanentDeleteConfirmationOpen(false);
   }, [asset?.id]);
 
   if (!canRender || !asset) return null;
@@ -201,8 +206,21 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   const safeFilename = asset.title.replace(/[^a-zA-Z0-9ก-๙]/g, '_');
   const markdown = `# ${asset.title}\n**หมวดหมู่:** ${category.name} (${category.nameEn})\n**ผู้สร้าง:** ${creator.displayName}\n**วันที่สร้าง:** ${asset.createdAt}\n**ลิขสิทธิ์ / Proof Hash:** #VAULT-${asset.id.slice(0, 8).toUpperCase()}\n\n## คำอธิบายสั้น\n${shortDescription}\n\n---\n\n## เนื้อหาหลัก\n${mainContentCopy}\n${uiCode ? `\n---\n\n## โค้ด UI Snippet\n\`\`\`html\n${uiCode}\n\`\`\`` : ''}\n`;
+  const confirmMoveToTrash = () => {
+    if (!onDelete) return;
+    setIsTrashConfirmationOpen(false);
+    onDelete(asset.id);
+    onClose();
+  };
+  const confirmPermanentDelete = () => {
+    if (!onPermanentDelete) return;
+    setIsPermanentDeleteConfirmationOpen(false);
+    onPermanentDelete(asset.id);
+    onClose();
+  };
 
-  return <div
+  return <>
+    <div
     className="work-detail-backdrop"
     data-work-detail-presentation="canonical"
     data-work-detail-source="recovered-final"
@@ -231,7 +249,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-media-column" data-work-detail-section="media">
             <div className="work-detail-cover">
               {galleryImages.length > 0 && <img src={galleryImages[activeImageIndex] || galleryImages[0]} alt={`ภาพปก ${asset.title}`} referrerPolicy="no-referrer" />}
-              <div className="work-detail-mark"><WorkMark icon={asset.icon} /></div>
+              <div className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}><WorkMark icon={asset.icon} /></div>
             </div>
             {galleryImages.length > 1 && <div className="work-detail-thumbnails" aria-label="รูปภาพประกอบ">
               {galleryImages.map((image, index) => <button
@@ -327,17 +345,34 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <button type="button" className="is-secondary" onClick={() => downloadText(JSON.stringify(asset, null, 2), `${safeFilename}_vault.json`, 'text/json')}><Download aria-hidden="true" />JSON</button>
           {isTrashMode ? <>
             {onRestore && <button type="button" className="is-positive" onClick={() => { onRestore(asset.id); onClose(); }}><RotateCcw aria-hidden="true" />กู้คืน</button>}
-            {onPermanentDelete && <button type="button" className="is-danger" onClick={() => { if (window.confirm('คุณต้องการลบผลงานนี้ถาวรใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้')) { onPermanentDelete(asset.id); onClose(); } }}><Trash2 aria-hidden="true" />ลบถาวร</button>}
+            {onPermanentDelete && <button type="button" className="is-danger" onClick={() => setIsPermanentDeleteConfirmationOpen(true)}><Trash2 aria-hidden="true" />ลบถาวร</button>}
           </> : <>
             {onBookmark && <button type="button" className={`is-secondary ${isBookmarked ? 'is-selected' : ''}`} onClick={() => onBookmark(asset.id)}><Bookmark aria-hidden="true" className={isBookmarked ? 'is-filled' : ''} />{isBookmarked ? 'บันทึกแล้ว' : 'บันทึกไว้'}</button>}
             {!isOwner && onFork && <button type="button" className="is-secondary" onClick={() => onFork(asset)}><GitFork aria-hidden="true" />Fork</button>}
             {isOwner && onEdit && <button type="button" className="is-secondary" onClick={() => onEdit(asset)}><Edit3 aria-hidden="true" />แก้ไขผลงาน</button>}
             {isOwner && onMoveToFolder && <button type="button" className="is-secondary" onClick={() => onMoveToFolder(asset)}><FolderInput aria-hidden="true" />ย้ายไปโฟลเดอร์</button>}
-            {isOwner && onDelete && <button type="button" className="is-danger" onClick={() => { if (window.confirm('ต้องการย้ายผลงานนี้ไปยังถังขยะ (Trash) ใช่หรือไม่?')) { onDelete(asset.id); onClose(); } }}><Trash2 aria-hidden="true" />ย้ายลงถังขยะ</button>}
+            {isOwner && onDelete && <button type="button" className="is-danger" onClick={() => setIsTrashConfirmationOpen(true)}><Trash2 aria-hidden="true" />ย้ายลงถังขยะ</button>}
           </>}
           <button type="button" className="is-primary" onClick={onClose}>ปิด</button>
         </div>
       </footer>
     </section>
-  </div>;
+  </div>
+  <ConfirmationDialog
+    isOpen={isTrashConfirmationOpen}
+    title="ย้ายผลงานไปถังขยะ?"
+    description={`ย้ายผลงาน “${asset.title}” ไปยังถังขยะหรือไม่?`}
+    confirmLabel="ย้ายไปถังขยะ"
+    onCancel={() => setIsTrashConfirmationOpen(false)}
+    onConfirm={confirmMoveToTrash}
+  />
+  <ConfirmationDialog
+    isOpen={isPermanentDeleteConfirmationOpen}
+    title="ลบผลงานถาวร?"
+    description={`ลบผลงาน “${asset.title}” อย่างถาวรหรือไม่? เมื่อลบแล้วจะไม่สามารถกู้คืนผลงานนี้ได้`}
+    confirmLabel="ลบถาวร"
+    onCancel={() => setIsPermanentDeleteConfirmationOpen(false)}
+    onConfirm={confirmPermanentDelete}
+  />
+  </>;
 };

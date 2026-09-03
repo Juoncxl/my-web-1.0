@@ -5,6 +5,7 @@ import { isPublicFeedVisibility, isValidWorkIcon } from '../lib/assetVisibility'
 import { useAuth } from '../context/AuthContext';
 import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
 import { formatShortDate } from '../lib/dateUtils';
+import { ConfirmationDialog } from './ConfirmationDialog';
 import {
   Bookmark as BookmarkIcon,
   Check,
@@ -76,6 +77,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const { currentUser } = useAuth();
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -155,7 +157,14 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     onSelectTag?.(tag);
   };
 
+  const confirmPermanentDelete = () => {
+    if (!onPermanentDelete) return;
+    setIsPermanentDeleteConfirmationOpen(false);
+    onPermanentDelete(asset.id);
+  };
+
   return (
+    <>
     <article
       onClick={() => onClick(asset)}
       onKeyDown={event => {
@@ -259,7 +268,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                   {!isTrashMode && <button type="button" onClick={handleQuickCopy}>{copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}{copied ? 'คัดลอกแล้ว' : 'คัดลอกเนื้อหา'}</button>}
                   {!isTrashMode && isOwner && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}
                   {isTrashMode && onRestore && <button type="button" onClick={handleMenuAction(() => onRestore(asset.id))}><RotateCcw className="w-3.5 h-3.5" />กู้คืนผลงาน</button>}
-                  {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => { if (window.confirm('คุณต้องการลบผลงานนี้ถาวรใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้')) onPermanentDelete(asset.id); })} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
+                  {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => setIsPermanentDeleteConfirmationOpen(true))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
                   {folderName && <span className="cv-card-menu-folder">{folderIcon || '📁'} {folderName}</span>}
                 </div>
               )}
@@ -268,5 +277,14 @@ export const AssetCard: React.FC<AssetCardProps> = ({
         </footer>
       </div>
     </article>
+    <ConfirmationDialog
+      isOpen={isPermanentDeleteConfirmationOpen}
+      title="ลบผลงานถาวร?"
+      description={`ลบผลงาน “${asset.title}” อย่างถาวรหรือไม่? เมื่อลบแล้วจะไม่สามารถกู้คืนผลงานนี้ได้`}
+      confirmLabel="ลบถาวร"
+      onCancel={() => setIsPermanentDeleteConfirmationOpen(false)}
+      onConfirm={confirmPermanentDelete}
+    />
+    </>
   );
 };

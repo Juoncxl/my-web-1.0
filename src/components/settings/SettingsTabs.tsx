@@ -8,36 +8,33 @@ interface SettingsTabsProps {
 }
 
 export const SettingsTabs: React.FC<SettingsTabsProps> = ({ activeTab, onTabChange }) => (
-  <div className="flex border-b border-slate-100 dark:border-slate-800 px-6 bg-slate-50/50 dark:bg-slate-900/50 gap-2 pt-2 overflow-x-auto no-scrollbar">
+  <div className="cv-settings-tabs" role="tablist" aria-label="หมวดการตั้งค่า">
     <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === 'profile'}
       onClick={() => onTabChange('profile')}
-      className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-        activeTab === 'profile'
-          ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-      }`}
+      className={`cv-settings-tab${activeTab === 'profile' ? ' is-active' : ''}`}
     >
       <User className="w-3.5 h-3.5" />
       <span>โปรไฟล์</span>
     </button>
     <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === 'security'}
       onClick={() => onTabChange('security')}
-      className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-        activeTab === 'security'
-          ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-      }`}
+      className={`cv-settings-tab${activeTab === 'security' ? ' is-active' : ''}`}
     >
       <Lock className="w-3.5 h-3.5" />
       <span>รหัสผ่าน</span>
     </button>
     <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === 'backup'}
       onClick={() => onTabChange('backup')}
-      className={`py-2.5 px-3.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
-        activeTab === 'backup'
-          ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-      }`}
+      className={`cv-settings-tab${activeTab === 'backup' ? ' is-active' : ''}`}
     >
       <HardDrive className="w-3.5 h-3.5" />
       <span>สำรองข้อมูล (Backup)</span>
