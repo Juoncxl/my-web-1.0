@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { AUDIENCE_RATING_LABELS } from '../lib/constants';
 
 const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
 const cardSource = readFileSync(new URL('./AssetCard.tsx', import.meta.url), 'utf8');
 const detailSource = readFileSync(new URL('./WorkDetailModal.tsx', import.meta.url), 'utf8');
 const detailCss = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+const constantsSource = readFileSync(new URL('../lib/constants.ts', import.meta.url), 'utf8');
 const legacyEntrySource = readFileSync(new URL('./AssetViewModal.tsx', import.meta.url), 'utf8');
 const confirmationSource = readFileSync(new URL('./ConfirmationDialog.tsx', import.meta.url), 'utf8');
 const actionsSource = readFileSync(new URL('../hooks/useAssetActions.ts', import.meta.url), 'utf8');
@@ -33,24 +35,24 @@ describe('canonical Work Detail routing', () => {
     expect(detailSource).toContain('data-work-detail-section="short-description"');
     expect(detailSource).toContain('data-work-detail-section="main-content"');
     expect(detailSource).toContain('data-work-detail-section="ui-code"');
-    expect(detailSource).toContain('<SandboxedCodePreview code={uiCode}');
+    expect(detailSource).toContain('<CodePresentation code={uiCode}');
   });
 
   it('ports recovered presentation without mounting legacy asset-view sections', () => {
     expect(detailSource).toContain('className="work-detail-grid"');
-    expect(detailSource).toContain('className="work-detail-cover"');
+    expect(detailSource).toContain('`work-detail-cover ${activeImageIndex >= 0');
     expect(detailSource).toContain('className="work-detail-footer"');
     expect(detailSource).not.toContain("from './asset-view/");
   });
 
   it('keeps production actions and privacy enforcement wired', () => {
-    expect(detailSource).toContain('const canRender = Boolean(isOpen && asset && canViewAssetDetail(asset, isOwner))');
+    expect(detailSource).toContain("const canRender = Boolean(isOpen && asset && (interactionMode === 'preview' || canViewAssetDetail(asset, isOwner)))");
     expect(detailSource).toContain("canViewAssetDetail(candidate, isOwner && candidate.userId === asset.userId)");
     expect(detailSource).toContain('onEdit(asset)');
     expect(detailSource).toContain('onDelete(asset.id)');
     expect(detailSource).toContain('onBookmark(asset.id)');
     expect(detailSource).toContain('onReport(asset)');
-    expect(detailSource).toContain('copyToClipboard(mainContentCopy');
+    expect(detailSource).toContain("copyToClipboard(legacyContent, 'content')");
     expect(detailSource).toContain('copyToClipboard(uiCode');
     expect(creatorSource).toContain("onRestore={activeTab === 'trash' ? onRestoreAsset : undefined}");
     expect(creatorSource).toContain("onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined}");
@@ -70,7 +72,61 @@ describe('canonical Work Detail routing', () => {
     expect(detailCss).toMatch(/\.work-detail-summary p\s*\{[^}]*overflow-wrap:\s*anywhere[^}]*word-break:\s*break-word/s);
     expect(detailCss).toMatch(/\.work-detail-block > pre\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*auto/s);
     expect(detailCss).toMatch(/\.work-detail-code-panel > pre\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*auto/s);
-    expect(detailSource).toContain('<SandboxedCodePreview code={uiCode}');
+    expect(detailSource).toContain('<CodePresentation code={uiCode}');
+  });
+
+  it('keeps copy actions on meaningful blocks instead of section labels', () => {
+    const mainSection = detailSource.match(/data-work-detail-section="main-content"[\s\S]*?<\/section>/)?.[0] || '';
+    const collaborationIdentity = detailSource.match(/data-work-detail-section="collaboration-identity"[\s\S]*?<\/section>/)?.[0] || '';
+    const mainHeading = mainSection.slice(
+      mainSection.indexOf('<div className="work-detail-section-heading">'),
+      mainSection.indexOf('<div className="work-detail-blocks">')
+    );
+
+    expect(detailSource).toContain('const NON_DATA_LABELS = new Set');
+    expect(detailSource).toContain('function isMeaningfulCopyText');
+    expect(detailSource).toContain("copyToClipboard(legacyContent, 'content')");
+    expect(mainHeading).not.toContain('<CopyButton');
+    expect(collaborationIdentity).not.toContain('คัดลอกทั้งหมด');
+    expect(detailSource).toContain('isMeaningfulCopyText(item.content, item.title)');
+    expect(detailSource).toContain('isMeaningfulCopyText(participantCopy(participant), participant.creatorName)');
+  });
+
+  it('renders collaboration code with the same safe preview tabs as UI Code', () => {
+    expect(detailSource).toContain('function CodePresentation');
+    expect(detailSource).toContain('work-detail-collaboration-code-block');
+    expect(detailSource).toContain("item.type === 'code' ? <CodePresentation code={item.content}");
+    expect(detailSource).toContain('<SandboxedCodePreview code={code} minHeight="280px"');
+    expect(detailSource).toContain("import { SandboxedCodePreview } from './SandboxedCodePreview'");
+  });
+
+  it('keeps profile Portfolio compact while preserving the full card elsewhere', () => {
+    expect(cardSource).toContain("presentationMode?: 'full' | 'profile-compact'");
+    expect(cardSource).toContain("presentationMode === 'profile-compact' ? 'is-profile-compact' : ''");
+    expect(creatorSource).toContain('presentationMode="profile-compact"');
+    expect(creatorSource).toContain('className="csp-asset-grid csp-portfolio-showcase-grid"');
+    expect(detailCss).toMatch(/\.csp-portfolio-showcase-grid \.cv-asset-card\.is-profile-compact \.cv-card-title-row h3[\s\S]*?-webkit-line-clamp:\s*2/s);
+    expect(detailCss).toMatch(/\.csp-portfolio-showcase-grid \.cv-asset-card\.is-profile-compact \.cv-card-snippet[\s\S]*?-webkit-line-clamp:\s*2/s);
+  });
+
+  it('stacks code preview and raw source at full modal width', () => {
+    expect(detailCss).toMatch(/\.work-detail-code-layout\.is-split\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    expect(detailCss).toMatch(/\.work-detail-code-panel,\s*\.work-detail-code-panel > iframe,\s*\.work-detail-code-panel > pre\s*\{[\s\S]*?width:\s*100%[\s\S]*?min-width:\s*0/s);
+    expect(detailCss).toMatch(/\.work-detail-code-panel > iframe\s*\{[\s\S]*?min-height:\s*17\.5rem/s);
+  });
+
+  it('keeps Prompt body readable and translates audience metadata at render time', () => {
+    expect(AUDIENCE_RATING_LABELS).toEqual({ general: 'ทั่วไป', '13_plus': '13+', '16_plus': '16+', '18_plus': '18+' });
+    expect(constantsSource).toContain('export const AUDIENCE_RATING_LABELS');
+    expect(constantsSource).toContain("general: 'ทั่วไป'");
+    expect(constantsSource).toContain("'13_plus': '13+'");
+    expect(constantsSource).toContain("'16_plus': '16+'");
+    expect(constantsSource).toContain("'18_plus': '18+'");
+    expect(detailSource).toContain('const audienceRating = presentationMetadata?.audienceRating');
+    expect(detailSource).toContain('AUDIENCE_RATING_LABELS[audienceRating] || audienceRating');
+    expect(detailSource).toContain("...(audienceRatingLabel ? [{ label: 'ระดับผู้ชม', value: audienceRatingLabel }] : [])");
+    expect(detailCss).toMatch(/\.work-detail-block\.is-prompt\s*>\s*pre\s*\{[\s\S]*?font-size:\s*1rem[\s\S]*?line-height:\s*1\.65/s);
+    expect(detailCss).toMatch(/\.work-detail-block\s*>\s*header span\s*\{[\s\S]*?font-size:\s*\.66rem/s);
   });
 
   it('keeps compact and code-heavy Work Details in one restrained visual system', () => {
@@ -89,7 +145,7 @@ describe('canonical Work Detail routing', () => {
     expect(detailSource).toContain('data-work-detail-section="ui-code"');
     expect(detailSource).toContain('{uiCode && <section className="work-detail-section work-detail-code"');
     expect(detailSource).toContain('downloadText(markdown, `${safeFilename}.md`');
-    expect(detailSource).toContain('downloadText(JSON.stringify(asset, null, 2)');
+    expect(detailSource).toContain('downloadText(JSON.stringify(createPublicAssetExport(asset), null, 2)');
     expect(detailSource).toContain('onMoveToFolder(asset)');
     expect(detailSource).toContain('onClick={onClose}');
   });

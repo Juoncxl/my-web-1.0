@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS public.assets (
     title TEXT NOT NULL,
     icon JSONB NOT NULL DEFAULT '{"type":"emoji","value":"✨"}'::jsonb,
     category TEXT NOT NULL DEFAULT 'character',
+    short_description TEXT NOT NULL DEFAULT '',
+    content_type_labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+    content_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+    presentation_metadata JSONB,
+    content_blocks JSONB NOT NULL DEFAULT '[]'::jsonb,
+    public_collaboration JSONB,
+    collaboration_asset_id TEXT REFERENCES public.assets(id) ON DELETE SET NULL,
     content TEXT DEFAULT '',
     ui_code_snippet TEXT DEFAULT '',
     preview_image TEXT,
@@ -58,6 +65,16 @@ CREATE TABLE IF NOT EXISTS public.assets (
     CONSTRAINT assets_visibility_check CHECK (visibility IN ('public', 'private', 'draft')),
     CONSTRAINT assets_status_check CHECK (status IN ('idea', 'draft', 'in_progress', 'finished', 'archived')),
     CONSTRAINT assets_counters_nonnegative_check CHECK (likes_count >= 0 AND legacy_likes_count >= 0 AND fork_count >= 0)
+);
+
+-- Owner-only Collaboration editor state. Public clients consume only
+-- assets.public_collaboration, which is a separately whitelisted snapshot.
+CREATE TABLE IF NOT EXISTS public.asset_collaboration_drafts (
+    asset_id TEXT PRIMARY KEY REFERENCES public.assets(id) ON DELETE CASCADE,
+    owner_id TEXT NOT NULL,
+    draft JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
 -- 2b. Profile social links. Public reads are restricted to visible links by RLS.

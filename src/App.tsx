@@ -33,6 +33,7 @@ import { CreatorSpacePage } from './pages/CreatorSpacePage';
 import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
 import { getCanonicalProfilePath } from './lib/profileIdentity';
 import { CreatorWorkWorkspace, type CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
+import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 
 function MainApp() {
   const { 
@@ -194,23 +195,14 @@ function MainApp() {
 
   const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนบันทึกผลงาน' };
+    const serialized = serializeCreatorWorkDraft({
+      ...draft,
+      imagePromptToolModel: draft.contentCanvas.imagePrompt.toolModel
+    });
 
     if (editingAssetId) {
       const result = await updateAsset(editingAssetId, {
-        title: draft.title,
-        icon: draft.icon,
-        category: draft.category,
-        shortDescription: draft.description,
-        contentBlocks: draft.contentBlocks,
-        content: draft.content,
-        uiCodeSnippet: draft.uiCodeSnippet,
-        previewImage: draft.previewImages[0] || '',
-        previewImages: draft.previewImages,
-        isPublic: draft.visibility === 'public',
-        visibility: draft.visibility,
-        status: draft.status,
-        folderId: draft.folderId,
-        tags: draft.tags
+        ...serialized
       });
       if (result.data) {
         return { success: true };
@@ -219,20 +211,7 @@ function MainApp() {
     }
 
     const result = await createAsset({
-      title: draft.title,
-      icon: draft.icon,
-      category: draft.category,
-      shortDescription: draft.description,
-      contentBlocks: draft.contentBlocks,
-      content: draft.content,
-      uiCodeSnippet: draft.uiCodeSnippet,
-      previewImage: draft.previewImages[0],
-      previewImages: draft.previewImages,
-      folderId: draft.folderId,
-      isPublic: draft.visibility === 'public',
-      visibility: draft.visibility,
-      status: draft.status,
-      tags: draft.tags,
+      ...serialized,
       deletedAt: null,
       likesCount: 0,
       forkCount: 0,
@@ -433,6 +412,7 @@ function MainApp() {
     activeView,
     activeVaultTab,
     filteredAssets,
+    allAssets: assets,
     folders: foldersWithCounts,
     isLoadingAssets,
     searchQuery,
@@ -483,7 +463,9 @@ function MainApp() {
           isLoadingAssets={isLoadingAssets}
           isLoadingFolders={isLoadingFolders}
           bookmarkedAssetIds={bookmarkedAssetIds}
+          likedAssetIds={likedAssetIds}
           recentlyViewedIds={recentlyViewedIds}
+          onLike={handleLikeAsset}
           onBookmark={handleToggleBookmark}
           onDeleteAsset={handleDeleteVaultAsset}
           onRestoreAsset={handleRestoreAsset}
@@ -539,6 +521,7 @@ function MainApp() {
         onDelete={handleSoftDeleteAsset}
         onPermanentDelete={handlePermanentDeleteAsset}
         onRestore={handleRestoreAsset}
+        onLike={handleLikeAsset}
         onBookmark={handleToggleBookmark}
         onFork={handleForkAsset}
         onReport={handleOpenReport}
@@ -552,6 +535,7 @@ function MainApp() {
         isOwner={viewingAsset?.userId === currentUser?.id}
         creatorProfile={viewingAsset && viewingAsset.userId === currentUser?.id ? currentUser : null}
         isBookmarked={viewingAsset ? bookmarkedAssetIds.includes(viewingAsset.id) : false}
+        isLiked={viewingAsset ? likedAssetIds.includes(viewingAsset.id) : false}
         isTrashMode={activeVaultTab === 'trash'}
       />
 
@@ -616,6 +600,7 @@ function MainApp() {
         initialData={editingAsset}
         creatorProfile={currentUser}
         folders={folders}
+        ownedWorks={assets}
         onSave={handleSaveCreatorWork}
       />
     </div>

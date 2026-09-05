@@ -188,9 +188,9 @@ export function normalizeFreePlacement(input: Partial<FreeLayoutPlacement>): Fre
 }
 
 /** Responsive showcase columns derived from the Portfolio's 12-column width. */
-export function getPortfolioGridColumns(width: number): 1 | 2 | 3 {
+export function getPortfolioGridColumns(width: number): 1 | 2 | 3 | 4 {
   const normalizedWidth = Math.min(FREE_LAYOUT_COLUMNS, Math.max(1, Math.round(asFiniteNumber(width, 1))));
-  if (normalizedWidth >= 9) return 3;
+  if (normalizedWidth >= 9) return 4;
   if (normalizedWidth >= 6) return 2;
   return 1;
 }

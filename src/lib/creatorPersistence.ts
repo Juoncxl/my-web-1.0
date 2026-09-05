@@ -1,6 +1,7 @@
 import type { Asset, Folder, User } from '../types';
 import type { FreeLayoutPlacement, FreeWidgetInstance } from './creatorLayout';
 import { normalizeAssetVisibility } from './assetVisibility';
+import { stripQaWorkPayload } from './qaWorkPayloadStore';
 
 const STORAGE_KEY = 'cxl_creator_space_qa_sandbox_v1';
 const PROFILE_STORAGE_KEY = 'cxl_creator_space_qa_profiles_v1';
@@ -242,10 +243,11 @@ export function writeMockAsset(asset: Asset): boolean {
     // exposes the canonical relation-backed aggregate instead.
     likesCount: baseline
   };
+  const storageAsset = normalizedAsset.qaStorageKey ? stripQaWorkPayload(normalizedAsset, normalizedAsset.qaStorageKey) : normalizedAsset;
   const index = state.assets.findIndex(item => item.id === normalizedAsset.id);
   const assets = [...state.assets];
-  if (index >= 0) assets[index] = normalizedAsset;
-  else assets.unshift(normalizedAsset);
+  if (index >= 0) assets[index] = storageAsset;
+  else assets.unshift(storageAsset);
   return writeState({
     ...state,
     assets,

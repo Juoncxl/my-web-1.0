@@ -13,14 +13,16 @@ export const AssetViewContentSection: React.FC<AssetViewContentSectionProps> = (
   content,
   copiedType,
   onCopy
-}) => (
+}) => {
+  const hasCopyableContent = Boolean(content.trim());
+  return (
   <div className="space-y-2">
     <div className="flex items-center justify-between">
       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
         <FileText className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
         <span>เนื้อหา / ข้อมูลตัวละคร / Prompt Directives</span>
       </h3>
-      <button
+      {hasCopyableContent && <button
         onClick={() => onCopy(content, 'content')}
         className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-xl border transition-all ${
           copiedType === 'content'
@@ -36,13 +38,14 @@ export const AssetViewContentSection: React.FC<AssetViewContentSectionProps> = (
         ) : (
           <>
             <Copy className="w-3.5 h-3.5" />
-            <span>คัดลอกเนื้อหา</span>
+            <span>คัดลอก</span>
           </>
         )}
-      </button>
+      </button>}
     </div>
     <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 font-mono text-xs leading-relaxed text-slate-800 dark:text-slate-100 whitespace-pre-wrap select-text selection:bg-purple-200 dark:selection:bg-purple-900">
       {content}
     </div>
   </div>
-);
+  );
+};

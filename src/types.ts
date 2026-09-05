@@ -10,6 +10,20 @@ export type AssetVisibility = 'public' | 'private' | 'draft';
 
 export type AssetStatus = 'idea' | 'draft' | 'in_progress' | 'finished' | 'archived';
 
+export type AssetContentType = 'character' | 'lore' | 'image_prompt' | 'ui_code' | 'bot_prompt';
+export type AssetAudienceRating = 'general' | '13_plus' | '16_plus' | '18_plus';
+export type AssetCreatorWorkStatus = 'not_started' | 'in_progress' | 'waiting_data' | 'in_review' | 'needs_fix' | 'blocked' | 'paused' | 'finished';
+
+export interface AssetPresentationMetadata {
+  contentTypes: AssetContentType[];
+  appPlatforms: string[];
+  audienceRating: AssetAudienceRating;
+  contentWarnings: string[];
+  genres: string[];
+  imagePromptToolModel: string;
+  workStatus: AssetCreatorWorkStatus;
+}
+
 export interface CategoryMeta {
   id: AssetCategory;
   name: string;
@@ -60,6 +74,87 @@ export interface WorkContentBlock {
   body: string;
 }
 
+export interface AssetCollaborationSharedInformation {
+  id: string;
+  title: string;
+  type: 'text' | 'code';
+  content: string;
+  appScope: 'unspecified' | 'all_apps' | 'specific_apps';
+  platforms: string[];
+}
+
+export interface AssetCollaborationDeadline {
+  id: string;
+  kind: 'data' | 'image' | 'publish' | 'custom';
+  label: string;
+  date: string;
+}
+
+export interface AssetCollaborationParticipant {
+  id: string;
+  isOwner: boolean;
+  creatorName: string;
+  houseTag: string;
+  platforms: string[];
+  contact: string;
+  externalWorkName: string;
+  dataStatus: 'not_submitted' | 'reviewing' | 'needs_fix' | 'approved';
+  imageStatus: 'not_submitted' | 'reviewing' | 'needs_fix' | 'approved';
+  notes: string;
+  referenceImages: Array<{
+    id: string;
+    src: string;
+    kind: 'image' | 'gif';
+    mimeType?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+  }>;
+  linkedWorkIds: string[];
+  deadlineOverrides: Record<string, string>;
+  useDeadlineOverrides: boolean;
+}
+
+export interface AssetCollaborationVisibilityPolicy {
+  showParticipantStatuses: boolean;
+  showParticipantNotes: boolean;
+  showParticipantDeadlineOverrides: boolean;
+}
+
+export interface AssetCollaboration {
+  name: string;
+  sharedTag: string;
+  platforms: string[];
+  sharedInformation: AssetCollaborationSharedInformation[];
+  deadlines: AssetCollaborationDeadline[];
+  participants: AssetCollaborationParticipant[];
+  visibilityPolicy: AssetCollaborationVisibilityPolicy;
+}
+
+export interface PublicAssetCollaborationParticipant {
+  id: string;
+  isOwner: boolean;
+  creatorName: string;
+  houseTag: string;
+  platforms: string[];
+  externalWorkName: string;
+  referenceImages: AssetCollaborationParticipant['referenceImages'];
+  linkedWorkIds: string[];
+  dataStatus?: AssetCollaborationParticipant['dataStatus'];
+  imageStatus?: AssetCollaborationParticipant['imageStatus'];
+  notes?: string;
+  deadlineOverrides?: Record<string, string>;
+}
+
+export interface PublicAssetCollaboration {
+  name: string;
+  sharedTag: string;
+  platforms: string[];
+  sharedInformation: AssetCollaborationSharedInformation[];
+  deadlines: AssetCollaborationDeadline[];
+  participants: PublicAssetCollaborationParticipant[];
+  visibilityPolicy: AssetCollaborationVisibilityPolicy;
+}
+
 export interface Asset {
   id: string;
   userId: string;
@@ -69,6 +164,20 @@ export interface Asset {
   icon: AssetIcon;
   category: AssetCategory;
   shortDescription?: string;
+  /** QA-safe canonical labels used by both Review and real Work cards. */
+  contentTypeLabels?: string[];
+  /** Selected Composer content types retained by the local QA persistence model. */
+  contentTypes?: AssetContentType[];
+  /** Canonical metadata shared by Composer Review and persisted Work surfaces. */
+  presentationMetadata?: AssetPresentationMetadata;
+  /** Owner-only Collaboration draft. Public renderers must never read this field. */
+  collaboration?: AssetCollaboration | null;
+  /** QA Sandbox key for the large Work payload held outside localStorage. */
+  qaStorageKey?: string;
+  /** Whitelisted Collaboration data safe for cards, details, exports, and public APIs. */
+  publicCollaboration?: PublicAssetCollaboration | null;
+  /** A standard Work may belong to one Collaboration hub. */
+  collaborationAssetId?: string | null;
   contentBlocks?: WorkContentBlock[];
   content: string;
   uiCodeSnippet?: string;

@@ -11,6 +11,7 @@ interface AssetCollectionViewProps {
   activeView: 'feed' | 'vault';
   activeVaultTab: VaultTabType;
   filteredAssets: Asset[];
+  allAssets: Asset[];
   folders: Folder[];
   isLoadingAssets: boolean;
   searchQuery: string;
@@ -59,6 +60,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
   activeView,
   activeVaultTab,
   filteredAssets,
+  allAssets,
   folders,
   isLoadingAssets,
   searchQuery,
@@ -328,6 +330,8 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                   <AssetCard
                     key={asset.id}
                     asset={asset}
+                    allAssets={allAssets}
+                    viewerMode={asset.userId === currentUserId ? 'owner' : 'public'}
                     folderName={folder?.name}
                     folderIcon={folder?.icon}
                     onClick={onOpenAsset}

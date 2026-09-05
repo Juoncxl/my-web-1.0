@@ -1,4 +1,15 @@
-import { AssetCategory, CategoryMeta } from '../types';
+import type { AssetAudienceRating, AssetCategory, CategoryMeta } from '../types';
+
+/**
+ * Human-readable labels for audience ratings.  The persisted values remain
+ * stable enum keys; this map is only used at presentation boundaries.
+ */
+export const AUDIENCE_RATING_LABELS: Record<AssetAudienceRating, string> = {
+  general: 'ทั่วไป',
+  '13_plus': '13+',
+  '16_plus': '16+',
+  '18_plus': '18+'
+};
 
 export const CATEGORIES: Record<AssetCategory, CategoryMeta> = {
   character: {

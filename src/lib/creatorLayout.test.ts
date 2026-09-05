@@ -91,7 +91,7 @@ describe('Free Layout coordinate model', () => {
   });
 
   it('derives responsive Portfolio wrapping and height from width and showcase count', () => {
-    expect(getPortfolioGridColumns(12)).toBe(3);
+    expect(getPortfolioGridColumns(12)).toBe(4);
     expect(getPortfolioGridColumns(8)).toBe(2);
     expect(getPortfolioGridColumns(4)).toBe(1);
     expect(estimatePortfolioHeightRows(9, 6)).toBeLessThan(estimatePortfolioHeightRows(4, 6));

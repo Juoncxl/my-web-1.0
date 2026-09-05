@@ -7,16 +7,11 @@ const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', impo
 const folderSource = readFileSync(new URL('./FolderDetailModal.tsx', import.meta.url), 'utf8');
 
 describe('Work Card three-dot menu dismissal', () => {
-  it('dismisses the menu before every menu action, including Copy', () => {
+  it('keeps the menu focused on navigation and management rather than generic copy', () => {
     expect(assetCardSource).toContain('const handleMenuAction =');
     expect(assetCardSource).toContain('window.dispatchEvent(new CustomEvent(\'creator-vault:card-menu-open\'');
-    expect(assetCardSource).toContain('onClick={handleQuickCopy}');
-
-    const copyHandlerStart = assetCardSource.indexOf('const handleQuickCopy');
-    const copyHandlerEnd = assetCardSource.indexOf('const handleLike', copyHandlerStart);
-    expect(copyHandlerStart).toBeGreaterThanOrEqual(0);
-    expect(copyHandlerEnd).toBeGreaterThan(copyHandlerStart);
-    expect(assetCardSource.slice(copyHandlerStart, copyHandlerEnd)).toContain('setMenuOpen(false);');
+    expect(assetCardSource).not.toContain('handleQuickCopy');
+    expect(assetCardSource).not.toContain('คัดลอกเนื้อหา');
   });
 
   it('supports outside-pointer, Escape, and cross-card dismissal', () => {

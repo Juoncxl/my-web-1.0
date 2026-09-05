@@ -84,7 +84,7 @@ export const FolderDetailModal: React.FC<FolderDetailModalProps> = ({
       <div className="csp-folder-detail-body">
         {folderAssets.length ? <div className="csp-folder-detail-grid">
           {folderAssets.map(asset => <div className="csp-folder-detail-work" key={asset.id} data-folder-work-id={asset.id}>
-            <AssetCard asset={asset} onClick={onOpenWork} onEdit={onEditWork} isOwner creatorProfile={creatorProfile} />
+            <AssetCard asset={asset} allAssets={assets} onClick={onOpenWork} onEdit={onEditWork} isOwner viewerMode="owner" creatorProfile={creatorProfile} />
             <div className="csp-folder-detail-work-actions">
               {onEditWork && <button type="button" onClick={() => onEditWork(asset)}><Pencil className="h-3.5 w-3.5" />แก้ไข</button>}
               {onMoveWork && <button type="button" onClick={() => onMoveWork(asset)}><FolderInput className="h-3.5 w-3.5" />ย้ายไปโฟลเดอร์</button>}

@@ -153,11 +153,13 @@ export const SettingsModal: React.FC = () => {
 
   if (!isSettingsOpen) return null;
   return <div className="cv-settings-backdrop">
-    <div className="cv-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
-      <div className="cv-settings-heading"><div className="cv-settings-heading-copy"><div className="cv-settings-heading-icon"><Settings2 className="w-5 h-5" /></div><div><h2 id="settings-modal-title">ตั้งค่าบัญชี & การสำรองข้อมูล (Settings)</h2><p>จัดการโปรไฟล์, ความปลอดภัย และสำรองข้อมูลคลังผลงาน</p></div></div><button type="button" onClick={() => setIsSettingsOpen(false)} className="cv-settings-close" aria-label="ปิดหน้าตั้งค่า"><X className="w-4 h-4" /></button></div>
-      <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
+    <div className="cv-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" data-settings-tab={activeTab}>
+      <header className="cv-settings-chrome">
+        <div className="cv-settings-heading"><div className="cv-settings-heading-copy"><div className="cv-settings-heading-icon"><Settings2 className="w-5 h-5" /></div><div><h2 id="settings-modal-title">ตั้งค่าบัญชี & การสำรองข้อมูล</h2><p>จัดการโปรไฟล์ ความปลอดภัย และการสำรองข้อมูล</p></div></div><button type="button" onClick={() => setIsSettingsOpen(false)} className="cv-settings-close" aria-label="ปิดหน้าตั้งค่า"><X className="w-4 h-4" /></button></div>
+        <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
+      </header>
       <div className="cv-settings-content">
-        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarChange={value => { revokeTemporaryAvatarPreview(); setAvatarFile(null); setAvatarImageKey(null); setAvatarUrl(value); }} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
+        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
         {activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
       </div>

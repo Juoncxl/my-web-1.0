@@ -16,7 +16,7 @@ export const SettingsTabs: React.FC<SettingsTabsProps> = ({ activeTab, onTabChan
       onClick={() => onTabChange('profile')}
       className={`cv-settings-tab${activeTab === 'profile' ? ' is-active' : ''}`}
     >
-      <User className="w-3.5 h-3.5" />
+      <User className="w-4 h-4" />
       <span>โปรไฟล์</span>
     </button>
     <button
@@ -26,7 +26,7 @@ export const SettingsTabs: React.FC<SettingsTabsProps> = ({ activeTab, onTabChan
       onClick={() => onTabChange('security')}
       className={`cv-settings-tab${activeTab === 'security' ? ' is-active' : ''}`}
     >
-      <Lock className="w-3.5 h-3.5" />
+      <Lock className="w-4 h-4" />
       <span>รหัสผ่าน</span>
     </button>
     <button
@@ -36,8 +36,8 @@ export const SettingsTabs: React.FC<SettingsTabsProps> = ({ activeTab, onTabChan
       onClick={() => onTabChange('backup')}
       className={`cv-settings-tab${activeTab === 'backup' ? ' is-active' : ''}`}
     >
-      <HardDrive className="w-3.5 h-3.5" />
-      <span>สำรองข้อมูล (Backup)</span>
+      <HardDrive className="w-4 h-4" />
+      <span>สำรองข้อมูล <small>(Backup)</small></span>
     </button>
   </div>
 );

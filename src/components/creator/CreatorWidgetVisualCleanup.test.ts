@@ -71,7 +71,9 @@ describe('Creator Widget UI visual contracts', () => {
     expect(creatorSource).toContain('renderPortfolio');
     expect(creatorSource).toContain('<AssetCard asset={asset}');
     expect(creatorSource).toContain('className="csp-free-work-content"');
-    const itemNineStyles = styles.slice(styles.indexOf('/* Phase 1.5N UI Item 9:'));
+    const itemNineStart = styles.indexOf('/* Phase 1.5N UI Item 9:');
+    const itemTwelveStart = styles.indexOf('/* Phase 1.5N Item 12E.2');
+    const itemNineStyles = styles.slice(itemNineStart, itemTwelveStart > itemNineStart ? itemTwelveStart : undefined);
     expect(itemNineStyles).toContain('.csp-free-work-content');
     expect(itemNineStyles).not.toContain('.cv-asset-card');
   });

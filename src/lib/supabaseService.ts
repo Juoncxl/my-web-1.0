@@ -19,6 +19,13 @@ import {
   saveQaWorkIcon
 } from './qaWorkIconStore';
 import {
+  deleteQaWorkPayload,
+  getQaWorkPayload,
+  hydrateQaWorkPayloads,
+  saveQaWorkPayload,
+  stripQaWorkPayload
+} from './qaWorkPayloadStore';
+import {
   readMockAssets,
   readMockBookmarks,
   readMockFolders,
@@ -160,6 +167,12 @@ function mapDbToAsset(row: any): Asset {
       : row.icon || { type: 'emoji', value: '✨' },
     category: row.category,
     shortDescription: row.short_description ?? row.shortDescription,
+    contentTypeLabels: parseStoredJson(row.content_type_labels ?? row.contentTypeLabels, []),
+    contentTypes: parseStoredJson(row.content_types ?? row.contentTypes, []),
+    presentationMetadata: parseStoredJson(row.presentation_metadata ?? row.presentationMetadata, undefined),
+    publicCollaboration: parseStoredJson(row.public_collaboration ?? row.publicCollaboration, null),
+    collaborationAssetId: row.collaboration_asset_id ?? row.collaborationAssetId ?? null,
+    collaboration: parseStoredJson(row.private_collaboration ?? row.collaboration, null),
     contentBlocks: parseStoredJson(row.content_blocks ?? row.contentBlocks, []),
     content: row.content || '',
     uiCodeSnippet: row.ui_code_snippet || row.uiCodeSnippet || '',
@@ -192,6 +205,13 @@ function mapAssetToDb(asset: Partial<Asset>) {
   if (asset.title !== undefined) dbPayload.title = asset.title;
   if (asset.icon !== undefined) dbPayload.icon = asset.icon;
   if (asset.category !== undefined) dbPayload.category = asset.category;
+  if (asset.shortDescription !== undefined) dbPayload.short_description = asset.shortDescription || '';
+  if (asset.contentTypeLabels !== undefined) dbPayload.content_type_labels = asset.contentTypeLabels || [];
+  if (asset.contentTypes !== undefined) dbPayload.content_types = asset.contentTypes || [];
+  if (asset.presentationMetadata !== undefined) dbPayload.presentation_metadata = asset.presentationMetadata || null;
+  if (asset.publicCollaboration !== undefined) dbPayload.public_collaboration = asset.publicCollaboration || null;
+  if (asset.collaborationAssetId !== undefined) dbPayload.collaboration_asset_id = asset.collaborationAssetId || null;
+  if (asset.contentBlocks !== undefined) dbPayload.content_blocks = asset.contentBlocks || [];
   if (asset.content !== undefined) dbPayload.content = asset.content;
   if (asset.uiCodeSnippet !== undefined) dbPayload.ui_code_snippet = asset.uiCodeSnippet || '';
   if (asset.previewImage !== undefined) dbPayload.preview_image = asset.previewImage || '';
@@ -317,9 +337,53 @@ async function prepareQaWorkIconForWrite(asset: Asset): Promise<{ asset: Asset; 
   return { asset };
 }
 
+/** Keep HTML, preview data and Collaboration reference media out of QA JSON storage. */
+async function prepareQaWorkAssetForWrite(asset: Asset): Promise<{ asset: Asset; storageAsset: Asset; createdIconKey?: string; createdPayloadKey: string }> {
+  const iconPrepared = await prepareQaWorkIconForWrite(asset);
+  try {
+    const payload = await saveQaWorkPayload({ assetId: iconPrepared.asset.id, asset: iconPrepared.asset });
+    return {
+      asset: iconPrepared.asset,
+      storageAsset: stripQaWorkPayload(iconPrepared.asset, payload.key),
+      createdIconKey: iconPrepared.createdStorageKey,
+      createdPayloadKey: payload.key
+    };
+  } catch (error) {
+    await removeQaWorkIconQuietly(iconPrepared.createdStorageKey);
+    throw error;
+  }
+}
+
+/** One-time compaction for pre-overflow QA records created by older builds. */
+async function compactLegacyQaWorkPayloads(): Promise<void> {
+  const legacyAssets = readMockAssets().filter(asset => {
+    if (asset.qaStorageKey) return false;
+    try { return JSON.stringify(getQaWorkPayload(asset)).length > 50000; } catch { return false; }
+  });
+  for (const legacyAsset of legacyAssets) {
+    try {
+      const prepared = await prepareQaWorkAssetForWrite(legacyAsset);
+      if (writeMockAsset(prepared.storageAsset)) {
+        // The old record had no external key, so there is no payload to clean up.
+      } else {
+        await removeQaWorkIconQuietly(prepared.createdIconKey);
+        await removeQaWorkPayloadQuietly(prepared.createdPayloadKey);
+      }
+    } catch {
+      // Keep the original record intact; the current mutation will return its
+      // normal persistence error if the browser has no remaining storage.
+    }
+  }
+}
+
 async function removeQaWorkIconQuietly(storageKey?: string): Promise<void> {
   if (!storageKey) return;
   try { await deleteQaWorkIcon(storageKey); } catch { /* orphan cleanup must not undo a saved Work mutation */ }
+}
+
+async function removeQaWorkPayloadQuietly(storageKey?: string): Promise<void> {
+  if (!storageKey) return;
+  try { await deleteQaWorkPayload(storageKey); } catch { /* orphan cleanup must not undo a saved Work mutation */ }
 }
 
 async function getSessionUserId(): Promise<string | null> {
@@ -344,10 +408,10 @@ async function fetchAssetsFromMock(options?: {
 }): Promise<{ data: Asset[]; error: string | null }> {
   // QA Sandbox is intentionally local-only. Cloud migration is an explicit
   // Settings action; a normal read must never wait on or merge remote tables.
-  let list = await hydrateQaWorkIcons(readMockAssets().map(asset => ({
+  let list = await hydrateQaWorkPayloads(await hydrateQaWorkIcons(readMockAssets().map(asset => ({
     ...asset,
     ...normalizeAssetVisibility({ visibility: asset.visibility, isPublic: asset.isPublic })
-  })));
+  }))));
 
   if (options?.userId) list = list.filter(asset => asset.userId === options.userId);
   else if (options?.currentUserId) list = list.filter(asset => asset.userId === options.currentUserId || (asset.visibility === 'public' && asset.isPublic && !asset.deletedAt));
@@ -361,6 +425,15 @@ async function fetchAssetsFromMock(options?: {
   if (options?.search?.trim()) {
     const search = options.search.toLowerCase().trim();
     list = list.filter(asset => asset.title.toLowerCase().includes(search) || asset.shortDescription?.toLowerCase().includes(search) || asset.content.toLowerCase().includes(search) || asset.contentBlocks?.some(block => block.title.toLowerCase().includes(search) || block.body.toLowerCase().includes(search)) || asset.tags?.some(tag => tag.toLowerCase().includes(search)));
+  }
+  // The payload store contains owner-only Collaboration drafts for edit flows.
+  // Never hand that field to a public profile/feed consumer.
+  if (options?.currentUserId !== undefined) {
+    list = list.map(asset => asset.userId === options.currentUserId
+      ? asset
+      : { ...asset, collaboration: null, qaStorageKey: undefined });
+  } else {
+    list = list.map(asset => ({ ...asset, collaboration: null, qaStorageKey: undefined }));
   }
   return { data: list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), error: null };
 }
@@ -469,6 +542,22 @@ export const supabaseService = {
       }
 
       let list = (data || []).map(mapDbToAsset);
+      const ownedCollaborationIds = list
+        .filter(asset => asset.userId === sessionUserId && asset.category === 'collab')
+        .map(asset => asset.id);
+      if (sessionUserId && ownedCollaborationIds.length > 0) {
+        const { data: privateDraftRows, error: privateDraftError } = await supabase
+          .from('asset_collaboration_drafts')
+          .select('asset_id,draft')
+          .eq('owner_id', sessionUserId)
+          .in('asset_id', ownedCollaborationIds);
+        if (!privateDraftError && privateDraftRows) {
+          const privateByAssetId = new Map(privateDraftRows.map(row => [row.asset_id, row.draft]));
+          list = list.map(asset => privateByAssetId.has(asset.id)
+            ? { ...asset, collaboration: parseStoredJson(privateByAssetId.get(asset.id), null) }
+            : asset);
+        }
+      }
       if (options?.search?.trim()) {
         const search = options.search.toLowerCase().trim();
         list = list.filter(asset =>
@@ -489,15 +578,17 @@ export const supabaseService = {
     assetData: Omit<Asset, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<{ data: Asset | null; error: string | null }> {
     if (isMockPersistence) {
+      await compactLegacyQaWorkPayloads();
       const asset = buildMockAsset(assetData);
-      let prepared: { asset: Asset; createdStorageKey?: string };
+      let prepared: { asset: Asset; storageAsset: Asset; createdIconKey?: string; createdPayloadKey: string };
       try {
-        prepared = await prepareQaWorkIconForWrite(asset);
+        prepared = await prepareQaWorkAssetForWrite(asset);
       } catch (error) {
-        return { data: null, error: toServiceError(error, 'บันทึก GIF หรือรูปไอคอนใน QA Sandbox ไม่สำเร็จ') };
+        return { data: null, error: toServiceError(error, 'บันทึกข้อมูลผลงานใน QA Sandbox ไม่สำเร็จ') };
       }
-      if (!writeMockAsset(prepared.asset)) {
-        await removeQaWorkIconQuietly(prepared.createdStorageKey);
+      if (!writeMockAsset(prepared.storageAsset)) {
+        await removeQaWorkIconQuietly(prepared.createdIconKey);
+        await removeQaWorkPayloadQuietly(prepared.createdPayloadKey);
         return { data: null, error: 'บันทึกผลงานใน QA Sandbox ไม่สำเร็จ กรุณาลองใหม่' };
       }
       return { data: prepared.asset, error: null };
@@ -551,6 +642,19 @@ export const supabaseService = {
           return { data: null, error: 'โฟลเดอร์ปลายทางไม่อยู่ในบัญชีของคุณ' };
         }
       }
+      if (newAsset.collaborationAssetId) {
+        const { data: collaborationAsset, error: collaborationError } = await supabase
+          .from('assets')
+          .select('id')
+          .eq('id', newAsset.collaborationAssetId)
+          .eq('user_id', auth.userId)
+          .eq('category', 'collab')
+          .is('deleted_at', null)
+          .maybeSingle();
+        if (collaborationError || !collaborationAsset) {
+          return { data: null, error: 'คอลแลปที่เลือกไม่อยู่ในบัญชีของคุณหรือไม่พร้อมใช้งาน' };
+        }
+      }
 
       const dbPayload = mapAssetToDb(newAsset);
       dbPayload.id = newId;
@@ -568,7 +672,19 @@ export const supabaseService = {
       if (error || !data) {
         return { data: null, error: toServiceError(error, 'บันทึกผลงานบนคลาวด์ไม่สำเร็จ') };
       }
-      return { data: mapDbToAsset(data), error: null };
+      if (newAsset.collaboration) {
+        const { error: privateDraftError } = await supabase.from('asset_collaboration_drafts').upsert({
+          asset_id: newAsset.id,
+          owner_id: auth.userId,
+          draft: newAsset.collaboration,
+          updated_at: now
+        }, { onConflict: 'asset_id' });
+        if (privateDraftError) {
+          await supabase.from('assets').delete().eq('id', newAsset.id).eq('user_id', auth.userId);
+          return { data: null, error: toServiceError(privateDraftError, 'บันทึกข้อมูลจัดการคอลแลปไม่สำเร็จ') };
+        }
+      }
+      return { data: { ...mapDbToAsset(data), collaboration: newAsset.collaboration || null }, error: null };
     } catch (error) {
       return { data: null, error: toServiceError(error, 'บันทึกผลงานบนคลาวด์ไม่สำเร็จ') };
     }
@@ -580,6 +696,7 @@ export const supabaseService = {
     updates: Partial<Asset>
   ): Promise<{ data: Asset | null; error: string | null }> {
     if (isMockPersistence) {
+      await compactLegacyQaWorkPayloads();
       const userId = await getSessionUserId();
       if (!userId) return { data: null, error: 'กรุณาเข้าสู่ระบบอีกครั้งก่อนบันทึกข้อมูล' };
       const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true });
@@ -599,18 +716,23 @@ export const supabaseService = {
           : existing.versions
       };
       const previousStorageKey = existing.icon.type === 'image' ? existing.icon.storageKey : undefined;
-      let prepared: { asset: Asset; createdStorageKey?: string };
+      const previousPayloadKey = existing.qaStorageKey;
+      let prepared: { asset: Asset; storageAsset: Asset; createdIconKey?: string; createdPayloadKey: string };
       try {
-        prepared = await prepareQaWorkIconForWrite(next);
+        prepared = await prepareQaWorkAssetForWrite(next);
       } catch (error) {
-        return { data: null, error: toServiceError(error, 'บันทึก GIF หรือรูปไอคอนใน QA Sandbox ไม่สำเร็จ') };
+        return { data: null, error: toServiceError(error, 'บันทึกข้อมูลผลงานใน QA Sandbox ไม่สำเร็จ') };
       }
-      if (!writeMockAsset(prepared.asset)) {
-        await removeQaWorkIconQuietly(prepared.createdStorageKey);
+      if (!writeMockAsset(prepared.storageAsset)) {
+        await removeQaWorkIconQuietly(prepared.createdIconKey);
+        await removeQaWorkPayloadQuietly(prepared.createdPayloadKey);
         return { data: null, error: 'บันทึกการแก้ไขใน QA Sandbox ไม่สำเร็จ กรุณาลองใหม่' };
       }
       if (previousStorageKey && previousStorageKey !== prepared.asset.icon.storageKey) {
         await removeQaWorkIconQuietly(previousStorageKey);
+      }
+      if (previousPayloadKey && previousPayloadKey !== prepared.createdPayloadKey) {
+        await removeQaWorkPayloadQuietly(previousPayloadKey);
       }
       return { data: prepared.asset, error: null };
     }
@@ -646,11 +768,26 @@ export const supabaseService = {
           return { data: null, error: 'โฟลเดอร์ปลายทางไม่อยู่ในบัญชีของคุณ' };
         }
       }
+      if (updates.collaborationAssetId) {
+        const { data: collaborationAsset, error: collaborationError } = await supabase
+          .from('assets')
+          .select('id')
+          .eq('id', updates.collaborationAssetId)
+          .eq('user_id', auth.userId)
+          .eq('category', 'collab')
+          .is('deleted_at', null)
+          .maybeSingle();
+        if (collaborationError || !collaborationAsset) {
+          return { data: null, error: 'คอลแลปที่เลือกไม่อยู่ในบัญชีของคุณหรือไม่พร้อมใช้งาน' };
+        }
+      }
 
       const existing = mapDbToAsset(existingRow);
       const safeUpdates: Partial<Asset> = {};
       const mutableKeys: Array<keyof Asset> = [
-        'authorName', 'authorAvatar', 'title', 'icon', 'category', 'content',
+        'authorName', 'authorAvatar', 'title', 'icon', 'category', 'shortDescription',
+        'contentTypeLabels', 'contentTypes', 'presentationMetadata', 'publicCollaboration',
+        'collaborationAssetId', 'contentBlocks', 'collaboration', 'content',
         'uiCodeSnippet', 'previewImage', 'previewImages', 'folderId', 'isPublic',
         'visibility', 'status', 'tags', 'linkedAssetIds'
       ];
@@ -693,7 +830,15 @@ export const supabaseService = {
       if (error) return { data: null, error: toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') };
       if (!data) return { data: null, error: 'ไม่พบผลงานของคุณที่ต้องการแก้ไข' };
 
-      return { data: mapDbToAsset(data), error: null };
+      if (updates.collaboration !== undefined) {
+        const privateDraftMutation = updates.collaboration
+          ? supabase.from('asset_collaboration_drafts').upsert({ asset_id: id, owner_id: auth.userId, draft: updates.collaboration, updated_at: now }, { onConflict: 'asset_id' })
+          : supabase.from('asset_collaboration_drafts').delete().eq('asset_id', id).eq('owner_id', auth.userId);
+        const { error: privateDraftError } = await privateDraftMutation;
+        if (privateDraftError) return { data: null, error: toServiceError(privateDraftError, 'บันทึกข้อมูลจัดการคอลแลปไม่สำเร็จ') };
+      }
+
+      return { data: { ...mapDbToAsset(data), collaboration: updates.collaboration ?? existing.collaboration ?? null }, error: null };
     } catch (error) {
       return { data: null, error: toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') };
     }
@@ -778,6 +923,7 @@ export const supabaseService = {
       if (!existing) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
       if (!removeMockAsset(id, userId)) return { success: false, error: 'ลบผลงานใน QA Sandbox ไม่สำเร็จ' };
       await removeQaWorkIconQuietly(existing.icon.type === 'image' ? existing.icon.storageKey : undefined);
+      await removeQaWorkPayloadQuietly(existing.qaStorageKey);
       return { success: true, error: null };
     }
     const supabase = getSupabaseClient();
@@ -807,7 +953,11 @@ export const supabaseService = {
   async emptyTrash(userId: string): Promise<{ success: boolean; error: string | null }> {
     if (isMockPersistence) {
       const result = await fetchAssetsFromMock({ userId, currentUserId: userId, includeDeleted: true, onlyDeleted: true });
-      result.data.forEach(asset => removeMockAsset(asset.id, userId));
+      result.data.forEach(asset => {
+        removeMockAsset(asset.id, userId);
+        void removeQaWorkIconQuietly(asset.icon.type === 'image' ? asset.icon.storageKey : undefined);
+        void removeQaWorkPayloadQuietly(asset.qaStorageKey);
+      });
       return { success: true, error: null };
     }
     const supabase = getSupabaseClient();
@@ -851,8 +1001,17 @@ export const supabaseService = {
         forkCount: 0,
         likesCount: 0
       });
-      writeMockAsset(copy);
-      return { data: copy, sourceForkCount: (originalAsset.forkCount || 0) + 1, error: null };
+      try {
+        const prepared = await prepareQaWorkAssetForWrite(copy);
+        if (!writeMockAsset(prepared.storageAsset)) {
+          await removeQaWorkIconQuietly(prepared.createdIconKey);
+          await removeQaWorkPayloadQuietly(prepared.createdPayloadKey);
+          return { data: null, sourceForkCount: null, error: 'สร้างสำเนาผลงานใน QA Sandbox ไม่สำเร็จ กรุณาลองใหม่' };
+        }
+        return { data: prepared.asset, sourceForkCount: (originalAsset.forkCount || 0) + 1, error: null };
+      } catch (error) {
+        return { data: null, sourceForkCount: null, error: toServiceError(error, 'สร้างสำเนาผลงานใน QA Sandbox ไม่สำเร็จ') };
+      }
     }
     const supabase = getSupabaseClient();
     const auth = await requireCloudUser(newUserId);
