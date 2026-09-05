@@ -397,15 +397,36 @@ async function getSessionUserId(): Promise<string | null> {
   }
 }
 
-async function fetchAssetsFromMock(options?: {
+export interface FetchAssetsOptions {
   userId?: string;
   currentUserId?: string;
+  creatorSlug?: string;
+  assetId?: string;
   category?: string;
   folderId?: string | null;
   search?: string;
   includeDeleted?: boolean;
   onlyDeleted?: boolean;
-}): Promise<{ data: Asset[]; error: string | null }> {
+  publicOnly?: boolean;
+  limit?: number;
+  detail?: 'summary' | 'full';
+}
+
+const ASSET_SUMMARY_COLUMNS = [
+  'id', 'user_id', 'author_name', 'author_avatar', 'title', 'icon', 'category',
+  'short_description', 'content_type_labels', 'content_types', 'presentation_metadata',
+  'public_collaboration', 'collaboration_asset_id', 'preview_image', 'folder_id',
+  'is_public', 'visibility', 'status', 'tags', 'created_at', 'updated_at',
+  'deleted_at', 'likes_count', 'fork_count', 'forked_from_id', 'forked_from_author',
+  'linked_asset_ids'
+].join(',');
+
+function normalizeAssetQueryLimit(value: number | undefined): number | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(100, Math.max(1, Math.trunc(value!)));
+}
+
+async function fetchAssetsFromMock(options?: FetchAssetsOptions): Promise<{ data: Asset[]; error: string | null }> {
   // QA Sandbox is intentionally local-only. Cloud migration is an explicit
   // Settings action; a normal read must never wait on or merge remote tables.
   let list = await hydrateQaWorkPayloads(await hydrateQaWorkIcons(readMockAssets().map(asset => ({
@@ -413,11 +434,21 @@ async function fetchAssetsFromMock(options?: {
     ...normalizeAssetVisibility({ visibility: asset.visibility, isPublic: asset.isPublic })
   }))));
 
-  if (options?.userId) list = list.filter(asset => asset.userId === options.userId);
+  let scopedUserId = options?.userId;
+  if (!scopedUserId && options?.creatorSlug) {
+    let cleanSlug = '';
+    try { cleanSlug = decodeURIComponent(options.creatorSlug).trim(); } catch { cleanSlug = ''; }
+    scopedUserId = resolveProfileBySlug(readMockProfiles(), cleanSlug)?.id;
+    if (!scopedUserId) return { data: [], error: null };
+  }
+
+  if (options?.assetId) list = list.filter(asset => asset.id === options.assetId);
+  if (options?.publicOnly) list = list.filter(asset => asset.visibility === 'public' && asset.isPublic && !asset.deletedAt);
+  else if (scopedUserId) list = list.filter(asset => asset.userId === scopedUserId);
   else if (options?.currentUserId) list = list.filter(asset => asset.userId === options.currentUserId || (asset.visibility === 'public' && asset.isPublic && !asset.deletedAt));
   else list = list.filter(asset => asset.visibility === 'public' && asset.isPublic && !asset.deletedAt);
 
-  if (options?.userId && options.currentUserId !== options.userId) list = list.filter(asset => asset.visibility === 'public' && asset.isPublic && !asset.deletedAt);
+  if (scopedUserId && options?.currentUserId !== scopedUserId) list = list.filter(asset => asset.visibility === 'public' && asset.isPublic && !asset.deletedAt);
   if (options?.onlyDeleted) list = list.filter(asset => Boolean(asset.deletedAt));
   else if (!options?.includeDeleted) list = list.filter(asset => !asset.deletedAt);
   if (options?.category && options.category !== 'all') list = list.filter(asset => asset.category === options.category);
@@ -435,7 +466,9 @@ async function fetchAssetsFromMock(options?: {
   } else {
     list = list.map(asset => ({ ...asset, collaboration: null, qaStorageKey: undefined }));
   }
-  return { data: list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), error: null };
+  const sorted = list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const limit = normalizeAssetQueryLimit(options?.limit);
+  return { data: limit ? sorted.slice(0, limit) : sorted, error: null };
 }
 
 async function fetchFoldersFromMock(userId: string): Promise<{ data: Folder[]; error: string | null }> {
@@ -478,15 +511,7 @@ async function fetchProfileSocialLinks(userId: string): Promise<ProfileSocialLin
 // DIRECT SUPABASE DATABASE SERVICE (CRUD & ADVANCED LOGIC)
 export const supabaseService = {
   // 1. Fetch Assets (Public feed or personal vault)
-  async fetchAssets(options?: {
-    category?: string;
-    userId?: string;
-    folderId?: string | null;
-    search?: string;
-    currentUserId?: string;
-    includeDeleted?: boolean;
-    onlyDeleted?: boolean;
-  }): Promise<{ data: Asset[]; error: string | null }> {
+  async fetchAssets(options?: FetchAssetsOptions): Promise<{ data: Asset[]; error: string | null }> {
     if (isMockPersistence) return fetchAssetsFromMock(options);
     const supabase = getSupabaseClient();
     if (!supabase) {
@@ -496,16 +521,45 @@ export const supabaseService = {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionUserId = sessionData.session?.user.id;
-      let query = supabase.from('assets').select('*');
+      let query = supabase
+        .from('assets')
+        .select(options?.detail === 'summary' ? ASSET_SUMMARY_COLUMNS : '*');
 
-      if (options?.onlyDeleted) {
-        if (!sessionUserId || (options.userId && options.userId !== sessionUserId)) {
+      let scopedUserId = options?.userId;
+      if (!scopedUserId && options?.creatorSlug) {
+        let cleanSlug = '';
+        try { cleanSlug = decodeURIComponent(options.creatorSlug).trim(); } catch { cleanSlug = ''; }
+        if (!cleanSlug || cleanSlug.length > 128) return { data: [], error: null };
+        const isProfileId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanSlug);
+        const { data: profileRow, error: profileError } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq(isProfileId ? 'id' : 'username', isProfileId ? cleanSlug : normalizeProfileUsername(cleanSlug) || cleanSlug)
+          .maybeSingle();
+        if (profileError) {
+          return { data: [], error: toServiceError(profileError, 'โหลดเจ้าของโปรไฟล์ไม่สำเร็จ') };
+        }
+        if (!profileRow?.id) return { data: [], error: null };
+        scopedUserId = profileRow.id;
+      }
+
+      if (options?.assetId) {
+        query = query.eq('id', options.assetId);
+      }
+
+      if (options?.publicOnly) {
+        query = query
+          .eq('visibility', 'public')
+          .eq('is_public', true)
+          .is('deleted_at', null);
+      } else if (options?.onlyDeleted) {
+        if (!sessionUserId || (scopedUserId && scopedUserId !== sessionUserId)) {
           return { data: [], error: 'กรุณาเข้าสู่ระบบเพื่อดูถังขยะของคุณ' };
         }
         query = query.eq('user_id', sessionUserId).not('deleted_at', 'is', null);
-      } else if (options?.userId) {
-        query = query.eq('user_id', options.userId);
-        if (sessionUserId !== options.userId) {
+      } else if (scopedUserId) {
+        query = query.eq('user_id', scopedUserId);
+        if (sessionUserId !== scopedUserId) {
           query = query
             .eq('visibility', 'public')
             .eq('is_public', true)
@@ -536,7 +590,11 @@ export const supabaseService = {
           : query.eq('folder_id', options.folderId);
       }
 
-      const { data, error } = await query.order('created_at', { ascending: false });
+      query = query.order('created_at', { ascending: false });
+      const limit = normalizeAssetQueryLimit(options?.limit);
+      if (limit) query = query.limit(limit);
+
+      const { data, error } = await query;
       if (error) {
         return { data: [], error: toServiceError(error, 'โหลดคลังผลงานไม่สำเร็จ') };
       }
@@ -545,7 +603,7 @@ export const supabaseService = {
       const ownedCollaborationIds = list
         .filter(asset => asset.userId === sessionUserId && asset.category === 'collab')
         .map(asset => asset.id);
-      if (sessionUserId && ownedCollaborationIds.length > 0) {
+      if (options?.detail !== 'summary' && sessionUserId && ownedCollaborationIds.length > 0) {
         const { data: privateDraftRows, error: privateDraftError } = await supabase
           .from('asset_collaboration_drafts')
           .select('asset_id,draft')

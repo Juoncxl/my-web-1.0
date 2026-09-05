@@ -196,6 +196,38 @@ describe('Profile identity service in the QA persistence boundary', () => {
     expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
   });
 
+  it('scopes profile and public-feed reads before applying the result limit', async () => {
+    const now = '2026-01-01T00:00:00.000Z';
+    const owner = makeProfile();
+    const visitor = makeProfile({ id: 'visitor-uuid', username: 'visitor', displayName: 'Visitor' });
+    expect(writeMockProfile(owner).success).toBe(true);
+    expect(writeMockProfile(visitor).success).toBe(true);
+
+    const makeAsset = (id: string, userId: string, visibility: Asset['visibility'], createdAt: string): Asset => ({
+      id, userId, authorName: userId, title: id,
+      icon: { type: 'emoji', value: '✨' }, category: 'lore', content: '', uiCodeSnippet: '',
+      previewImage: '', previewImages: [], folderId: null, isPublic: visibility === 'public', visibility,
+      status: 'finished', deletedAt: null, createdAt, updatedAt: createdAt, likesCount: 0,
+      forkCount: 0, forkedFromId: null, forkedFromAuthor: null, linkedAssetIds: [], versions: [], tags: []
+    });
+    writeMockAsset(makeAsset('owner-private', owner.id, 'private', now));
+    writeMockAsset(makeAsset('owner-public', owner.id, 'public', '2026-01-02T00:00:00.000Z'));
+    writeMockAsset(makeAsset('visitor-public', visitor.id, 'public', '2026-01-03T00:00:00.000Z'));
+
+    const ownerProfile = await supabaseService.fetchAssets({
+      creatorSlug: 'JUONCXL', currentUserId: owner.id, includeDeleted: true, limit: 100
+    });
+    expect(ownerProfile.data.map(asset => asset.id)).toEqual(['owner-public', 'owner-private']);
+
+    const publicProfile = await supabaseService.fetchAssets({
+      creatorSlug: 'juoncxl', currentUserId: visitor.id, limit: 100
+    });
+    expect(publicProfile.data.map(asset => asset.id)).toEqual(['owner-public']);
+
+    const publicFeed = await supabaseService.fetchAssets({ publicOnly: true, limit: 1 });
+    expect(publicFeed.data.map(asset => asset.id)).toEqual(['visitor-public']);
+  });
+
   it('persists a GIF Work Icon outside localStorage and rehydrates it through the Edit Work save path', async () => {
     const now = '2026-01-01T00:00:00.000Z';
     const work: Asset = {

@@ -1,17 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Asset, User } from '../types';
-import { supabaseService } from '../lib/supabaseService';
+import { supabaseService, type FetchAssetsOptions } from '../lib/supabaseService';
 import { removeAssetFromCreatorSpaceSettings } from '../lib/creatorPersistence';
 
 type ReportError = (message: string) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
 
-export function useAssetData(currentUser: User | null, reportError: ReportError, enabled = true) {
+export function useAssetData(
+  currentUser: User | null,
+  reportError: ReportError,
+  enabled = true,
+  loadOptions: Omit<FetchAssetsOptions, 'currentUserId'> = {}
+) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoadingAssets, setIsLoadingAssets] = useState(true);
   const requestSequence = useRef(0);
   const scopeSequence = useRef(0);
   const previousUserId = useRef<string | undefined>(currentUser?.id);
+  const loadScopeKey = [
+    loadOptions.assetId || '',
+    loadOptions.creatorSlug || '',
+    loadOptions.detail || '',
+    loadOptions.userId || '',
+    loadOptions.publicOnly ? 'public' : '',
+    loadOptions.onlyDeleted ? 'deleted' : '',
+    loadOptions.includeDeleted ? 'with-deleted' : '',
+    loadOptions.category || '',
+    loadOptions.folderId === null ? 'unassigned' : loadOptions.folderId || '',
+    loadOptions.search || '',
+    loadOptions.limit || ''
+  ].join('|');
+  const previousLoadScopeKey = useRef(loadScopeKey);
   const hasLoadedAssets = useRef(false);
 
   const refreshAssets = useCallback(async () => {
@@ -25,8 +44,8 @@ export function useAssetData(currentUser: User | null, reportError: ReportError,
 
     try {
       const res = await supabaseService.fetchAssets({
+        ...loadOptions,
         currentUserId: currentUser?.id,
-        includeDeleted: true
       });
       if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
       if (res.error) {
@@ -44,20 +63,37 @@ export function useAssetData(currentUser: User | null, reportError: ReportError,
         setIsLoadingAssets(false);
       }
     }
-  }, [currentUser?.id, enabled, reportError]);
+  }, [
+    currentUser?.id,
+    enabled,
+    loadOptions.assetId,
+    loadOptions.category,
+    loadOptions.creatorSlug,
+    loadOptions.detail,
+    loadOptions.folderId,
+    loadOptions.includeDeleted,
+    loadOptions.limit,
+    loadOptions.onlyDeleted,
+    loadOptions.publicOnly,
+    loadOptions.search,
+    loadOptions.userId,
+    reportError
+  ]);
 
   useEffect(() => {
     if (!enabled) return;
 
     const userId = currentUser?.id;
-    if (previousUserId.current !== userId) {
+    if (previousUserId.current !== userId || previousLoadScopeKey.current !== loadScopeKey) {
       previousUserId.current = userId;
+      previousLoadScopeKey.current = loadScopeKey;
       scopeSequence.current += 1;
       hasLoadedAssets.current = false;
       setAssets([]);
+      setIsLoadingAssets(true);
     }
     void refreshAssets();
-  }, [currentUser?.id, enabled, refreshAssets]);
+  }, [currentUser?.id, enabled, loadScopeKey, refreshAssets]);
 
   const createAsset = useCallback(async (assetData: NewAssetData) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
@@ -70,6 +106,25 @@ export function useAssetData(currentUser: User | null, reportError: ReportError,
     if (result.data) setAssets(previous => [result.data!, ...previous]);
     return result;
   }, [currentUser]);
+
+  const loadAssetDetail = useCallback(async (assetId: string): Promise<Asset | null> => {
+    const result = await supabaseService.fetchAssets({
+      assetId,
+      currentUserId: currentUser?.id,
+      detail: 'full',
+      limit: 1
+    });
+    if (result.error || !result.data[0]) {
+      if (result.error) reportError(result.error);
+      return null;
+    }
+    const detailedAsset = result.data[0];
+    setAssets(previous => previous.some(asset => asset.id === detailedAsset.id)
+      ? previous.map(asset => asset.id === detailedAsset.id ? detailedAsset : asset)
+      : [detailedAsset, ...previous]
+    );
+    return detailedAsset;
+  }, [currentUser?.id, reportError]);
 
   const updateAsset = useCallback(async (id: string, updates: Partial<Asset>) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
@@ -147,6 +202,7 @@ export function useAssetData(currentUser: User | null, reportError: ReportError,
     assets,
     isLoadingAssets: isLoadingAssets || isChangingAccountScope,
     refreshAssets,
+    loadAssetDetail,
     createAsset,
     updateAsset,
     softDeleteAsset,

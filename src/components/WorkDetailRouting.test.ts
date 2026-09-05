@@ -14,14 +14,15 @@ const actionsSource = readFileSync(new URL('../hooks/useAssetActions.ts', import
 
 describe('canonical Work Detail routing', () => {
   it('mounts WorkDetailModal from both primary Work Card flows', () => {
-    expect(appSource).toContain("from './components/WorkDetailModal'");
+    expect(appSource).toContain("import('./components/WorkDetailModal')");
     expect(appSource).toContain('<WorkDetailModal');
-    expect(creatorSource).toContain("from '../components/WorkDetailModal'");
+    expect(creatorSource).toContain("import('../components/WorkDetailModal')");
     expect(creatorSource).toContain('<WorkDetailModal');
     expect(appSource).not.toContain("from './components/AssetViewModal'");
     expect(creatorSource).not.toContain("from '../components/AssetViewModal'");
     expect(cardSource).toContain('onClick={() => onClick(asset)}');
-    expect(creatorSource).toContain('onClick={setSelectedAsset}');
+    expect(creatorSource).toContain('void openAssetDetail(asset)');
+    expect(creatorSource).toContain("detail: 'full'");
     expect(creatorSource).toContain('onBookmark={onBookmark}');
     expect(creatorSource).toContain('isBookmarked={bookmarkedAssetIds.includes(asset.id)}');
   });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import type { Asset, AssetCategory, AssetStatus } from './types';
@@ -6,15 +6,10 @@ import {
   canCreateOwnedAsset
 } from './lib/accessPolicy';
 import { Header } from './components/Header';
-import { WorkDetailModal } from './components/WorkDetailModal';
-import { AIAssistantModal } from './components/AIAssistantModal';
 import { AuthModal } from './components/AuthModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SettingsModal } from './components/SettingsModal';
 import { VaultTabType } from './components/PersonalVaultHeader';
-import { FolderManagerModal } from './components/FolderManagerModal';
-import { MoveToFolderModal } from './components/MoveToFolderModal';
-import { ReportModal } from './components/ReportModal';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AlertCircle, X } from 'lucide-react';
@@ -28,12 +23,19 @@ import { useRecentlyViewed } from './hooks/useRecentlyViewed';
 import { useAssetFilters } from './hooks/useAssetFilters';
 import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
-import { DiscoverPage } from './pages/DiscoverPage';
-import { CreatorSpacePage } from './pages/CreatorSpacePage';
 import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
 import { getCanonicalProfilePath } from './lib/profileIdentity';
-import { CreatorWorkWorkspace, type CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
+import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
+
+const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
+const CreatorSpacePage = React.lazy(() => import('./pages/CreatorSpacePage').then(module => ({ default: module.CreatorSpacePage })));
+const WorkDetailModal = React.lazy(() => import('./components/WorkDetailModal').then(module => ({ default: module.WorkDetailModal })));
+const AIAssistantModal = React.lazy(() => import('./components/AIAssistantModal').then(module => ({ default: module.AIAssistantModal })));
+const FolderManagerModal = React.lazy(() => import('./components/FolderManagerModal').then(module => ({ default: module.FolderManagerModal })));
+const MoveToFolderModal = React.lazy(() => import('./components/MoveToFolderModal').then(module => ({ default: module.MoveToFolderModal })));
+const ReportModal = React.lazy(() => import('./components/ReportModal').then(module => ({ default: module.ReportModal })));
+const CreatorWorkWorkspace = React.lazy(() => import('./components/creator/CreatorWorkWorkspace').then(module => ({ default: module.CreatorWorkWorkspace })));
 
 function MainApp() {
   const { 
@@ -84,11 +86,32 @@ function MainApp() {
     setOperationError(message);
   }, []);
   const resolvedUserId = authLoading ? undefined : currentUser?.id;
+  const assetLoadOptions = useMemo(() => {
+    if (creatorSlug) {
+      let decodedSlug = creatorSlug;
+      try { decodedSlug = decodeURIComponent(decodedSlug).trim(); } catch { /* keep the raw route value */ }
+      const isOwnerProfile = Boolean(currentUser && (
+        decodedSlug === currentUser.id ||
+        decodedSlug.toLowerCase() === currentUser.username?.trim().toLowerCase()
+      ));
+      return { creatorSlug, includeDeleted: true, detail: isOwnerProfile ? 'full' : 'summary', limit: 100 } as const;
+    }
+    if (workRoute?.[1]) {
+      let assetId = workRoute[1];
+      try { assetId = decodeURIComponent(assetId); } catch { /* keep the raw route value */ }
+      return { assetId, detail: 'full', limit: 1 } as const;
+    }
+    if (activeView === 'vault' && currentUser?.id) {
+      return { userId: currentUser.id, includeDeleted: true, detail: 'full', limit: 100 } as const;
+    }
+    return { publicOnly: true, detail: 'summary', limit: 48 } as const;
+  }, [activeView, creatorSlug, currentUser, workRoute?.[1]]);
 
   const {
     assets,
     isLoadingAssets,
     refreshAssets,
+    loadAssetDetail,
     createAsset,
     updateAsset,
     softDeleteAsset,
@@ -98,7 +121,7 @@ function MainApp() {
     moveAsset,
     updateAssetLikeCount,
     clearFolderAssignments
-  } = useAssetData(currentUser, reportOperationError);
+  } = useAssetData(currentUser, reportOperationError, true, assetLoadOptions);
   const {
     folders,
     isLoadingFolders,
@@ -162,10 +185,11 @@ function MainApp() {
   }, [legacyProfileRedirect]);
 
   // Track recently viewed items while keeping the selected asset canonical.
-  const handleOpenAssetView = useCallback((asset: Asset) => {
+  const handleOpenAssetView = useCallback(async (asset: Asset) => {
+    await loadAssetDetail(asset.id);
     openAssetView(asset.id);
     trackRecentlyViewed(asset.id);
-  }, [openAssetView, trackRecentlyViewed]);
+  }, [loadAssetDetail, openAssetView, trackRecentlyViewed]);
 
   const handleViewChange = useCallback((view: 'feed' | 'vault') => {
     if (authLoading) return;
@@ -236,9 +260,11 @@ function MainApp() {
     openMoveToFolder(asset.id);
   }, [openMoveToFolder]);
 
-  const handleEditVaultAsset = useCallback((asset: Asset, onEditorClose?: () => void) => {
+  const handleEditVaultAsset = useCallback(async (asset: Asset, onEditorClose?: () => void) => {
+    const detailedAsset = await loadAssetDetail(asset.id);
+    if (!detailedAsset) return;
     openEditEditor(asset.id, onEditorClose);
-  }, [openEditEditor]);
+  }, [loadAssetDetail, openEditEditor]);
 
   const handleCloseEditor = useCallback(() => {
     closeEditor();
@@ -448,6 +474,7 @@ function MainApp() {
 
   return (
     <div className="cv-app-shell min-h-screen flex flex-col text-slate-800 dark:text-slate-100 transition-colors duration-200">
+      <React.Suspense fallback={<main className="cv-main-container flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6" aria-busy="true">กำลังโหลดพื้นที่ของคุณ...</main>}>
       {creatorSlug ? (
         <CreatorSpacePage
           slug={creatorSlug}
@@ -511,9 +538,11 @@ function MainApp() {
           </footer>
         </>
       )}
+      </React.Suspense>
 
       {/* Modals */}
-      <WorkDetailModal
+      <React.Suspense fallback={null}>
+      {viewingAsset && <WorkDetailModal
         asset={viewingAsset}
         isOpen={!!viewingAsset}
         onClose={closeAssetView}
@@ -537,24 +566,24 @@ function MainApp() {
         isBookmarked={viewingAsset ? bookmarkedAssetIds.includes(viewingAsset.id) : false}
         isLiked={viewingAsset ? likedAssetIds.includes(viewingAsset.id) : false}
         isTrashMode={activeVaultTab === 'trash'}
-      />
+      />}
 
-      <ReportModal
+      {reportingAsset && <ReportModal
         isOpen={!!reportingAsset}
         onClose={closeReport}
         asset={reportingAsset}
-      />
+      />}
 
-      <FolderManagerModal
+      {isFolderManagerOpen && <FolderManagerModal
         isOpen={isFolderManagerOpen}
         onClose={() => setIsFolderManagerOpen(false)}
         folders={folders}
         onCreateFolder={handleCreateFolder}
         onUpdateFolder={handleUpdateFolder}
         onDeleteFolder={handleDeleteFolder}
-      />
+      />}
 
-      <MoveToFolderModal
+      {movingAsset && <MoveToFolderModal
         isOpen={!!movingAsset}
         onClose={closeMoveToFolder}
         asset={movingAsset}
@@ -564,7 +593,7 @@ function MainApp() {
           closeMoveToFolder();
           setIsFolderManagerOpen(true);
         }}
-      />
+      />}
 
       <ConfirmationDialog
         isOpen={Boolean(trashConfirmationAsset)}
@@ -575,7 +604,7 @@ function MainApp() {
         onConfirm={handleConfirmVaultTrash}
       />
 
-      <AIAssistantModal
+      {isAIOpen && <AIAssistantModal
         isOpen={isAIOpen}
         onClose={() => setIsAIOpen(false)}
         initialType={aiContext?.type}
@@ -583,7 +612,7 @@ function MainApp() {
         onApplyResult={(aiText) => {
           // Handled in context
         }}
-      />
+      />}
 
       <AuthModal
         isOpen={isAuthOpen}
@@ -594,7 +623,7 @@ function MainApp() {
 
       <SettingsModal />
 
-      <CreatorWorkWorkspace
+      {isEditorOpen && <CreatorWorkWorkspace
         isOpen={isEditorOpen}
         onClose={handleCloseEditor}
         initialData={editingAsset}
@@ -602,7 +631,8 @@ function MainApp() {
         folders={folders}
         ownedWorks={assets}
         onSave={handleSaveCreatorWork}
-      />
+      />}
+      </React.Suspense>
     </div>
   );
 }

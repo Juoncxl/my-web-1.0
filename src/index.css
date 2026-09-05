@@ -6101,6 +6101,51 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   line-height: var(--cv-leading-ui);
 }
 
+/* Keep profile actions in normal layout flow. At production viewport widths
+   the owner toolbar can wrap to three rows; absolute positioning let the last
+   row escape the profile surface. */
+@media (min-width: 768px) {
+  .csp-profile-header > .csp-profile-surface {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 16rem);
+    column-gap: 1rem;
+    align-items: start;
+  }
+
+  .csp-profile-header .csp-profile-identity {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .csp-profile-header .csp-profile-actions {
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 16rem;
+    padding-top: 1.2rem;
+  }
+
+  .csp-profile-header .csp-profile-actions > .csp-viewer-toolbar,
+  .csp-profile-header .csp-profile-actions > span {
+    grid-column: 1 / -1;
+  }
+
+  .csp-profile-header .csp-profile-actions .csp-secondary-button,
+  .csp-profile-header .csp-profile-actions .csp-primary-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .csp-profile-header .csp-mobile-stats {
+    grid-column: 1 / -1;
+  }
+}
+
 .csp-works-controls {
   display: flex;
   align-items: flex-end;
