@@ -51,15 +51,15 @@ export function getFreePlacementId(kind: FreePlacementKind, refId: string): stri
 const WIDGET_MIN_WIDTHS: Readonly<Record<string, number>> = {
   decoration: 1,
   single_image: 1,
-  folder: 2,
+  folder: 3,
   playlist: 2,
   status: 2,
   note: 2,
   links: 2,
-  goal: 2,
+  goal: 4,
   gallery: 2,
-  clock: 2,
-  weather: 2,
+  clock: 3,
+  weather: 4,
   todo: 3,
   calendar: 3
 };
@@ -67,7 +67,7 @@ const WIDGET_MIN_WIDTHS: Readonly<Record<string, number>> = {
 export function getFreePlacementWidthRange(kind: FreePlacementKind, widgetType?: string): FreePlacementWidthRange {
   if (kind === 'portfolio') return { minW: 4, maxW: FREE_LAYOUT_COLUMNS };
   if (kind === 'work') return { minW: 3, maxW: FREE_LAYOUT_COLUMNS };
-  if (kind === 'folder') return { minW: 2, maxW: FREE_LAYOUT_COLUMNS };
+  if (kind === 'folder') return { minW: 3, maxW: FREE_LAYOUT_COLUMNS };
   return { minW: WIDGET_MIN_WIDTHS[widgetType || ''] || 2, maxW: FREE_LAYOUT_COLUMNS };
 }
 

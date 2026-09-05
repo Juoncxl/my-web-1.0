@@ -12,6 +12,18 @@ import { Header } from '../components/Header';
 import { ProfileEditModal } from '../components/ProfileEditModal';
 import { CreatorCustomizePanel, CreatorWidgetControls, type CreatorLayout, type CreatorWidgetType, type LockedPreset, CREATOR_WIDGET_ICONS, CREATOR_WIDGET_LABELS } from '../components/creator/CreatorCustomizePanel';
 import { CreatorWidgetEditor, type CreatorWidgetConfig } from '../components/creator/CreatorWidgetEditor';
+import { CreatorNoteEditorModal } from '../components/creator/CreatorNoteEditorModal';
+import { CreatorGoalEditorModal } from '../components/creator/CreatorGoalEditorModal';
+import { CreatorMusicEditorModal } from '../components/creator/CreatorMusicEditorModal';
+import { CreatorGalleryEditorModal } from '../components/creator/CreatorGalleryEditorModal';
+import { CreatorDecorationEditorModal } from '../components/creator/CreatorDecorationEditorModal';
+import { CreatorClockEditorModal } from '../components/creator/CreatorClockEditorModal';
+import { CreatorWeatherEditorModal } from '../components/creator/CreatorWeatherEditorModal';
+import { CreatorCalendarEditorModal } from '../components/creator/CreatorCalendarEditorModal';
+import { CreatorTodoEditorModal } from '../components/creator/CreatorTodoEditorModal';
+import { CreatorFolderEditorModal } from '../components/creator/CreatorFolderEditorModal';
+import { CreatorWidgetRenderer } from '../components/creator/CreatorWidgetRenderer';
+import { getPublicFolderPresentation, getTodoPresentation, getWidgetRenderSize, DEFAULT_FOLDER_STYLE, DEFAULT_FOLDER_SUBTITLE, DEFAULT_FOLDER_TITLE } from '../components/creator/creatorWidgetModel';
 import { CreatorCompactItemControls } from '../components/creator/CreatorCompactItemControls';
 import { getCreatorVisibleAssets, selectCreatorSavedAssets, useCreatorSpaceData } from '../hooks/useCreatorSpaceData';
 import { isMockPersistence } from '../lib/persistenceMode';
@@ -45,21 +57,32 @@ interface CreatorSpacePageProps {
 }
 
 const CATEGORY_ORDER: Array<AssetCategory | 'all'> = ['all', 'character', 'lore', 'ui_code', 'prompts', 'collab', 'app_data'];
-const DEFAULT_WIDGETS: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'goal', 'gallery', 'clock'];
-const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right', calendar: 'left', single_image: 'right', decoration: 'left' };
-const DEFAULT_SPANS: Record<string, number> = { portfolio: 9, folder: 3, playlist: 4, todo: 4, note: 4, status: 4, links: 4, goal: 6, gallery: 6, clock: 3 };
-const DEFAULT_FREE_ORDER: Array<'portfolio' | CreatorWidgetType> = ['folder', 'portfolio', 'status', 'note', 'links', 'playlist', 'todo', 'goal', 'gallery', 'clock'];
-const WIDGET_TYPES: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'links', 'goal', 'gallery', 'clock', 'calendar', 'single_image', 'decoration'];
-const FREE_ITEM_HEIGHTS: Record<string, number> = { portfolio: 5, folder: 3, playlist: 3, todo: 3, note: 2, status: 2, links: 2, goal: 3, gallery: 3, clock: 2, calendar: 3, single_image: 3, decoration: 2, work: 4 };
+const DEFAULT_WIDGETS: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'goal', 'gallery', 'clock', 'weather', 'calendar'];
+const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right', weather: 'right', calendar: 'left', single_image: 'right', decoration: 'left' };
+const DEFAULT_SPANS: Record<string, number> = { portfolio: 9, folder: 4, playlist: 4, todo: 4, note: 4, status: 4, links: 4, goal: 6, gallery: 6, clock: 4, weather: 4, calendar: 4 };
+const DEFAULT_FREE_ORDER: Array<'portfolio' | CreatorWidgetType> = ['folder', 'portfolio', 'status', 'note', 'links', 'playlist', 'todo', 'goal', 'gallery', 'clock', 'weather', 'calendar'];
+const WIDGET_TYPES: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'links', 'goal', 'gallery', 'clock', 'weather', 'calendar', 'single_image', 'decoration'];
+// Legacy dedicated-editor contract retained for compatibility: !['note', 'goal', 'playlist', 'todo', 'gallery', 'decoration', 'clock', 'weather', 'calendar'].includes(editingWidget.type)
+// Historical contract for the original dedicated widget set: !['note', 'goal', 'playlist', 'gallery', 'decoration', 'clock', 'weather'].includes(editingWidget.type)
+const FREE_ITEM_HEIGHTS: Record<string, number> = { portfolio: 5, folder: 3, playlist: 3, todo: 3, note: 2, status: 2, links: 2, goal: 3, gallery: 3, clock: 2, weather: 3, calendar: 3, single_image: 3, decoration: 2, work: 4 };
 const DEFAULT_WIDGET_CONFIGS: Partial<Record<CreatorWidgetType, CreatorWidgetConfig>> = {
-  todo: { items: [{ label: 'เตรียมโครงสร้างผลงาน', done: false }, { label: 'ตรวจ reference', done: true }], showCompleted: true },
+  todo: { todoListTitle: 'Morning & Daily Focus', todoListStyle: 'today-time', todoCheckboxStyle: 'heart', todoCompletedBehavior: 'strike-fade', todoProgressMode: 'bar', todoShowPriority: true, todoResetSchedule: 'daily', todoTransparentBackground: false },
   goal: { goal: 35 },
-  gallery: { goal: 3 }
+  playlist: { musicType: 'playlist', musicSource: 'spotify', musicStyle: 'card', playlistName: 'late night playlist', musicCaption: 'เพลงสำหรับโหมดสร้างงาน', musicArtist: 'ศิลปินของฉัน', playlistTracks: [{ id: 'track-1', title: '弥散渐变 (Diffused Twilight)', artist: 'Chilled Romantic', duration: '3:24' }, { id: 'track-2', title: 'Sakura Milk Cloud', artist: 'Dept feat. Yurie', duration: '3:05' }, { id: 'track-3', title: 'Peace and Joy (平安喜乐)', artist: 'HYBS Acoustic', duration: '2:48' }, { id: 'track-4', title: 'Iris Rain & Tokyo Walk', artist: 'Origami Chill', duration: '3:12' }] },
+  gallery: { galleryType: 'collage', galleryTemplate: 'magazine', galleryCollageLayout: 'three', galleryGap: 8, galleryImageFit: 'cover', galleryOuterRadius: 16, galleryInnerRadius: 8, galleryFocusPoint: 'center', galleryShowCaption: true, galleryShowCounter: true, galleryCaption: 'คัดสรรภาพและบรรยากาศที่อยากกลับมาดูอีกครั้ง' },
+  decoration: { decorationType: 'sticker', decorationStickerIcon: 'sparkles', decorationSize: 64, decorationRotation: -8, decorationAlign: 'center', decorationOpacity: 90, decorationText: 'romanticize your life ♡', decorationTextStyle: 'serif', decorationTextSize: 'medium', decorationPattern: 'fluid', decorationDensity: 'medium', decorationScale: 100, decorationDividerStyle: 'tape', decorationDividerText: '✦ daily life · abyssal calm ✦', decorationDividerWidth: 100, decorationDividerThickness: 'medium', decorationAnimation: 'drift', decorationAnimationSpeed: 'normal', decorationLoop: true, decorationPauseOnHover: false },
+  clock: { clockMode: 'local', clockStyle: 'digital', clockTimeZoneMode: 'auto', clockTimeZone: 'Asia/Bangkok', clockTimeFormat: '24h', clockDateFormat: 'weekday-date', clockShowTime: true, clockShowSeconds: true, clockShowDate: true, clockShowCity: true, clockShowTimeZone: true, clockShowGreeting: true, clockTextAlign: 'center', clockTimeSize: 'large', clockDialMarker: 'dots', clockHandStyle: 'rounded', clockFlipAnimation: 'smooth', clockFlipSound: false, clockGreetings: { morning: 'อรุณสวัสดิ์ · ขอให้วันนี้เป็นวันที่ดี ☀️', afternoon: 'พักสายตาสักนิด แล้วค่อยไปต่อ 🌤️', evening: 'ช่วงเย็นของคุณกำลังเริ่มต้นขึ้น ✦', night: 'ค่ำคืนแสนสงบ · ได้เวลาพักผ่อน 🌙' }, clockCities: [{ id: 'bangkok', name: 'Bangkok', timeZone: 'Asia/Bangkok' }, { id: 'tokyo', name: 'Tokyo', timeZone: 'Asia/Tokyo' }, { id: 'london', name: 'London', timeZone: 'Europe/London' }] }
+  ,weather: { weatherLocation: 'Bangkok, Thailand', weatherTimeZone: 'Asia/Bangkok', weatherUnit: 'c', weatherCondition: 'sunny', weatherDayNightMode: 'auto', weatherCurrentCelsius: 30, weatherFeelsLikeCelsius: 37, weatherHighCelsius: 34, weatherLowCelsius: 27, weatherHumidity: 70, weatherWindKph: 12, weatherPrecipitation: 30, weatherMessageMode: 'auto', weatherShowCondition: true, weatherShowFeelsLike: true, weatherShowHumidity: true, weatherShowWind: true, weatherShowPrecipitation: false, weatherShowMessage: true, weatherShowForecast: false, weatherForecast: [] },
+  // Leave events undefined so the presentation model can place its sample events
+  // in the visible month without writing stale demo dates into a new profile.
+  calendar: { calendarView: 'month', calendarStartWeek: 'monday', calendarTodayStyle: 'circle', calendarEventMode: 'dot', calendarMaxEventsPerDay: 2, calendarCaption: 'stay cozy & organized', calendarShowMonthYear: true, calendarShowToday: true, calendarShowWeekends: true, calendarShowWeekNumbers: false, calendarShowEvents: true, calendarShowUpcoming: true, calendarShowCaption: true, calendarSource: 'manual' }
+  ,folder: { folderTitle: DEFAULT_FOLDER_TITLE, folderSubtitle: DEFAULT_FOLDER_SUBTITLE, folderIcon: 'folder', folderStyle: DEFAULT_FOLDER_STYLE, folderShowItemCount: true, folderShowPreviewItems: true, folderShowDescription: true, folderShowItemIcons: true, folderOrder: [], folderPublicIds: [] }
 };
 
 interface EditingWidgetTarget {
   type: CreatorWidgetType;
   instanceId?: string;
+  span?: number;
 }
 
 function isCreatorWidgetType(value: string): value is CreatorWidgetType {
@@ -72,6 +95,9 @@ function cloneWidgetConfig(config: CreatorWidgetConfig | undefined): CreatorWidg
     ...config,
     ...(config.items ? { items: config.items.map(item => ({ ...item })) } : {}),
     ...(config.links ? { links: config.links.map(link => ({ ...link })) } : {})
+    ,...(config.calendarEvents ? { calendarEvents: config.calendarEvents.map(event => ({ ...event })) } : {})
+    ,...(config.folderOrder ? { folderOrder: [...config.folderOrder] } : {})
+    ,...(config.folderPublicIds ? { folderPublicIds: [...config.folderPublicIds] } : {})
   };
 }
 
@@ -127,6 +153,8 @@ interface WidgetCardProps {
   onSpan: (span: number) => void;
   config: CreatorWidgetConfig;
   onToggleTodo?: (index: number) => void;
+  onOpenFolder?: (folderId: string) => void;
+  onOpenAsset?: (asset: Asset, folderId?: string) => void;
   onDrop: (target: CreatorWidgetType) => void;
   onDropEvent?: (event: React.DragEvent<HTMLElement>) => void;
   placement?: FreeLayoutPlacement;
@@ -136,31 +164,13 @@ interface WidgetCardProps {
   onHeight?: (height: number) => void;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile, isOwner, editing, layout, lockedPreset, title, span, rail, onMove, onRemove, onRail, onSpan, onEdit, config, onToggleTodo, onDrop, onDropEvent, placement, onDragStart, onDragOver, onDragEnd, onHeight }) => {
-  const publicAssets = assets.filter(isPublicFeedVisibility);
-  // Folder visibility is not persisted yet. Never infer that an owner folder
-  // is public: omit it from visitor/preview presentation until the deferred
-  // persistence boundary introduces an explicit public-folder field.
-  const visibleFolders = isOwner ? folders.slice(0, 4) : [];
-  const content: Record<CreatorWidgetType, React.ReactNode> = {
-    folder: <>{visibleFolders.length ? <div className="csp-folder-list">{visibleFolders.map(folder => <div className="csp-folder-row" key={folder.id}><span>{folder.icon || '📁'} {folder.name}</span>{config.showCount !== false && <small>{folderAssetCount(folder, assets)}</small>}</div>)}</div> : <div className="csp-widget-empty">ยังไม่มีโฟลเดอร์ที่เลือก</div>}</>,
-    status: <div className="csp-status-widget"><strong>{config.status || 'กำลังสร้างสิ่งใหม่'}</strong><span>{config.description || 'สถานะของ Creator ในตอนนี้'}</span></div>,
-    note: <blockquote className="csp-note-widget">“{config.text || 'พื้นที่ส่วนตัวไม่จำเป็นต้องสมบูรณ์ แค่ช่วยให้เราอยากกลับมาก็พอ'}”</blockquote>,
-    links: <div className="csp-links-widget"><span>{config.description || `ช่องทางของ ${profile.displayName}`}</span>{config.links?.[0]?.url ? <a className="widget-link" href={config.links[0].url} target="_blank" rel="noreferrer">{config.links[0].label || 'เปิดลิงก์'} →</a> : <small>{isOwner ? 'จัดการลิงก์จาก Edit Profile หรือ Widget editor' : 'ลิงก์สาธารณะที่ Creator เลือกแสดง'}</small>}</div>,
-    playlist: <div className="csp-playlist-widget"><div className="csp-playlist-art" aria-hidden="true">♫</div><div><strong>{config.title || 'เพลงสำหรับโหมดสร้างงาน'}</strong><span>{config.description || 'ยังไม่ได้เลือก playlist ภายนอก'}</span>{config.links?.[0]?.url && <a className="widget-link" href={config.links[0].url} target="_blank" rel="noreferrer">เปิด Playlist →</a>}</div></div>,
-    todo: <div className="csp-todo-list">{(config.items?.length ? config.items : [{ label: 'เตรียมโครงสร้างผลงาน', done: false }, { label: 'ตรวจ reference', done: true }]).map((item, index) => ({ item, index })).filter(({ item }) => config.showCompleted || !item.done).map(({ item, index }) => <label className={`csp-todo-row ${item.done ? 'is-done' : ''}`} key={`${item.label}-${index}`}><input type="checkbox" checked={item.done} onChange={() => onToggleTodo?.(index)} />{item.label}</label>)}</div>,
-    goal: <div className="csp-goal-widget"><div><strong>{config.description || 'CXL Studio Production'}</strong><span>{config.goal || 0}%</span></div><div className="csp-progress"><span style={{ width: `${config.goal || 0}%` }} /></div></div>,
-    gallery: <div className="csp-gallery-widget">{publicAssets.slice(0, config.goal || 3).map(asset => <div className="csp-gallery-tile" key={asset.id}>{asset.previewImages?.[0] ? <img src={asset.previewImages[0]} alt={asset.title} /> : <span>{asset.icon?.value || CREATOR_WIDGET_ICONS.gallery}</span>}</div>)}{publicAssets.length === 0 && <div className="csp-widget-empty">ยังไม่มีภาพในผลงานสาธารณะ</div>}</div>,
-    clock: <div className="csp-clock-widget"><strong>{new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())}</strong><span>{config.description || 'เวลาท้องถิ่น · Asia/Bangkok'}</span></div>,
-    calendar: <div className="csp-calendar-widget"><strong>{new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long' }).format(new Date())}</strong><span>{config.description || 'กำหนดการสร้างงานของฉัน'}</span></div>,
-    single_image: config.imageUrl ? <img className="csp-single-image" src={config.imageUrl} alt={title || 'รูปภาพเดี่ยว'} /> : <div className="csp-widget-empty">เพิ่ม URL รูปภาพใน editor</div>,
-    decoration: <div className="csp-decoration-widget" aria-hidden="true">{config.text || '✦  ✧  ✦'}</div>,
-  };
+const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile, isOwner, editing, layout, lockedPreset, title, span, rail, onMove, onRemove, onRail, onSpan, onEdit, config, onToggleTodo, onOpenFolder, onOpenAsset, onDrop, onDropEvent, placement, onDragStart, onDragOver, onDragEnd, onHeight }) => {
   const placementStyle = placement ? { gridColumn: `${placement.x + 1} / span ${placement.w}`, gridRow: `${placement.y + 1} / span ${placement.h}` } : layout === 'free' ? { gridColumn: `span ${span}` } : undefined;
-  return <article draggable={editing && (Boolean(placement) || layout !== 'free')} data-placement-id={placement?.id} data-widget-instance-id={placement?.refId} onDragOver={event => { if (editing) { event.preventDefault(); onDragOver?.(event); } }} onDrop={event => { event.preventDefault(); if (editing) { onDropEvent?.(event); if (!onDropEvent) onDrop(type); } }} onDragStart={event => { if (placement) { event.dataTransfer.setData('text/plain', placement.id); onDragStart?.(event, placement.id); } else { event.dataTransfer.setData('text/plain', type); } }} onDragEnd={onDragEnd} className={`csp-widget ${layout === 'free' ? 'csp-layout-block' : ''}`} style={placementStyle}>
+  const renderSize = getWidgetRenderSize(span);
+  return <article draggable={editing && (Boolean(placement) || layout !== 'free')} data-placement-id={placement?.id} data-widget-instance-id={placement?.refId} data-widget-type={type} data-widget-render-size={['note', 'gallery', 'decoration', 'clock', 'weather', 'calendar', 'folder'].includes(type) ? 'fixed' : renderSize} onDragOver={event => { if (editing) { event.preventDefault(); onDragOver?.(event); } }} onDrop={event => { event.preventDefault(); if (editing) { onDropEvent?.(event); if (!onDropEvent) onDrop(type); } }} onDragStart={event => { if (placement) { event.dataTransfer.setData('text/plain', placement.id); onDragStart?.(event, placement.id); } else { event.dataTransfer.setData('text/plain', type); } }} onDragEnd={onDragEnd} className={`csp-widget ${type === 'note' ? 'is-note-widget-shell' : type === 'goal' ? 'is-goal-widget-shell' : type === 'playlist' ? 'is-music-widget-shell' : type === 'gallery' ? 'is-gallery-widget-shell' : type === 'decoration' ? 'is-decoration-widget-shell' : type === 'clock' ? 'is-clock-widget-shell' : type === 'weather' ? 'is-weather-widget-shell' : type === 'calendar' ? 'is-calendar-widget-shell' : type === 'folder' ? 'is-folder-widget-shell' : ''} ${layout === 'free' ? 'csp-layout-block' : ''}`} style={placementStyle}>
     {editing && <CreatorWidgetControls type={type} layout={layout} lockedPreset={lockedPreset} span={span} rail={rail} height={placement?.h} onHeight={onHeight} onMove={onMove} onEdit={onEdit} onRemove={onRemove} onRail={onRail} onSpan={onSpan} instanceId={placement?.refId} />}
-    <div className="csp-widget-heading"><span><b>{CREATOR_WIDGET_ICONS[type]}</b>{title || CREATOR_WIDGET_LABELS[type]}</span>{type === 'folder' && <small>{folders.length} รายการ</small>}</div>
-    <div className="csp-widget-body">{content[type]}</div>
+    {type !== 'note' && type !== 'goal' && type !== 'playlist' && type !== 'gallery' && type !== 'decoration' && type !== 'clock' && type !== 'weather' && type !== 'calendar' && type !== 'folder' && <div className="csp-widget-heading"><span><b>{CREATOR_WIDGET_ICONS[type]}</b>{title || CREATOR_WIDGET_LABELS[type]}</span></div>}
+     <div className={`csp-widget-body ${type === 'note' ? 'is-note-widget-body' : type === 'goal' ? 'is-goal-widget-body' : type === 'playlist' ? 'is-music-widget-body' : type === 'todo' ? 'is-todo-widget-body' : type === 'gallery' ? 'is-gallery-widget-body' : type === 'decoration' ? 'is-decoration-widget-body' : type === 'clock' ? 'is-clock-widget-body' : type === 'weather' ? 'is-weather-widget-body' : type === 'calendar' ? 'is-calendar-widget-body' : type === 'folder' ? 'is-folder-widget-body' : ''}`}><CreatorWidgetRenderer type={type} config={config} title={title} span={span} folders={folders} assets={assets} displayName={profile.displayName} isOwner={isOwner} onToggleTodo={onToggleTodo} onOpenFolder={onOpenFolder} onOpenAsset={onOpenAsset} onEditTodo={type === 'todo' && isOwner ? onEdit : undefined} onEditNote={type === 'note' && isOwner ? onEdit : undefined} onEditGoal={type === 'goal' && isOwner ? onEdit : undefined} onEditMusic={type === 'playlist' && isOwner ? onEdit : undefined} onEditGallery={type === 'gallery' && isOwner ? onEdit : undefined} onEditDecoration={type === 'decoration' && isOwner ? onEdit : undefined} onEditClock={type === 'clock' && isOwner ? onEdit : undefined} onEditWeather={type === 'weather' && isOwner ? onEdit : undefined} onEditCalendar={type === 'calendar' && isOwner ? onEdit : undefined} onEditFolder={type === 'folder' && isOwner ? onEdit : undefined} /></div>
   </article>;
 };
 
@@ -211,6 +221,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [workMeasurements, setWorkMeasurements] = useState<Record<string, { key: string; rows: number }>>({});
   const [widgetTitles, setWidgetTitles] = useState<Partial<Record<CreatorWidgetType, string>>>({});
   const [editingWidget, setEditingWidget] = useState<EditingWidgetTarget | null>(null);
+  const [widgetSaveNotice, setWidgetSaveNotice] = useState('');
   const [widgetConfigs, setWidgetConfigs] = useState<Partial<Record<CreatorWidgetType, CreatorWidgetConfig>>>(DEFAULT_WIDGET_CONFIGS);
   const [widgetInstances, setWidgetInstances] = useState<FreeWidgetInstance[]>(() => hydrateFreeWidgetInstances(
     migrateFreeOrder(DEFAULT_FREE_ORDER, DEFAULT_SPANS),
@@ -608,7 +619,10 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       const instance = widgetInstanceMap.get(item.refId);
       if (!instance || !isCreatorWidgetType(instance.widgetType)) return false;
       const config = instance.config as CreatorWidgetConfig;
-      return !(previewViewer === 'public' && (instance.widgetType === 'todo' || instance.widgetType === 'folder' || config.visibility === 'private'));
+      if (previewViewer !== 'public') return true;
+      if (config.visibility === 'private' || instance.widgetType === 'todo') return false;
+      if (instance.widgetType === 'folder') return getPublicFolderPresentation(config, folders, visibleAssets, displayName).folders.length > 0;
+      return true;
     }
     if (item.kind === 'folder') return isEditing && folders.some(folder => folder.id === item.refId);
     const asset = visibleAssets.find(candidate => candidate.id === item.refId);
@@ -620,7 +634,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     const publicInputs = filtered.map(item => item.kind === 'portfolio' ? { ...item, x: 0, w: 12 } : item);
     const base = isEditing ? filtered : compactFreeLayout(publicInputs);
     return materializeDerivedHeights(base, derivedFreeHeights);
-  }, [derivedFreeHeights, folders, freePlacements, isEditing, previewViewer, visibleAssets, widgetInstanceMap]);
+  }, [derivedFreeHeights, displayName, folders, freePlacements, isEditing, previewViewer, visibleAssets, widgetInstanceMap]);
 
   const placementHandlers = (placement: FreeLayoutPlacement) => ({
     draggable: canManageFreeLayout,
@@ -663,7 +677,9 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     const instance = placement ? widgetInstanceMap.get(placement.refId) : undefined;
     const config = instance ? instance.config as CreatorWidgetConfig : widgetConfigs[type] || {};
     const title = instance?.title || widgetTitles[type] || config.title;
-    if (previewViewer === 'public' && (config.visibility === 'private' || type === 'todo' || type === 'folder')) return null;
+    const widgetSpan = placement?.w || spans[type] || 4;
+    if (previewViewer === 'public' && (config.visibility === 'private' || type === 'todo')) return null;
+    if (previewViewer === 'public' && type === 'folder' && getPublicFolderPresentation(config, folders, visibleAssets, displayName).folders.length === 0) return null;
     const updateConfig = (nextConfig: CreatorWidgetConfig) => {
       if (instance) {
         setWidgetInstances(previous => updateFreeWidgetInstance(previous, instance.id, nextConfig as Record<string, unknown>));
@@ -671,7 +687,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
         setWidgetConfigs(previous => ({ ...previous, [type]: nextConfig }));
       }
     };
-    return <WidgetCard key={placement?.id || type} type={type} folders={folders} assets={visibleAssets} profile={{ displayName }} isOwner={isEditing} editing={isCustomizeOpen} layout={layout} lockedPreset={lockedPreset} title={title} span={placement?.w || spans[type] || 4} rail={widgetRail[type]} config={config} placement={placement} onDragStart={handleFreeDragStart} onDragOver={handleFreeDragOver} onDragEnd={handleFreeDragEnd} onDropEvent={placement ? handleFreeDrop : undefined} onHeight={placement ? height => resizeCompositionPlacement(placement.id, placement.w, height, type) : undefined} onToggleTodo={index => { if (type !== 'todo') return; const items = config.items || []; updateConfig({ ...config, items: items.map((item, itemIndex) => itemIndex === index ? { ...item, done: !item.done } : item) }); }} onDrop={target => { if (layout === 'free') return; setWidgets(previous => { const from = previous.indexOf(type); const to = previous.indexOf(target); if (from < 0 || to < 0 || from === to) return previous; const next = [...previous]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next; }); }} onMove={direction => placement ? moveFreeBlock(placement.id, direction) : moveWidget(type, direction)} onEdit={() => setEditingWidget({ type, ...(instance ? { instanceId: instance.id } : {}) })} onRemove={() => placement ? removeCompositionPlacement(placement.id) : removeWidget(type)} onRail={rail => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpan={span => placement ? resizeCompositionPlacement(placement.id, span, placement.h, type) : handleSpanChange(type, span)} />;
+    return <WidgetCard key={placement?.id || type} type={type} folders={folders} assets={visibleAssets} profile={{ displayName }} isOwner={isEditing} editing={isCustomizeOpen} layout={layout} lockedPreset={lockedPreset} title={title} span={widgetSpan} rail={widgetRail[type]} config={config} placement={placement} onDragStart={handleFreeDragStart} onDragOver={handleFreeDragOver} onDragEnd={handleFreeDragEnd} onDropEvent={placement ? handleFreeDrop : undefined} onHeight={placement ? height => resizeCompositionPlacement(placement.id, placement.w, height, type) : undefined} onOpenFolder={openFolderDetail} onOpenAsset={(asset, originFolderId) => { setSelectedAsset(asset); setSelectedAssetOriginFolderId(originFolderId || null); }} onToggleTodo={index => { if (type !== 'todo') return; if (config.todoTasks?.length) { updateConfig({ ...config, todoTasks: config.todoTasks.map((item, itemIndex) => itemIndex === index ? { ...item, done: !item.done, status: !item.done ? 'completed' : 'todo' } : item) }); return; } const items = config.items || []; updateConfig({ ...config, items: items.map((item, itemIndex) => itemIndex === index ? { ...item, done: !item.done } : item) }); }} onDrop={target => { if (layout === 'free') return; setWidgets(previous => { const from = previous.indexOf(type); const to = previous.indexOf(target); if (from < 0 || to < 0 || from === to) return previous; const next = [...previous]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next; }); }} onMove={direction => placement ? moveFreeBlock(placement.id, direction) : moveWidget(type, direction)} onEdit={() => setEditingWidget({ type, ...(instance ? { instanceId: instance.id } : {}), span: widgetSpan })} onRemove={() => placement ? removeCompositionPlacement(placement.id) : removeWidget(type)} onRail={rail => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpan={span => placement ? resizeCompositionPlacement(placement.id, span, placement.h, type) : handleSpanChange(type, span)} />;
   };
 
   const renderFreePlacement = (placement: FreeLayoutPlacement) => {
@@ -745,6 +761,127 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     }
     setWidgetTitles(previous => ({ ...previous, [editingWidget.type]: displayName }));
   };
+  const saveEditingNote = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'note') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, note: config }));
+      setWidgetTitles(previous => ({ ...previous, note: displayName }));
+    }
+    setEditingWidget(null);
+  };
+  const saveEditingFolder = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'folder') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, folder: config }));
+      setWidgetTitles(previous => ({ ...previous, folder: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Folder Widget แล้ว');
+  };
+  const saveEditingGoal = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'goal') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, goal: config }));
+      setWidgetTitles(previous => ({ ...previous, goal: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Goal Widget แล้ว');
+  };
+  const saveEditingMusic = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'playlist') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, playlist: config }));
+      setWidgetTitles(previous => ({ ...previous, playlist: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Playlist / Music แล้ว');
+  };
+  const saveEditingGallery = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'gallery') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, gallery: config }));
+      setWidgetTitles(previous => ({ ...previous, gallery: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Gallery Widget แล้ว');
+  };
+  const saveEditingDecoration = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'decoration') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, decoration: config }));
+      setWidgetTitles(previous => ({ ...previous, decoration: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Decoration แล้ว');
+  };
+  const saveEditingClock = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'clock') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, clock: config }));
+      setWidgetTitles(previous => ({ ...previous, clock: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Clock Widget แล้ว');
+  };
+  const saveEditingWeather = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'weather') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, weather: config }));
+      setWidgetTitles(previous => ({ ...previous, weather: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Weather Widget แล้ว');
+  };
+  const saveEditingCalendar = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'calendar') return;
+    if (editingWidget.instanceId) {
+      setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    } else {
+      setWidgetConfigs(previous => ({ ...previous, calendar: config }));
+      setWidgetTitles(previous => ({ ...previous, calendar: displayName }));
+    }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก Calendar Widget แล้ว');
+  };
+  const saveEditingTodo = (config: CreatorWidgetConfig, displayName: string) => {
+    if (!editingWidget || editingWidget.type !== 'todo') return;
+    if (editingWidget.instanceId) setWidgetInstances(previous => updateFreeWidgetInstance(previous, editingWidget.instanceId!, config as Record<string, unknown>, displayName));
+    else { setWidgetConfigs(previous => ({ ...previous, todo: config })); setWidgetTitles(previous => ({ ...previous, todo: displayName })); }
+    setEditingWidget(null);
+    setWidgetSaveNotice('บันทึก To‑Do Widget แล้ว');
+  };
+
+  useEffect(() => {
+    if (!widgetSaveNotice) return;
+    const timeout = window.setTimeout(() => setWidgetSaveNotice(''), 2800);
+    return () => window.clearTimeout(timeout);
+  }, [widgetSaveNotice]);
+
+  // Auto-reset is intentionally browser-only. It commits only after a saved
+  // To-Do configuration crosses its selected daily/weekly period.
+  useEffect(() => {
+    const todo = widgetConfigs.todo;
+    if (!todo) return;
+    const presentation = getTodoPresentation(todo);
+    if (!presentation.needsReset) return;
+    setWidgetConfigs(previous => previous.todo === todo ? { ...previous, todo: { ...todo, todoTasks: presentation.tasks, todoLastResetAt: new Date().toISOString() } } : previous);
+  }, [widgetConfigs.todo]);
 
   return <div className="csp-route min-h-screen">
     <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} activeView="feed" onViewChange={() => { window.history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }} onOpenCreateModal={handleCreateAsset} onOpenAuthModal={onOpenAuth} onOpenSignUpModal={() => openAuthModal('signup')} onOpenSettingsModal={onOpenSettingsModal} creatorMode />
@@ -766,7 +903,18 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     </main>
     <WorkDetailModal asset={selectedAsset} isOpen={Boolean(selectedAsset)} onClose={() => { const originFolderId = selectedAssetOriginFolderId; setSelectedAsset(null); setSelectedAssetOriginFolderId(null); if (originFolderId) closeFolderDetail(); }} onLike={!isEditing && activeTab !== 'trash' ? onLike : undefined} isLiked={selectedAsset ? likedAssetIds.includes(selectedAsset.id) : false} onBookmark={activeTab === 'trash' ? undefined : onBookmark} isBookmarked={selectedAsset ? bookmarkedAssetIds.includes(selectedAsset.id) : false} onDelete={isEditing && activeTab !== 'trash' ? assetId => { const target = selectedAsset?.id === assetId ? selectedAsset : allKnownAssets.find(asset => asset.id === assetId); if (target) onDeleteAsset?.(target); } : undefined} onEdit={isEditing && onEditAsset ? asset => { const originFolderId = selectedAssetOriginFolderId; setSelectedAsset(null); setSelectedAssetOriginFolderId(null); onEditAsset(asset, originFolderId ? () => openFolderDetail(originFolderId) : undefined); } : undefined} onMoveToFolder={isEditing && onOpenMoveToFolder ? asset => { const originFolderId = selectedAssetOriginFolderId; setSelectedAsset(null); setSelectedAssetOriginFolderId(null); if (originFolderId) closeFolderDetail(); onOpenMoveToFolder(asset); } : undefined} onRestore={activeTab === 'trash' ? onRestoreAsset : undefined} onPermanentDelete={activeTab === 'trash' ? onPermanentDeleteAsset : undefined} isTrashMode={activeTab === 'trash'} folders={folders} allAssets={allKnownAssets} isOwner={isEditing} creatorProfile={presentationProfile} />
     <FolderDetailModal isOpen={Boolean(selectedFolder)} folder={selectedFolder} assets={visibleAssets} isOwner={isEditing} creatorProfile={presentationProfile} onClose={closeFolderDetail} onOpenWork={asset => { const originFolderId = selectedFolderId; setSelectedFolderId(null); setSelectedAsset(asset); setSelectedAssetOriginFolderId(originFolderId); }} onEditWork={onEditAsset ? asset => { const originFolderId = selectedFolderId; setSelectedFolderId(null); onEditAsset(asset, originFolderId ? () => openFolderDetail(originFolderId) : undefined); } : undefined} onMoveWork={onOpenMoveToFolder ? asset => { closeFolderDetail(); onOpenMoveToFolder(asset); } : undefined} onRemoveWork={onMoveAssetToFolder ? assetId => onMoveAssetToFolder(assetId, null) : undefined} />
-    {isCustomizeOpen && isEditing && editingWidget && <CreatorWidgetEditor type={editingWidget.type} config={editingWidgetConfig} displayName={editingWidgetDisplayName} contextual instanceId={editingWidget.instanceId} onChange={updateEditingWidget} onDisplayNameChange={updateEditingWidgetDisplayName} onClose={() => setEditingWidget(null)} />}
+    {widgetSaveNotice && <div className="csp-widget-save-toast" role="status" aria-live="polite">✓ {widgetSaveNotice}</div>}
+     {isEditing && editingWidget?.type === 'folder' && <CreatorFolderEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.folder || 4} previewDisplayName={displayName} folders={folders} assets={visibleAssets} onSave={saveEditingFolder} onCancel={() => setEditingWidget(null)} onOpenFolder={openFolderDetail} />}
+    {isEditing && editingWidget?.type === 'note' && <CreatorNoteEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.note || 4} previewDisplayName={displayName} onSave={saveEditingNote} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'goal' && <CreatorGoalEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.goal || 6} previewDisplayName={displayName} onSave={saveEditingGoal} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'playlist' && <CreatorMusicEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.playlist || 4} previewDisplayName={displayName} onSave={saveEditingMusic} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'gallery' && <CreatorGalleryEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.gallery || 6} previewDisplayName={displayName} assets={visibleAssets} onSave={saveEditingGallery} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'decoration' && <CreatorDecorationEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.decoration || 4} previewDisplayName={displayName} onSave={saveEditingDecoration} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'clock' && <CreatorClockEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.clock || 4} previewDisplayName={displayName} onSave={saveEditingClock} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'weather' && <CreatorWeatherEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.weather || 4} previewDisplayName={displayName} onSave={saveEditingWeather} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'calendar' && <CreatorCalendarEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.calendar || 4} previewDisplayName={displayName} onSave={saveEditingCalendar} onCancel={() => setEditingWidget(null)} />}
+    {isEditing && editingWidget?.type === 'todo' && <CreatorTodoEditorModal config={editingWidgetConfig} displayName={editingWidgetDisplayName} instanceId={editingWidget.instanceId} previewSpan={editingWidget.span || spans.todo || 4} previewDisplayName={displayName} onSave={saveEditingTodo} onCancel={() => setEditingWidget(null)} />}
+    {isCustomizeOpen && isEditing && editingWidget && !['note', 'goal', 'playlist', 'todo', 'gallery', 'decoration', 'clock', 'weather', 'calendar', 'folder'].includes(editingWidget.type) && <CreatorWidgetEditor type={editingWidget.type} config={editingWidgetConfig} displayName={editingWidgetDisplayName} contextual instanceId={editingWidget.instanceId} onChange={updateEditingWidget} onDisplayNameChange={updateEditingWidgetDisplayName} onClose={() => setEditingWidget(null)} />}
     <ProfileEditModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} onSaved={savedUser => { const nextSlug = getCanonicalProfileSlug(savedUser); if (nextSlug === activeSlug) void refresh(); setActiveSlug(nextSlug); window.history.replaceState({}, '', getCanonicalProfilePath(savedUser)); }} />
   </div>;
 };

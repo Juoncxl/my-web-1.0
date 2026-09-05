@@ -5,7 +5,7 @@ import { CreatorCompactItemControls, shouldUseCompactOwnerControls } from './Cre
 
 export type CreatorLayout = 'locked' | 'free';
 export type LockedPreset = 'left' | 'right' | 'split';
-export type CreatorWidgetType = 'folder' | 'playlist' | 'todo' | 'status' | 'note' | 'links' | 'goal' | 'gallery' | 'clock' | 'calendar' | 'single_image' | 'decoration';
+export type CreatorWidgetType = 'folder' | 'playlist' | 'todo' | 'status' | 'note' | 'links' | 'goal' | 'gallery' | 'clock' | 'weather' | 'calendar' | 'single_image' | 'decoration';
 
 export interface CreatorCustomizePanelProps {
   layout: CreatorLayout;
@@ -26,15 +26,15 @@ export interface CreatorCustomizePanelProps {
 const WIDGET_LIBRARY: Array<{ group: string; items: Array<{ type: CreatorWidgetType; icon: string; label: string }> }> = [
   { group: 'จัดระเบียบ', items: [{ type: 'folder', icon: '📁', label: 'โฟลเดอร์' }, { type: 'todo', icon: '✅', label: 'สิ่งที่ต้องทำ' }, { type: 'goal', icon: '🎯', label: 'เป้าหมาย / ความคืบหน้า' }, { type: 'calendar', icon: '📅', label: 'ปฏิทิน' }] },
   { group: 'ตัวตน', items: [{ type: 'status', icon: '💭', label: 'สถานะ' }, { type: 'note', icon: '📝', label: 'โน้ต' }, { type: 'links', icon: '🔗', label: 'ลิงก์ของฉัน' }] },
-  { group: 'สื่อและ Utility', items: [{ type: 'playlist', icon: '🎵', label: 'Playlist' }, { type: 'single_image', icon: '🌄', label: 'รูปภาพเดี่ยว' }, { type: 'gallery', icon: '🖼️', label: 'แกลเลอรี' }, { type: 'decoration', icon: '✦', label: 'Decoration' }, { type: 'clock', icon: '🕒', label: 'นาฬิกา' }] }
+  { group: 'สื่อและ Utility', items: [{ type: 'playlist', icon: '🎵', label: 'Playlist' }, { type: 'single_image', icon: '🌄', label: 'รูปภาพเดี่ยว' }, { type: 'gallery', icon: '🖼️', label: 'แกลเลอรี' }, { type: 'decoration', icon: '✦', label: 'Decoration' }, { type: 'clock', icon: '🕒', label: 'นาฬิกา' }, { type: 'weather', icon: '☁️', label: 'สภาพอากาศ' }] }
 ];
 
 export const CREATOR_WIDGET_LABELS: Record<CreatorWidgetType, string> = {
-  folder: 'โฟลเดอร์', playlist: 'Playlist', todo: 'สิ่งที่ต้องทำ', status: 'สถานะ', note: 'โน้ต', links: 'ลิงก์ของฉัน', goal: 'เป้าหมาย / ความคืบหน้า', gallery: 'แกลเลอรี', clock: 'นาฬิกา', calendar: 'ปฏิทิน', single_image: 'รูปภาพเดี่ยว', decoration: 'Decoration'
+  folder: 'โฟลเดอร์', playlist: 'Playlist', todo: 'สิ่งที่ต้องทำ', status: 'สถานะ', note: 'โน้ต', links: 'ลิงก์ของฉัน', goal: 'เป้าหมาย / ความคืบหน้า', gallery: 'แกลเลอรี', clock: 'นาฬิกา', weather: 'สภาพอากาศ', calendar: 'ปฏิทิน', single_image: 'รูปภาพเดี่ยว', decoration: 'Decoration'
 };
 
 export const CREATOR_WIDGET_ICONS: Record<CreatorWidgetType, string> = {
-  folder: '📁', playlist: '🎵', todo: '✅', status: '💭', note: '📝', links: '🔗', goal: '🎯', gallery: '🖼️', clock: '🕒', calendar: '📅', single_image: '🌄', decoration: '✦'
+  folder: '📁', playlist: '🎵', todo: '✅', status: '💭', note: '📝', links: '🔗', goal: '🎯', gallery: '🖼️', clock: '🕒', weather: '☁️', calendar: '📅', single_image: '🌄', decoration: '✦'
 };
 
 const SPAN_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);

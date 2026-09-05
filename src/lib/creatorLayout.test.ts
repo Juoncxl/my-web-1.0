@@ -235,8 +235,13 @@ describe('Free Layout coordinate model', () => {
     expect(getFreePlacementWidthOptions('widget', 'decoration')).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(getFreePlacementWidthOptions('work')).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(getFreePlacementWidthOptions('portfolio')).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(getFreePlacementWidthRange('widget', 'goal')).toEqual({ minW: 4, maxW: 12 });
+    expect(getFreePlacementWidthRange('widget', 'clock')).toEqual({ minW: 3, maxW: 12 });
+    expect(getFreePlacementWidthRange('widget', 'folder')).toEqual({ minW: 3, maxW: 12 });
+    expect(getFreePlacementWidthOptions('widget', 'folder')).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(constrainFreePlacementWidth(1, 'work')).toBe(3);
     expect(constrainFreePlacementWidth(2, 'portfolio')).toBe(4);
+    expect(constrainFreePlacementWidth(2, 'widget', 'goal')).toBe(4);
     expect(constrainFreePlacementWidth(12, 'widget', 'note')).toBe(12);
   });
 
