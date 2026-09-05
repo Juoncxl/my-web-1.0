@@ -3,7 +3,7 @@ import type { Asset, User } from '../types';
 import { supabaseService, type FetchAssetsOptions } from '../lib/supabaseService';
 import { removeAssetFromCreatorSpaceSettings } from '../lib/creatorPersistence';
 
-type ReportError = (message: string) => void;
+type ReportError = (message: string | null) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
 
 export function useAssetData(
@@ -58,6 +58,9 @@ export function useAssetData(
       }
       setAssets(res.data);
       hasLoadedAssets.current = true;
+      // A successful retry supersedes an earlier request failure. Keeping the
+      // old message visible after the cards have rendered is misleading.
+      reportError(null);
     } catch (error) {
       if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
       console.error('Error loading assets:', error);

@@ -24,7 +24,7 @@ import { useAssetFilters } from './hooks/useAssetFilters';
 import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
 import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
-import { getCanonicalProfilePath } from './lib/profileIdentity';
+import { getCanonicalProfilePath, getCanonicalProfileSlug } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 
@@ -82,6 +82,7 @@ function MainApp() {
   }, []);
 
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
   const reportOperationError = useCallback((message: string) => {
     setOperationError(message);
   }, []);
@@ -92,7 +93,19 @@ function MainApp() {
       // columns. Opening or editing a Work hydrates that one full row on
       // demand, so an owner profile with legacy long-form payloads does not
       // download every payload during its initial render.
-      return { creatorSlug, includeDeleted: true, detail: 'summary', limit: 100 } as const;
+      let decodedSlug = creatorSlug;
+      try { decodedSlug = decodeURIComponent(creatorSlug).trim(); } catch { /* use the raw route value */ }
+      const isOwnerRoute = Boolean(
+        currentUser
+        && (
+          decodedSlug === currentUser.id
+          || decodedSlug.toLowerCase() === getCanonicalProfileSlug(currentUser).toLowerCase()
+        )
+      );
+      const includeDeleted = profileRoute?.requestedTab === 'trash';
+      return isOwnerRoute
+        ? { userId: currentUser!.id, includeDeleted, detail: 'summary', limit: 100 } as const
+        : { creatorSlug, includeDeleted: false, detail: 'summary', limit: 100 } as const;
     }
     if (workRoute?.[1]) {
       let assetId = workRoute[1];
@@ -103,7 +116,12 @@ function MainApp() {
       return { userId: currentUser.id, includeDeleted: true, detail: 'full', limit: 100 } as const;
     }
     return { publicOnly: true, detail: 'summary', limit: 48 } as const;
-  }, [activeView, creatorSlug, currentUser, workRoute?.[1]]);
+  }, [activeView, creatorSlug, currentUser, profileRoute?.requestedTab, workRoute?.[1]]);
+
+  // A creator route must wait for Auth restoration once so it can choose the
+  // owner query immediately instead of doing an anonymous read followed by a
+  // second owner read. The public Feed remains independent and starts at once.
+  const assetLoadingEnabled = !creatorSlug || !authLoading;
 
   const {
     assets,
@@ -119,7 +137,7 @@ function MainApp() {
     moveAsset,
     updateAssetLikeCount,
     clearFolderAssignments
-  } = useAssetData(currentUser, reportOperationError, true, assetLoadOptions);
+  } = useAssetData(currentUser, setAssetLoadError, assetLoadingEnabled, assetLoadOptions);
   const {
     folders,
     isLoadingFolders,
@@ -135,6 +153,7 @@ function MainApp() {
     toggleLike
   } = useEngagementData(resolvedUserId, reportOperationError);
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
+  const visibleOperationError = operationError || assetLoadError;
 
   const {
     viewingAsset,
@@ -512,11 +531,11 @@ function MainApp() {
 
           {/* Main Container */}
           <main className="cv-main-container flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            {operationError && (
+            {visibleOperationError && (
               <div className="mb-4 p-3 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2" role="alert">
                 <AlertCircle className="w-4 h-4 shrink-0" />
-                <span className="flex-1">{operationError}</span>
-                <button type="button" onClick={() => setOperationError(null)} aria-label="ปิดข้อความแจ้งเตือน" className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60">
+                <span className="flex-1">{visibleOperationError}</span>
+                <button type="button" onClick={() => { setOperationError(null); setAssetLoadError(null); }} aria-label="ปิดข้อความแจ้งเตือน" className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>

@@ -89,6 +89,13 @@ export function useCreatorSpaceData(
     }
     if (ownerProfileFallback) {
       setProfile(current => current || supabaseService.getCreatorProfileSnapshot(slug) || ownerProfileFallback);
+      // Auth already contains the canonical owner identity and presentation.
+      // Render it immediately while the cloud profile refresh continues in
+      // the background instead of blocking the whole page on another lookup.
+      if (!background) {
+        blockingLoadActive.current = false;
+        setIsProfileLoading(false);
+      }
     }
 
     try {
@@ -125,7 +132,7 @@ export function useCreatorSpaceData(
         setError('อัปเดตข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
       }
     } finally {
-      if (requestId === requestSequence.current && !background) {
+      if (requestId === requestSequence.current && !background && blockingLoadActive.current) {
         blockingLoadActive.current = false;
         setIsProfileLoading(false);
       }

@@ -533,7 +533,7 @@ export const supabaseService = {
       // copy of the exact same public list request.
       const sessionUserId = options?.publicOnly
         ? undefined
-        : (await supabase.auth.getSession()).data.session?.user.id;
+        : options?.currentUserId || (await supabase.auth.getSession()).data.session?.user.id;
       let query = supabase
         .from('assets')
         .select(options?.detail === 'summary' ? ASSET_SUMMARY_COLUMNS : '*');
