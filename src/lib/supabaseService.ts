@@ -422,12 +422,28 @@ export interface FetchAssetsOptions {
 }
 
 const ASSET_SUMMARY_COLUMNS = [
-  'id', 'user_id', 'author_name', 'author_avatar', 'title', 'icon', 'category',
+  // Legacy Google AI Studio rows may contain multi-megabyte base64 values in
+  // both author_avatar and icon. Repeating those blobs for every card caused
+  // 30+ MB Feed responses and PostgREST statement timeouts. List cards use
+  // their profile/category fallbacks; opening one Work hydrates its icon.
+  'id', 'user_id', 'author_name', 'title', 'category',
   'short_description', 'content_type_labels', 'content_types', 'presentation_metadata',
   'public_collaboration', 'collaboration_asset_id', 'preview_image', 'folder_id',
   'is_public', 'visibility', 'status', 'tags', 'created_at', 'updated_at',
   'deleted_at', 'likes_count', 'fork_count', 'forked_from_id', 'forked_from_author',
   'linked_asset_ids'
+].join(',');
+
+const ASSET_DETAIL_COLUMNS = [
+  // Author presentation belongs to profiles. Never download the legacy base64
+  // avatar duplicated on each Work row, even for a detail request.
+  'id', 'user_id', 'author_name', 'title', 'icon', 'category',
+  'short_description', 'content_type_labels', 'content_types', 'presentation_metadata',
+  'public_collaboration', 'collaboration_asset_id', 'content_blocks', 'content',
+  'ui_code_snippet', 'preview_image', 'preview_images', 'folder_id', 'is_public',
+  'visibility', 'status', 'tags', 'created_at', 'updated_at', 'deleted_at',
+  'likes_count', 'fork_count', 'forked_from_id', 'forked_from_author',
+  'linked_asset_ids', 'versions'
 ].join(',');
 
 function normalizeAssetQueryLimit(value: number | undefined): number | undefined {
@@ -536,7 +552,7 @@ export const supabaseService = {
         : options?.currentUserId || (await supabase.auth.getSession()).data.session?.user.id;
       let query = supabase
         .from('assets')
-        .select(options?.detail === 'summary' ? ASSET_SUMMARY_COLUMNS : '*');
+        .select(options?.detail === 'summary' ? ASSET_SUMMARY_COLUMNS : ASSET_DETAIL_COLUMNS);
 
       let scopedUserId = options?.userId;
       if (!scopedUserId && options?.creatorSlug) {

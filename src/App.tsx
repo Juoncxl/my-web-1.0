@@ -113,7 +113,9 @@ function MainApp() {
       return { assetId, detail: 'full', limit: 1 } as const;
     }
     if (activeView === 'vault' && currentUser?.id) {
-      return { userId: currentUser.id, includeDeleted: true, detail: 'full', limit: 100 } as const;
+      // The Vault list also hydrates one Work on demand. Pulling every legacy
+      // long-form payload here recreates the same egress spike as the Feed.
+      return { userId: currentUser.id, includeDeleted: true, detail: 'summary', limit: 100 } as const;
     }
     return { publicOnly: true, detail: 'summary', limit: 48 } as const;
   }, [activeView, creatorSlug, currentUser, profileRoute?.requestedTab, workRoute?.[1]]);

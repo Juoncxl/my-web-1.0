@@ -56,6 +56,34 @@ describe('social persistence', () => {
     await expect(supabaseService.fetchAssets({ publicOnly: true, detail: 'summary', limit: 48 }))
       .resolves.toEqual({ data: [], error: null });
     expect(client.auth.getSession).not.toHaveBeenCalled();
+    const summaryColumns = query.select.mock.calls[0][0] as string;
+    expect(summaryColumns).not.toContain('author_avatar');
+    expect(summaryColumns.split(',')).not.toContain('icon');
+    expect(summaryColumns).not.toContain('content_blocks');
+    expect(summaryColumns).not.toContain('ui_code_snippet');
+  });
+
+  it('never downloads the duplicated legacy author avatar for a Work detail', async () => {
+    const query: any = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      or: vi.fn(() => query),
+      order: vi.fn(() => query),
+      limit: vi.fn().mockResolvedValue({ data: [], error: null })
+    };
+    const from = vi.fn().mockReturnValue(query);
+    const client = authenticatedClient(from);
+    getSupabaseClientMock.mockReturnValue(client);
+
+    await expect(supabaseService.fetchAssets({
+      assetId: 'asset-1', currentUserId: 'user-1', detail: 'full', limit: 1
+    })).resolves.toEqual({ data: [], error: null });
+
+    expect(client.auth.getSession).not.toHaveBeenCalled();
+    const detailColumns = query.select.mock.calls[0][0] as string;
+    expect(detailColumns).not.toContain('author_avatar');
+    expect(detailColumns.split(',')).toContain('content');
+    expect(detailColumns.split(',')).toContain('icon');
   });
 
   it('uses an idempotent database upsert for Bookmark state', async () => {
