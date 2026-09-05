@@ -88,13 +88,11 @@ function MainApp() {
   const resolvedUserId = authLoading ? undefined : currentUser?.id;
   const assetLoadOptions = useMemo(() => {
     if (creatorSlug) {
-      let decodedSlug = creatorSlug;
-      try { decodedSlug = decodeURIComponent(decodedSlug).trim(); } catch { /* keep the raw route value */ }
-      const isOwnerProfile = Boolean(currentUser && (
-        decodedSlug === currentUser.id ||
-        decodedSlug.toLowerCase() === currentUser.username?.trim().toLowerCase()
-      ));
-      return { creatorSlug, includeDeleted: true, detail: isOwnerProfile ? 'full' : 'summary', limit: 100 } as const;
+      // Profile cards and widgets only need the lightweight presentation
+      // columns. Opening or editing a Work hydrates that one full row on
+      // demand, so an owner profile with legacy long-form payloads does not
+      // download every payload during its initial render.
+      return { creatorSlug, includeDeleted: true, detail: 'summary', limit: 100 } as const;
     }
     if (workRoute?.[1]) {
       let assetId = workRoute[1];

@@ -14,9 +14,13 @@ export function useAssetData(
 ) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoadingAssets, setIsLoadingAssets] = useState(true);
+  // A public feed query is identical before and after Auth restoration. Keep
+  // it independent from the session identity to avoid downloading the same
+  // public rows twice during application boot.
+  const loadIdentityUserId = loadOptions.publicOnly ? undefined : currentUser?.id;
   const requestSequence = useRef(0);
   const scopeSequence = useRef(0);
-  const previousUserId = useRef<string | undefined>(currentUser?.id);
+  const previousUserId = useRef<string | undefined>(loadIdentityUserId);
   const loadScopeKey = [
     loadOptions.assetId || '',
     loadOptions.creatorSlug || '',
@@ -45,7 +49,7 @@ export function useAssetData(
     try {
       const res = await supabaseService.fetchAssets({
         ...loadOptions,
-        currentUserId: currentUser?.id,
+        currentUserId: loadIdentityUserId,
       });
       if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
       if (res.error) {
@@ -64,7 +68,7 @@ export function useAssetData(
       }
     }
   }, [
-    currentUser?.id,
+    loadIdentityUserId,
     enabled,
     loadOptions.assetId,
     loadOptions.category,
@@ -83,7 +87,7 @@ export function useAssetData(
   useEffect(() => {
     if (!enabled) return;
 
-    const userId = currentUser?.id;
+    const userId = loadIdentityUserId;
     if (previousUserId.current !== userId || previousLoadScopeKey.current !== loadScopeKey) {
       previousUserId.current = userId;
       previousLoadScopeKey.current = loadScopeKey;
@@ -93,7 +97,7 @@ export function useAssetData(
       setIsLoadingAssets(true);
     }
     void refreshAssets();
-  }, [currentUser?.id, enabled, loadScopeKey, refreshAssets]);
+  }, [enabled, loadIdentityUserId, loadScopeKey, refreshAssets]);
 
   const createAsset = useCallback(async (assetData: NewAssetData) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
@@ -196,7 +200,7 @@ export function useAssetData(
   // Render the next account scope as loading immediately. Effects run after
   // paint, so relying only on setIsLoadingAssets inside the effect can flash a
   // stale/empty result for one frame during session restoration or re-login.
-  const isChangingAccountScope = previousUserId.current !== currentUser?.id;
+  const isChangingAccountScope = previousUserId.current !== loadIdentityUserId;
 
   return {
     assets,

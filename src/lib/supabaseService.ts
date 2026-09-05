@@ -77,6 +77,15 @@ function toServiceError(error: any, fallback: string): string {
   return friendly === message && message ? fallback : friendly || fallback;
 }
 
+function isOptionalRelationUnavailable(error: unknown): boolean {
+  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  const code = String(record.code || '');
+  const message = String(record.message || '');
+  return code === 'PGRST205'
+    || code === '42P01'
+    || /could not find the table|relation .* does not exist|schema cache/i.test(message);
+}
+
 async function requireCloudUser(expectedUserId?: string): Promise<CloudAuth> {
   const supabase = getSupabaseClient();
   if (!supabase) {
@@ -519,8 +528,12 @@ export const supabaseService = {
     }
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionUserId = sessionData.session?.user.id;
+      // Public discovery does not depend on the current session. Avoid an
+      // Auth read here so restoring a signed-in user cannot trigger a second
+      // copy of the exact same public list request.
+      const sessionUserId = options?.publicOnly
+        ? undefined
+        : (await supabase.auth.getSession()).data.session?.user.id;
       let query = supabase
         .from('assets')
         .select(options?.detail === 'summary' ? ASSET_SUMMARY_COLUMNS : '*');
@@ -1134,6 +1147,10 @@ export const supabaseService = {
         .from('asset_likes')
         .select('asset_id')
         .eq('user_id', auth.userId);
+      // Older Creator Vault databases predate the optional relational Likes
+      // table. Treat that capability as unavailable instead of turning an
+      // otherwise healthy Feed into a global error state.
+      if (error && isOptionalRelationUnavailable(error)) return { data: [], error: null };
       if (error) return { data: [], error: toServiceError(error, 'โหลดรายการถูกใจไม่สำเร็จ') };
       return { data: (data || []).map((row: any) => row.asset_id), error: null };
     } catch (error) {

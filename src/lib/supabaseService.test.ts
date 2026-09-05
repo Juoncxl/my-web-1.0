@@ -27,6 +27,37 @@ beforeEach(() => {
 });
 
 describe('social persistence', () => {
+  it('treats a missing optional Likes table as an empty list for legacy databases', async () => {
+    const likesQuery: any = {
+      select: vi.fn(() => likesQuery),
+      eq: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: 'PGRST205', message: "Could not find the table 'public.asset_likes' in the schema cache" }
+      })
+    };
+    const from = vi.fn().mockReturnValue(likesQuery);
+    getSupabaseClientMock.mockReturnValue(authenticatedClient(from));
+
+    await expect(supabaseService.fetchLikedAssetIds('user-1')).resolves.toEqual({ data: [], error: null });
+  });
+
+  it('does not read Auth before fetching the public Feed', async () => {
+    const query: any = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      is: vi.fn(() => query),
+      order: vi.fn(() => query),
+      limit: vi.fn().mockResolvedValue({ data: [], error: null })
+    };
+    const from = vi.fn().mockReturnValue(query);
+    const client = authenticatedClient(from);
+    getSupabaseClientMock.mockReturnValue(client);
+
+    await expect(supabaseService.fetchAssets({ publicOnly: true, detail: 'summary', limit: 48 }))
+      .resolves.toEqual({ data: [], error: null });
+    expect(client.auth.getSession).not.toHaveBeenCalled();
+  });
+
   it('uses an idempotent database upsert for Bookmark state', async () => {
     const upsert = vi.fn().mockResolvedValue({ error: null });
     const from = vi.fn().mockReturnValue({ upsert });
