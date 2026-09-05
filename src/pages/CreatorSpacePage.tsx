@@ -26,8 +26,7 @@ import { CreatorWidgetRenderer } from '../components/creator/CreatorWidgetRender
 import { getPublicFolderPresentation, getTodoPresentation, getWidgetRenderSize, DEFAULT_FOLDER_STYLE, DEFAULT_FOLDER_SUBTITLE, DEFAULT_FOLDER_TITLE } from '../components/creator/creatorWidgetModel';
 import { CreatorCompactItemControls } from '../components/creator/CreatorCompactItemControls';
 import { getCreatorVisibleAssets, selectCreatorSavedAssets, useCreatorSpaceData } from '../hooks/useCreatorSpaceData';
-import { isMockPersistence } from '../lib/persistenceMode';
-import { readCreatorSpaceSettings, writeCreatorSpaceSettings } from '../lib/creatorPersistence';
+import { readPersistedCreatorSpaceSettings, writePersistedCreatorSpaceSettings } from '../lib/creatorPersistence';
 import { anchorFreeGridCell, canAddFreePlacement, compactFreeLayout, constrainFreePlacementWidth, createFreeWidgetInstance, estimatePortfolioHeightRows, estimateWorkHeightRows, getFreePlacementId, getFreePlacementWidthOptions, getPortfolioShowcaseItems, getWorkCardSize, hydrateFreeWidgetInstances, hydrateSavedFreeLayout, materializeDerivedHeights, migrateFreeOrder, moveFreePlacement, normalizeFreePlacement, pixelsToFreeGridRows, pointerToFreeGridCell, removeFreePlacement, resolveFreePlacementPosition, resizeFreePlacement, shouldShowFreePlacementControls, updateFreeWidgetInstance, type FreeLayoutPlacement, type FreePlacementKind, type FreeWidgetInstance, type PortfolioDisplayLimit } from '../lib/creatorLayout';
 import { parseCanonicalProfileLocation, resolveProfileView, shouldNormalizeOwnerProfileContext, type ProfileTab } from '../lib/profileRouting';
 import { getCanonicalProfilePath, getCanonicalProfileSlug } from '../lib/profileIdentity';
@@ -284,10 +283,13 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   }, [authLoading, profile, requestedTab, resolvedView.isPublicView, selectedFolderId]);
 
   useEffect(() => {
-    if (!isMockPersistence || !profile) return;
+    if (!profile) return;
+    let cancelled = false;
     setSettingsHydrated(false);
-    const saved = readCreatorSpaceSettings(profile.id);
-    if (saved) {
+    void readPersistedCreatorSpaceSettings(profile.id).then(({ data: saved, error }) => {
+      if (cancelled) return;
+      if (error && (import.meta as any).env?.DEV) console.warn('[CreatorSpace] settings read failed; using available fallback', error);
+      if (saved) {
       if (saved.layout) setLayout(saved.layout);
       if (saved.lockedPreset) setLockedPreset(saved.lockedPreset);
       if (saved.widgets) setWidgets(saved.widgets as CreatorWidgetType[]);
@@ -308,17 +310,24 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       setFreePlacements(hydratedPlacements.filter(item => item.kind !== 'widget' || instanceIds.has(item.refId)));
       if (saved.widgetTitles) setWidgetTitles(saved.widgetTitles);
       if (saved.widgetConfigs) setWidgetConfigs(saved.widgetConfigs as Partial<Record<CreatorWidgetType, CreatorWidgetConfig>>);
-    } else {
+      } else {
       const defaultPlacements = migrateFreeOrder(DEFAULT_FREE_ORDER, DEFAULT_SPANS);
       setFreePlacements(defaultPlacements);
       setWidgetInstances(hydrateFreeWidgetInstances(defaultPlacements, [], DEFAULT_WIDGET_CONFIGS as Record<string, Record<string, unknown>>));
-    }
-    setSettingsHydrated(true);
+      }
+      setSettingsHydrated(true);
+    });
+    return () => { cancelled = true; };
   }, [profile?.id]);
 
   useEffect(() => {
-    if (!isMockPersistence || !isOwner || !profile || !settingsHydrated) return;
-    writeCreatorSpaceSettings(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, freePlacements, portfolioDisplayLimit, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>>, widgetInstances });
+    if (!isOwner || !profile || !settingsHydrated) return;
+    const timeoutId = window.setTimeout(() => {
+      void writePersistedCreatorSpaceSettings(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, freePlacements, portfolioDisplayLimit, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>>, widgetInstances }).then(result => {
+        if (!result.success && (import.meta as any).env?.DEV) console.warn('[CreatorSpace] settings save failed', result.error);
+      });
+    }, 500);
+    return () => window.clearTimeout(timeoutId);
   }, [freeOrder, freePlacements, isOwner, layout, lockedPreset, portfolioDisplayLimit, profile?.id, settingsHydrated, spans, widgetConfigs, widgetInstances, widgetRail, widgetTitles, widgets]);
   const visibleAssets = useMemo(() => getCreatorVisibleAssets(assets, isEditing), [assets, isEditing]);
   const widgetInstanceMap = useMemo(() => new Map(widgetInstances.map(instance => [instance.id, instance])), [widgetInstances]);

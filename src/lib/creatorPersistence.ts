@@ -2,6 +2,8 @@ import type { Asset, Folder, User } from '../types';
 import type { FreeLayoutPlacement, FreeWidgetInstance } from './creatorLayout';
 import { normalizeAssetVisibility } from './assetVisibility';
 import { stripQaWorkPayload } from './qaWorkPayloadStore';
+import { getSupabaseClient } from './supabaseClient';
+import { isMockPersistence } from './persistenceMode';
 
 const STORAGE_KEY = 'cxl_creator_space_qa_sandbox_v1';
 const PROFILE_STORAGE_KEY = 'cxl_creator_space_qa_profiles_v1';
@@ -24,6 +26,12 @@ export interface CreatorSpaceSettings {
   widgetTitles?: Record<string, string>;
   widgetConfigs?: Record<string, Record<string, unknown>>;
   widgetInstances?: FreeWidgetInstance[];
+}
+
+export interface CreatorSpaceSettingsResult {
+  data: CreatorSpaceSettings | null;
+  error: string | null;
+  source: 'cloud' | 'local' | 'none';
 }
 
 interface CreatorSandboxState {
@@ -468,6 +476,55 @@ export function writeCreatorSpaceSettings(userId: string, settings: CreatorSpace
   // asset/profile data listeners: doing so creates a settings -> profile
   // refresh -> rerender -> settings feedback loop on the Profile route.
   return writeState({ ...state, settings: { ...state.settings, [userId]: settings } }, false);
+}
+
+/**
+ * Reads the shared Creator Space presentation in production. A local record is
+ * used as a one-time migration source when the cloud row does not exist yet,
+ * which lets an owner bring an existing localhost layout into Supabase simply
+ * by opening the updated local app while signed in.
+ */
+export async function readPersistedCreatorSpaceSettings(userId: string): Promise<CreatorSpaceSettingsResult> {
+  const local = readCreatorSpaceSettings(userId);
+  if (isMockPersistence) return { data: local, error: null, source: local ? 'local' : 'none' };
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return { data: local, error: 'Supabase client is unavailable', source: local ? 'local' : 'none' };
+
+  try {
+    const { data, error } = await supabase
+      .from('creator_space_settings')
+      .select('settings')
+      .eq('profile_id', userId)
+      .maybeSingle();
+    if (error) return { data: local, error: error.message, source: local ? 'local' : 'none' };
+    if (data?.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)) {
+      return { data: data.settings as CreatorSpaceSettings, error: null, source: 'cloud' };
+    }
+    return { data: local, error: null, source: local ? 'local' : 'none' };
+  } catch (error) {
+    return { data: local, error: error instanceof Error ? error.message : 'Unable to read Creator Space settings', source: local ? 'local' : 'none' };
+  }
+}
+
+/** Save presentation settings locally in QA and to the owner's cloud row in production. */
+export async function writePersistedCreatorSpaceSettings(userId: string, settings: CreatorSpaceSettings): Promise<{ success: boolean; error: string | null }> {
+  if (isMockPersistence) return { success: writeCreatorSpaceSettings(userId, settings), error: null };
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: 'Supabase client is unavailable' };
+  try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || sessionData.session?.user.id !== userId) {
+      return { success: false, error: 'The active account is not the profile owner' };
+    }
+    const { error } = await supabase
+      .from('creator_space_settings')
+      .upsert({ profile_id: userId, settings, updated_at: new Date().toISOString() }, { onConflict: 'profile_id' });
+    return error ? { success: false, error: error.message } : { success: true, error: null };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to save Creator Space settings' };
+  }
 }
 
 export function readMockBookmarks(userId: string): string[] {
