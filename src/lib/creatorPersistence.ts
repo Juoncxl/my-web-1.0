@@ -7,6 +7,7 @@ import { isMockPersistence } from './persistenceMode';
 
 const STORAGE_KEY = 'cxl_creator_space_qa_sandbox_v1';
 const PROFILE_STORAGE_KEY = 'cxl_creator_space_qa_profiles_v1';
+const SETTINGS_CLOUD_MIGRATION_PREFIX = 'cxl_creator_space_cloud_migrated_v1_';
 
 export interface MockProfileWriteResult {
   success: boolean;
@@ -488,6 +489,19 @@ export async function readPersistedCreatorSpaceSettings(userId: string): Promise
   const local = readCreatorSpaceSettings(userId);
   if (isMockPersistence) return { data: local, error: null, source: local ? 'local' : 'none' };
 
+  // Localhost is the only origin that can see the owner's pre-deployment
+  // layout. Prefer it once, even if production has already created a default
+  // cloud row, and mark the migration after the first successful cloud write.
+  const isLocalhost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const migrationKey = `${SETTINGS_CLOUD_MIGRATION_PREFIX}${userId}`;
+  let hasMigratedLocalSettings = false;
+  if (typeof window !== 'undefined') {
+    try { hasMigratedLocalSettings = window.localStorage.getItem(migrationKey) === '1'; } catch { /* cloud read still works */ }
+  }
+  if (isLocalhost && local && !hasMigratedLocalSettings) {
+    return { data: local, error: null, source: 'local' };
+  }
+
   const supabase = getSupabaseClient();
   if (!supabase) return { data: local, error: 'Supabase client is unavailable', source: local ? 'local' : 'none' };
 
@@ -521,7 +535,11 @@ export async function writePersistedCreatorSpaceSettings(userId: string, setting
     const { error } = await supabase
       .from('creator_space_settings')
       .upsert({ profile_id: userId, settings, updated_at: new Date().toISOString() }, { onConflict: 'profile_id' });
-    return error ? { success: false, error: error.message } : { success: true, error: null };
+    if (error) return { success: false, error: error.message };
+    if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      try { window.localStorage.setItem(`${SETTINGS_CLOUD_MIGRATION_PREFIX}${userId}`, '1'); } catch { /* the cloud write already succeeded */ }
+    }
+    return { success: true, error: null };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unable to save Creator Space settings' };
   }
