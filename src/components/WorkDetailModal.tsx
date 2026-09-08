@@ -35,7 +35,7 @@ import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
 import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
-import { getParticipantHouseTagCopy } from '../lib/collaborationPresentation';
+import { getParticipantPromotionCopy } from '../lib/collaborationPresentation';
 import { createReferenceImageFile, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload } from '../lib/workSharing';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
@@ -345,7 +345,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       ...display.collaboration.participants.map(participant => `### ${participant.creatorName || 'ผู้เข้าร่วม'}\n${participant.houseTag ? `#${participant.houseTag.replace(/^#/, '')}\n` : ''}${participant.externalWorkName || ''}`)
     ].filter(Boolean).join('\n\n')
     : '';
-  const participantCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => getParticipantHouseTagCopy(participant.houseTag);
+  const participantCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => getParticipantPromotionCopy(participant.houseTag, participant.notes);
   const markdown = `# ${display.title}\n**หมวดหมู่:** ${category.name} (${category.nameEn})\n**ผู้สร้าง:** ${creator.displayName}\n**วันที่สร้าง:** ${asset.createdAt}\n**ลิขสิทธิ์ / Proof Hash:** #VAULT-${asset.id.slice(0, 8).toUpperCase()}\n\n## คำอธิบายสั้น\n${display.summary || shortDescription}\n\n---\n\n## เนื้อหาหลัก\n${mainContentCopy}\n${publicCollaborationCopy ? `\n\n---\n\n${publicCollaborationCopy}` : ''}${uiCode ? `\n---\n\n## โค้ด UI Snippet\n\`\`\`html\n${uiCode}\n\`\`\`` : ''}\n`;
   const confirmMoveToTrash = () => {
     if (!onDelete) return;

@@ -22,8 +22,8 @@ describe('public Creator identity on Work cards', () => {
     expect(previewSource).toContain("event.key === 'Escape'");
   });
 
-  it('limits a participant copy action to a house tag and omits the action without one', () => {
-    expect(detailSource).toContain('getParticipantHouseTagCopy(participant.houseTag)');
+  it('limits a participant copy action to the house tag and note body', () => {
+    expect(detailSource).toContain('getParticipantPromotionCopy(participant.houseTag, participant.notes)');
     expect(detailSource).toContain('{participantCopyText && <CopyButton');
     expect(detailSource).not.toContain('participant.platforms.join');
     expect(detailSource).not.toContain('`สถานะข้อมูล: ${getCollabStatusLabel(participant.dataStatus)}`');

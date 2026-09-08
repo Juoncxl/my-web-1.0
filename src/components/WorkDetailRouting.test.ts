@@ -90,7 +90,7 @@ describe('canonical Work Detail routing', () => {
     expect(mainHeading).not.toContain('<CopyButton');
     expect(collaborationIdentity).not.toContain('คัดลอกทั้งหมด');
     expect(detailSource).toContain('isMeaningfulCopyText(item.content, item.title)');
-    expect(detailSource).toContain('getParticipantHouseTagCopy(participant.houseTag)');
+    expect(detailSource).toContain('getParticipantPromotionCopy(participant.houseTag, participant.notes)');
     expect(detailSource).toContain('{participantCopyText && <CopyButton');
   });
 
