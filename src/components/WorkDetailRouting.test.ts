@@ -162,15 +162,14 @@ describe('canonical Work Detail routing', () => {
 
   it('routes Work trash confirmation through the in-app dialog and preserves the existing handler', () => {
     const vaultTrashHandler = appSource.match(/const handleDeleteVaultAsset[\s\S]*?\/\/ Folder CRUD/)?.[0] || '';
-    const detailTrashButton = detailSource.match(/\{isOwner && onDelete && <button[\s\S]*?<\/button>\}/)?.[0] || '';
     const cancelButton = confirmationSource.match(/<button ref=\{cancelButtonRef\}[\s\S]*?data-confirmation-cancel>/)?.[0] || '';
     const confirmButton = confirmationSource.match(/<button type="button" onClick=\{handleConfirm\}[\s\S]*?data-confirmation-confirm>/)?.[0] || '';
 
     expect(vaultTrashHandler).toContain('setTrashConfirmationAsset(asset)');
     expect(vaultTrashHandler).not.toContain('window.confirm');
     expect(appSource).toContain('void handleSoftDeleteAsset(assetId)');
-    expect(detailTrashButton).toContain('setIsTrashConfirmationOpen(true)');
-    expect(detailTrashButton).not.toContain('window.confirm');
+    expect(detailSource).toContain('setIsTrashConfirmationOpen(true)');
+    expect(detailSource).not.toContain('window.confirm');
     expect(detailSource).toContain('onDelete(asset.id)');
     expect(confirmationSource).toContain('data-confirmation-dialog');
     expect(confirmationSource).toContain('data-confirmation-cancel');
@@ -185,12 +184,11 @@ describe('canonical Work Detail routing', () => {
 
   it('routes Permanent Delete through the same confirmation dialog without changing deletion semantics', () => {
     const cardPermanentDeleteButton = cardSource.match(/\{isTrashMode && onPermanentDelete && <button[\s\S]*?<\/button>\}/)?.[0] || '';
-    const detailPermanentDeleteButton = detailSource.match(/\{onPermanentDelete && <button[\s\S]*?<\/button>\}/)?.[0] || '';
 
     expect(cardPermanentDeleteButton).toContain('setIsPermanentDeleteConfirmationOpen(true)');
     expect(cardPermanentDeleteButton).not.toContain('window.confirm');
-    expect(detailPermanentDeleteButton).toContain('setIsPermanentDeleteConfirmationOpen(true)');
-    expect(detailPermanentDeleteButton).not.toContain('window.confirm');
+    expect(detailSource).toContain('setIsPermanentDeleteConfirmationOpen(true)');
+    expect(detailSource).not.toContain('window.confirm');
     expect(actionsSource).toContain('const handlePermanentDeleteAsset = useCallback');
     expect(actionsSource).toContain('permanentDeleteAsset(assetId)');
     expect(actionsSource).toContain('onAssetDeleted(assetId)');

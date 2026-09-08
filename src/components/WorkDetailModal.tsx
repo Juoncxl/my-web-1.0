@@ -18,6 +18,7 @@ import {
   Heart,
   ImageIcon,
   LockKeyhole,
+  MoreHorizontal,
   RotateCcw,
   Share2,
   Tag,
@@ -34,6 +35,7 @@ import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
 import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
+import { createReferenceImageFilename, getWorkShareUrl } from '../lib/workSharing';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
 
@@ -176,7 +178,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codeView, setCodeView] = useState<CodeView>('split');
-  const [shareToast, setShareToast] = useState(false);
+  const [shareStatus, setShareStatus] = useState<'success' | 'error' | null>(null);
+  const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
@@ -204,6 +207,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     setActiveImageIndex(coverImageSelected ? 0 : -1);
     setShowVersionHistory(false);
     setCodeView('split');
+    setShareStatus(null);
+    setIsMobileActionsOpen(false);
     setIsTrashConfirmationOpen(false);
     setIsPermanentDeleteConfirmationOpen(false);
   }, [asset?.id, coverImageSelected]);
@@ -279,11 +284,18 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     window.setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (interactionMode === 'preview') return;
-    void navigator.clipboard?.writeText(window.location.href);
-    setShareToast(true);
-    window.setTimeout(() => setShareToast(false), 2000);
+    const shareUrl = getWorkShareUrl(asset.id, window.location.origin);
+    setShareStatus(null);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(shareUrl);
+      setShareStatus('success');
+    } catch {
+      setShareStatus('error');
+    }
+    window.setTimeout(() => setShareStatus(null), 2500);
   };
 
   const downloadText = (content: string, filename: string, mime: string) => {
@@ -296,6 +308,15 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   };
 
   const safeFilename = display.title.replace(/[^a-zA-Z0-9ก-๙]/g, '_');
+  const downloadReferenceImage = (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
+    const anchor = document.createElement('a');
+    anchor.href = image.src;
+    anchor.download = createReferenceImageFilename(display.title, participantName, index, image.mimeType, image.src);
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  };
   const publicCollaborationCopy = display.collaboration
     ? [
       `## ข้อมูลคอลแลป\n${display.collaboration.name}`,
@@ -460,7 +481,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
-            {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map(image => <img key={image.id} src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'}`} referrerPolicy="no-referrer" />)}</div>}
+            {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => downloadReferenceImage(image, participant.creatorName, index)} aria-label={`ดาวน์โหลดรูปอ้างอิงที่ ${index + 1}`} title="ดาวน์โหลดรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
           </article>)}</div>
         </section> : null}
 
@@ -498,21 +519,26 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <span>โดย {creator.displayName}</span>
         </div>
         <div className="work-detail-footer-actions">
-          {isTrashMode ? <>
-            {onRestore && <button type="button" className="is-positive" onClick={() => { onRestore(asset.id); onClose(); }}><RotateCcw aria-hidden="true" />กู้คืน</button>}
-            {onPermanentDelete && <button type="button" className="is-danger" onClick={() => setIsPermanentDeleteConfirmationOpen(true)}><Trash2 aria-hidden="true" />ลบถาวร</button>}
-          </> : <>
-            {!isOwner && onLike && <button type="button" className={`is-secondary work-detail-like-action ${isLiked ? 'is-selected' : ''}`} onClick={() => onLike(asset.id)}><Heart aria-hidden="true" className={isLiked ? 'is-filled' : ''} />{isLiked ? 'ถูกใจแล้ว' : 'ถูกใจ'}<span className="work-detail-action-count">{asset.likesCount || 0}</span></button>}
-            <button type="button" className="is-secondary work-detail-share-action" onClick={handleShare}><Share2 aria-hidden="true" />แชร์{shareToast && <span role="status" className="work-detail-share-status">คัดลอกลิงก์แล้ว</span>}</button>
-            {!isOwner && onBookmark && <button type="button" className={`is-secondary ${isBookmarked ? 'is-selected' : ''}`} onClick={() => onBookmark(asset.id)}><Bookmark aria-hidden="true" className={isBookmarked ? 'is-filled' : ''} />{isBookmarked ? 'บันทึกแล้ว' : 'บันทึกไว้'}</button>}
-            {!isOwner && onFork && <button type="button" className="is-secondary" onClick={() => onFork(asset)}><GitFork aria-hidden="true" />Fork</button>}
-            {isOwner && onEdit && <button type="button" className="is-secondary" onClick={() => onEdit(asset)}><Edit3 aria-hidden="true" />แก้ไขผลงาน</button>}
-            {isOwner && onMoveToFolder && <button type="button" className="is-secondary" onClick={() => onMoveToFolder(asset)}><FolderInput aria-hidden="true" />ย้ายไปโฟลเดอร์</button>}
-            {isOwner && onDelete && <button type="button" className="is-danger" onClick={() => setIsTrashConfirmationOpen(true)}><Trash2 aria-hidden="true" />ย้ายลงถังขยะ</button>}
-          </>}
-          <button type="button" className="is-secondary work-detail-download-action" onClick={() => downloadText(markdown, `${safeFilename}.md`, 'text/markdown')}><Download aria-hidden="true" />Markdown</button>
-          <button type="button" className="is-secondary work-detail-download-action" onClick={() => downloadText(JSON.stringify(createPublicAssetExport(asset), null, 2), `${safeFilename}_vault.json`, 'text/json')}><Download aria-hidden="true" />JSON</button>
-          <button type="button" className="is-primary" onClick={onClose}>ปิด</button>
+          <div className="work-detail-primary-actions">
+            {isTrashMode ? <>
+              {onRestore && <button type="button" className="is-positive" onClick={() => { onRestore(asset.id); onClose(); }}><RotateCcw aria-hidden="true" />กู้คืน</button>}
+            </> : <>
+              {!isOwner && onLike && <button type="button" className={`is-secondary work-detail-like-action ${isLiked ? 'is-selected' : ''}`} onClick={() => onLike(asset.id)}><Heart aria-hidden="true" className={isLiked ? 'is-filled' : ''} />{isLiked ? 'ถูกใจแล้ว' : 'ถูกใจ'}<span className="work-detail-action-count">{asset.likesCount || 0}</span></button>}
+              <button type="button" className="is-secondary work-detail-share-action" onClick={() => void handleShare()}><Share2 aria-hidden="true" />แชร์{shareStatus === 'success' && <span role="status" className="work-detail-share-status">คัดลอกลิงก์ผลงานแล้ว</span>}{shareStatus === 'error' && <span role="status" className="work-detail-share-status is-error">คัดลอกลิงก์ไม่สำเร็จ</span>}</button>
+              {!isOwner && onBookmark && <button type="button" className={`is-secondary ${isBookmarked ? 'is-selected' : ''}`} onClick={() => onBookmark(asset.id)}><Bookmark aria-hidden="true" className={isBookmarked ? 'is-filled' : ''} />{isBookmarked ? 'บันทึกแล้ว' : 'บันทึกไว้'}</button>}
+              {isOwner && onEdit && <button type="button" className="is-secondary" onClick={() => onEdit(asset)}><Edit3 aria-hidden="true" />แก้ไขผลงาน</button>}
+            </>}
+          </div>
+          <button type="button" className="is-secondary work-detail-more-toggle" aria-expanded={isMobileActionsOpen} aria-controls="work-detail-secondary-actions" onClick={() => setIsMobileActionsOpen(value => !value)}><MoreHorizontal aria-hidden="true" />เพิ่มเติม</button>
+          <div id="work-detail-secondary-actions" className={`work-detail-secondary-actions ${isMobileActionsOpen ? 'is-open' : ''}`}>
+            {isTrashMode && onPermanentDelete && <button type="button" className="is-danger" onClick={() => setIsPermanentDeleteConfirmationOpen(true)}><Trash2 aria-hidden="true" />ลบถาวร</button>}
+            {!isTrashMode && !isOwner && onFork && <button type="button" className="is-secondary" onClick={() => onFork(asset)}><GitFork aria-hidden="true" />Fork</button>}
+            {!isTrashMode && isOwner && onMoveToFolder && <button type="button" className="is-secondary" onClick={() => onMoveToFolder(asset)}><FolderInput aria-hidden="true" />ย้ายไปโฟลเดอร์</button>}
+            {!isTrashMode && isOwner && onDelete && <button type="button" className="is-danger" onClick={() => setIsTrashConfirmationOpen(true)}><Trash2 aria-hidden="true" />ย้ายลงถังขยะ</button>}
+            <button type="button" className="is-secondary work-detail-download-action" onClick={() => downloadText(markdown, `${safeFilename}.md`, 'text/markdown')}><Download aria-hidden="true" />Markdown</button>
+            <button type="button" className="is-secondary work-detail-download-action" onClick={() => downloadText(JSON.stringify(createPublicAssetExport(asset), null, 2), `${safeFilename}_vault.json`, 'text/json')}><Download aria-hidden="true" />JSON</button>
+          </div>
+          <button type="button" className="is-primary work-detail-close-action" onClick={onClose}>ปิด</button>
         </div>
       </footer>}
     </section>

@@ -56,9 +56,10 @@ describe('12E.2.1 Work presentation parity and action cleanup', () => {
     expect(detailSource).toContain('createPublicAssetExport(asset)');
   });
 
-  it('preserves square Card cover and natural Detail media without image download controls', () => {
+  it('preserves square Card cover and provides per-image download controls for Collab references', () => {
     expect(cardSource).toContain('const mainImage = asset.previewImage || asset.previewImages?.[0];');
     expect(detailSource).toContain('className={`work-detail-cover ${activeImageIndex >= 0');
-    expect(`${cardSource}\n${detailSource}`).not.toMatch(/(?:Save|Download|Copy) Image|บันทึกรูป|ดาวน์โหลดรูป|คัดลอกรูป/);
+    expect(detailSource).toContain('className="work-detail-reference-download"');
+    expect(detailSource).toContain('ดาวน์โหลดรูปอ้างอิงที่');
   });
 });

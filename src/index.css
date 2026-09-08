@@ -8840,7 +8840,7 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   .csp-asset-grid.csp-works-grid,
   .csp-portfolio-showcase-grid,
   .csp-free-canvas .csp-portfolio-showcase-grid,
-  .csp-folder-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .csp-folder-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
   .work-detail-collaboration-deadline-grid,
   .work-detail-participant-grid { grid-template-columns: 1fr; }
 }
@@ -10041,3 +10041,50 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .csp-folder-surface.is-cute .csp-folder-pocket { border-radius: 1.25rem; background: linear-gradient(145deg, rgba(255,255,255,.9), rgba(252,246,182,.26)); box-shadow: 0 7px 16px rgba(252,190,181,.14); }
 .csp-folder-surface.is-cute .csp-folder-pocket-ribbon { border-radius: 1.25rem 1.25rem 0 0; background: linear-gradient(90deg, rgba(252,190,181,.5), rgba(252,246,182,.48)); }
 .csp-folder-surface.is-cute .csp-folder-pocket-icon { border-radius: 50%; background: rgba(252,246,182,.62); color: #927b42; }
+
+/* Final overrides for the mobile Work Detail action density and Collab cards. */
+.work-detail-primary-actions,
+.work-detail-secondary-actions { display: contents; }
+.work-detail-more-toggle { display: none; }
+.work-detail-secondary-actions { min-width: 0; }
+.work-detail-share-status.is-error { background: #8f294c; }
+.work-detail-participant-references { align-items: start; }
+.work-detail-participant-references figure { position: relative; min-width: 0; margin: 0; overflow: hidden; border: 1px solid rgba(106, 144, 180, .18); border-radius: .5rem; background: rgba(210, 219, 235, .18); }
+.work-detail-participant-references figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.work-detail-reference-download { position: absolute; right: .3rem; bottom: .3rem; display: grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid rgba(255, 255, 255, .76); border-radius: .45rem; background: rgba(1, 22, 43, .76); color: #fff; cursor: pointer; }
+.work-detail-reference-download:hover { background: #00385a; }
+.work-detail-reference-download svg { width: .85rem; height: .85rem; }
+.csp-work-modal .csp-collab-shared-list,
+.csp-work-modal .csp-collab-participant-list { gap: .8rem; }
+.csp-work-modal .csp-collab-shared-item,
+.csp-work-modal .csp-collab-participant { border-color: rgba(106, 144, 180, .24); background: rgba(255, 255, 255, .72); box-shadow: 0 .25rem .8rem rgba(1, 22, 43, .045); }
+.csp-work-modal .csp-collab-shared-item.is-expanded,
+.csp-work-modal .csp-collab-participant.is-expanded { box-shadow: 0 .35rem 1rem rgba(114, 73, 114, .1); }
+.csp-work-modal .csp-collab-shared-summary,
+.csp-work-modal .csp-collab-participant-summary { min-height: 3.3rem; padding: .72rem .8rem; }
+.csp-work-modal .csp-collab-shared-detail,
+.csp-work-modal .csp-collab-participant-detail { background: rgba(244, 247, 252, .72); }
+.dark .csp-work-modal .csp-collab-shared-item,
+.dark .csp-work-modal .csp-collab-participant { border-color: rgba(144, 181, 243, .24); background: rgba(12, 30, 61, .78); box-shadow: 0 .25rem .8rem rgba(1, 8, 25, .2); }
+.dark .csp-work-modal .csp-collab-shared-detail,
+.dark .csp-work-modal .csp-collab-participant-detail { background: rgba(7, 23, 48, .7); }
+
+@media (max-width: 720px) {
+  .work-detail-footer-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: .45rem; width: 100%; }
+  .work-detail-primary-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; min-width: 0; }
+  .work-detail-primary-actions button,
+  .work-detail-more-toggle { min-width: 0; min-height: 2.35rem; padding-inline: .42rem; font-size: .68rem; }
+  .work-detail-primary-actions button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .work-detail-more-toggle { display: inline-flex; }
+  .work-detail-more-toggle[aria-expanded="true"] { border-color: rgba(177, 153, 219, .56); background: rgba(177, 153, 219, .16); color: #724972; }
+  .work-detail-secondary-actions { display: none; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; padding-top: .1rem; }
+  .work-detail-secondary-actions.is-open { display: grid; }
+  .work-detail-secondary-actions button { min-width: 0; }
+  .work-detail-close-action { display: none !important; }
+  .work-detail-participant-references { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 380px) {
+  .work-detail-primary-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-detail-participant-references { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
