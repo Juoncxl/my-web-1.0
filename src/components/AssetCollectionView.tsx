@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ArrowLeft, Clock3, Folder as FolderIcon, LockKeyhole, MoreHorizontal, Plus, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Asset, AssetCategory, AssetStatus, Folder, User } from '../types';
@@ -6,7 +6,9 @@ import { CATEGORIES, FOLDER_COLOR_PRESETS, STATUS_PRESETS } from '../lib/constan
 import type { PlatformCount } from '../lib/assetSelectors';
 import { CategoryNav } from './CategoryNav';
 import { AssetCard } from './AssetCard';
+import { CreatorProfilePreview, type CreatorProfilePreviewAnchor } from './CreatorProfilePreview';
 import type { VaultTabType } from './PersonalVaultHeader';
+import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
 
 interface AssetCollectionViewProps {
   activeView: 'feed' | 'vault';
@@ -101,6 +103,21 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
   onSelectStatusFilter
 }) => {
   const [sortMode, setSortMode] = useState<'latest' | 'title'>('latest');
+  const [previewCreatorId, setPreviewCreatorId] = useState<string | null>(null);
+  const [previewAnchor, setPreviewAnchor] = useState<CreatorProfilePreviewAnchor | null>(null);
+  const creatorProfilesById = usePublicCreatorProfiles(allAssets, currentUser);
+  const previewCreator = previewCreatorId ? creatorProfilesById.get(previewCreatorId) || null : null;
+
+  const openCreatorPreview = useCallback((profile: User, anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect();
+    setPreviewAnchor({ top: rect.top, left: rect.left, bottom: rect.bottom });
+    setPreviewCreatorId(profile.id);
+  }, []);
+
+  const closeCreatorPreview = useCallback(() => {
+    setPreviewCreatorId(null);
+    setPreviewAnchor(null);
+  }, []);
 
   const availableTags = useMemo(() => {
     const tags = new Set<string>();
@@ -376,7 +393,8 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                     isBookmarked={bookmarkedAssetIds.includes(asset.id)}
                     isLiked={likedAssetIds.includes(asset.id)}
                     isTrashMode={activeVaultTab === 'trash'}
-                    creatorProfile={currentUser && currentUser.id === asset.userId ? currentUser : null}
+                    creatorProfile={creatorProfilesById.get(asset.userId) || null}
+                    onPreviewCreator={openCreatorPreview}
                   />
                 );
               })}
@@ -391,6 +409,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
           )}
         </>
       )}
+      <CreatorProfilePreview profile={previewCreator} anchor={previewAnchor} onClose={closeCreatorPreview} />
     </div>
   );
 };

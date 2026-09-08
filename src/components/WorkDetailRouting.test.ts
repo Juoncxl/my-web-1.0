@@ -90,7 +90,8 @@ describe('canonical Work Detail routing', () => {
     expect(mainHeading).not.toContain('<CopyButton');
     expect(collaborationIdentity).not.toContain('คัดลอกทั้งหมด');
     expect(detailSource).toContain('isMeaningfulCopyText(item.content, item.title)');
-    expect(detailSource).toContain('isMeaningfulCopyText(participantCopy(participant), participant.creatorName)');
+    expect(detailSource).toContain('getParticipantHouseTagCopy(participant.houseTag)');
+    expect(detailSource).toContain('{participantCopyText && <CopyButton');
   });
 
   it('renders collaboration code with the same safe preview tabs as UI Code', () => {

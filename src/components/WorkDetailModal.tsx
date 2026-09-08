@@ -35,6 +35,7 @@ import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
 import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
+import { getParticipantHouseTagCopy } from '../lib/collaborationPresentation';
 import { createReferenceImageFile, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload } from '../lib/workSharing';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
@@ -344,16 +345,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       ...display.collaboration.participants.map(participant => `### ${participant.creatorName || 'ผู้เข้าร่วม'}\n${participant.houseTag ? `#${participant.houseTag.replace(/^#/, '')}\n` : ''}${participant.externalWorkName || ''}`)
     ].filter(Boolean).join('\n\n')
     : '';
-  const participantCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => [
-    participant.creatorName || 'ผู้เข้าร่วม',
-    participant.houseTag ? `#${participant.houseTag.replace(/^#/, '')}` : '',
-    participant.platforms.join(' · '),
-    participant.externalWorkName,
-    participant.dataStatus ? `สถานะข้อมูล: ${getCollabStatusLabel(participant.dataStatus)}` : '',
-    participant.imageStatus ? `สถานะรูป: ${getCollabStatusLabel(participant.imageStatus)}` : '',
-    participant.notes ? `โน้ต: ${participant.notes}` : '',
-    participant.deadlineOverrides ? `กำหนดส่งเฉพาะคน: ${Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}` : ''
-  ].filter(Boolean).join('\n');
+  const participantCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => getParticipantHouseTagCopy(participant.houseTag);
   const markdown = `# ${display.title}\n**หมวดหมู่:** ${category.name} (${category.nameEn})\n**ผู้สร้าง:** ${creator.displayName}\n**วันที่สร้าง:** ${asset.createdAt}\n**ลิขสิทธิ์ / Proof Hash:** #VAULT-${asset.id.slice(0, 8).toUpperCase()}\n\n## คำอธิบายสั้น\n${display.summary || shortDescription}\n\n---\n\n## เนื้อหาหลัก\n${mainContentCopy}\n${publicCollaborationCopy ? `\n\n---\n\n${publicCollaborationCopy}` : ''}${uiCode ? `\n---\n\n## โค้ด UI Snippet\n\`\`\`html\n${uiCode}\n\`\`\`` : ''}\n`;
   const confirmMoveToTrash = () => {
     if (!onDelete) return;
@@ -491,8 +483,10 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
         {display.isCollaborationFocused && publicCollaboration?.participants.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div></div>
-          <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => <article key={participant.id}>
-            <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{isMeaningfulCopyText(participantCopy(participant), participant.creatorName) && <CopyButton copied={copiedKey === `participant-${participant.id}`} label="คัดลอก" onClick={() => copyToClipboard(participantCopy(participant), `participant-${participant.id}`)} />}</header>
+          <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => {
+            const participantCopyText = participantCopy(participant);
+            return <article key={participant.id}>
+            <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantCopyText && <CopyButton copied={copiedKey === `participant-${participant.id}`} label="คัดลอก" onClick={() => copyToClipboard(participantCopyText, `participant-${participant.id}`)} />}</header>
             <div className="work-detail-collaboration-chips">{participant.houseTag && <span>#{participant.houseTag.replace(/^#/, '')}</span>}{participant.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
             {participant.externalWorkName && <p><strong>ผลงาน:</strong> {participant.externalWorkName}</p>}
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
@@ -500,7 +494,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
             {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
             {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
-          </article>)}</div>
+          </article>;
+          })}</div>
         </section> : null}
 
         {display.isCollaborationFocused && !publicCollaboration && publicCollaborationBlocks.length > 0 && <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content-legacy">

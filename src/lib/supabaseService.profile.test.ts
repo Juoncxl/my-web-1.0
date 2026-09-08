@@ -161,6 +161,23 @@ describe('Profile identity service in the QA persistence boundary', () => {
     expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
   });
 
+  it('loads the current public identity for every requested Work creator in one profile lookup', async () => {
+    const owner = makeProfile({ displayName: 'Juon ล่าสุด', avatarUrl: 'blob:juon-avatar', bio: 'CXL creator' });
+    const collaborator = makeProfile({ id: 'collab-uuid', username: 'collab', displayName: 'Collaborator', avatarUrl: 'blob:collab-avatar' });
+    expect(writeMockProfile(owner).success).toBe(true);
+    expect(writeMockProfile(collaborator).success).toBe(true);
+
+    const result = await supabaseService.getPublicProfiles([owner.id, collaborator.id, owner.id, 'missing-profile']);
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: owner.id, displayName: 'Juon ล่าสุด', avatarUrl: 'blob:juon-avatar', bio: 'CXL creator' }),
+      expect.objectContaining({ id: collaborator.id, displayName: 'Collaborator', avatarUrl: 'blob:collab-avatar' })
+    ]));
+    expect(result.data).toHaveLength(2);
+    expect(supabaseClientMocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
+
   it('keeps the first verified Profile snapshot without overwriting an explicit QA Profile', () => {
     const verified = makeProfile({ displayName: 'Juon', username: 'juoncxl' });
     expect(cacheMockProfileSnapshot(verified)).toBe(true);

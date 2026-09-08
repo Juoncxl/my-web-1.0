@@ -1546,6 +1546,51 @@ export const supabaseService = {
     return localProfile;
   },
 
+  /**
+   * Resolves the lightweight, public-facing identity for a set of Work
+   * creators.  Work list rows deliberately omit legacy author_avatar blobs,
+   * so cards must use this canonical profile source instead.
+   */
+  async getPublicProfiles(userIds: readonly string[]): Promise<{ data: User[]; error: string | null }> {
+    const ids = [...new Set(userIds.map(id => id.trim()).filter(Boolean))];
+    if (ids.length === 0) return { data: [], error: null };
+
+    if (isMockPersistence) {
+      const profiles = await Promise.all(ids.map(async id => {
+        const profile = readMockProfile(id, null);
+        return profile ? hydrateQaProfileImages(profile) : null;
+      }));
+      return { data: profiles.filter((profile): profile is User => profile !== null), error: null };
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return { data: [], error: 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, bio, avatar_url, cover_url, created_at')
+        .in('id', ids);
+      if (error) return { data: [], error: toServiceError(error, 'โหลดข้อมูล Creator ไม่สำเร็จ') };
+
+      return {
+        data: (data || []).map(profile => ({
+          id: profile.id,
+          displayName: profile.display_name || 'Creator',
+          username: profile.username || undefined,
+          bio: mapProfileBio(profile.bio),
+          avatarUrl: profile.avatar_url || undefined,
+          coverUrl: profile.cover_url || undefined,
+          socialLinks: [],
+          createdAt: profile.created_at || new Date().toISOString()
+        })),
+        error: null
+      };
+    } catch (error) {
+      return { data: [], error: toServiceError(error, 'โหลดข้อมูล Creator ไม่สำเร็จ') };
+    }
+  },
+
   async getCreatorProfile(slug: string): Promise<ProfileLookupResult> {
     const supabase = getSupabaseClient();
     let cleanSlug = '';

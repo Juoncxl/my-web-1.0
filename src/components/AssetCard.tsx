@@ -43,6 +43,7 @@ interface AssetCardProps {
   isLiked?: boolean;
   isTrashMode?: boolean;
   creatorProfile?: User | null;
+  onPreviewCreator?: (profile: User, anchor: HTMLElement) => void;
   allAssets?: Asset[];
   viewerMode?: 'public' | 'owner';
   interactionMode?: 'live' | 'preview';
@@ -125,6 +126,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   isLiked = false,
   isTrashMode = false,
   creatorProfile = null,
+  onPreviewCreator,
   allAssets = [],
   viewerMode = 'public',
   interactionMode = 'live',
@@ -174,7 +176,8 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const mainImage = asset.previewImage || asset.previewImages?.[0];
   const snippetSource = display.isCollaborationFocused ? asset.shortDescription || '' : display.summary || asset.content;
   const snippet = snippetSource.replace(/[#*`_]/g, '').trim();
-  const creator = resolveWorkCreator(asset, creatorProfile || (currentUser?.id === asset.userId ? currentUser : null));
+  const resolvedCreatorProfile = creatorProfile || (currentUser?.id === asset.userId ? currentUser : null);
+  const creator = resolveWorkCreator(asset, resolvedCreatorProfile);
   const linkedCollaboration = asset.collaborationAssetId
     ? allAssets.find(candidate => candidate.id === asset.collaborationAssetId && candidate.category === 'collab')
     : undefined;
@@ -211,6 +214,11 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const handleCategoryClick = (event: React.MouseEvent) => {
     event.stopPropagation();
     onSelectCategory?.(asset.category);
+  };
+
+  const handleCreatorPreview = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (resolvedCreatorProfile) onPreviewCreator?.(resolvedCreatorProfile, event.currentTarget);
   };
 
   const confirmPermanentDelete = () => {
@@ -294,12 +302,13 @@ export const AssetCard: React.FC<AssetCardProps> = ({
         </div>}
 
         <footer className="cv-card-footer">
-          <div className="cv-card-author">
+          {resolvedCreatorProfile && onPreviewCreator ? <button type="button" className="cv-card-author cv-card-author-preview" onClick={handleCreatorPreview} aria-label={`ดูโปรไฟล์ย่อของ ${creator.displayName}`}>
             {creator.avatarUrl ? <img src={creator.avatarUrl} alt="" referrerPolicy="no-referrer" /> : <span className="cv-card-author-avatar-fallback" aria-hidden="true">{getTitleMark(creator.displayName)}</span>}
-            <div className="min-w-0">
-              <p>{creator.displayName}</p>
-            </div>
-          </div>
+            <span className="min-w-0"><span>{creator.displayName}</span></span>
+          </button> : <div className="cv-card-author">
+            {creator.avatarUrl ? <img src={creator.avatarUrl} alt="" referrerPolicy="no-referrer" /> : <span className="cv-card-author-avatar-fallback" aria-hidden="true">{getTitleMark(creator.displayName)}</span>}
+            <div className="min-w-0"><p>{creator.displayName}</p></div>
+          </div>}
 
           <time className="cv-card-date" dateTime={asset.createdAt}>{formatShortDate(asset.createdAt)}</time>
 
