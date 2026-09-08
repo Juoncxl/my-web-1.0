@@ -10054,6 +10054,36 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .work-detail-reference-download { position: absolute; right: .3rem; bottom: .3rem; display: grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid rgba(255, 255, 255, .76); border-radius: .45rem; background: rgba(1, 22, 43, .76); color: #fff; cursor: pointer; }
 .work-detail-reference-download:hover { background: #00385a; }
 .work-detail-reference-download svg { width: .85rem; height: .85rem; }
+.work-detail-reference-error { margin: .15rem 0 0; color: #a43355; font-size: .74rem; line-height: 1.45; }
+
+/* Public Collab shared information is intentionally carded independently from
+   the main Work content, where the lighter document-style grouping remains. */
+.work-detail-collaboration-content .work-detail-blocks { gap: .8rem; }
+.work-detail-collaboration-content .work-detail-collaboration-shared-item { gap: .72rem; border: 1px solid rgba(106, 144, 180, .28); border-radius: .85rem; padding: .88rem; background: rgba(255, 255, 255, .94); box-shadow: 0 .3rem .9rem rgba(1, 22, 43, .055); }
+.work-detail-collaboration-content .work-detail-collaboration-shared-item > header { padding-bottom: .62rem; border-bottom: 1px solid rgba(106, 144, 180, .16); }
+.work-detail-collaboration-content .work-detail-collaboration-shared-item > header span { color: #6a90b4; }
+.work-detail-collaboration-content .work-detail-collaboration-shared-item > p { color: #4e647f; line-height: 1.78; }
+.work-detail-collaboration-scope { display: flex; align-items: center; min-height: 2.05rem; border-top: 1px solid rgba(106, 144, 180, .15); padding-top: .62rem; }
+.work-detail-collaboration-scope > span { display: inline-flex; align-items: center; min-height: 1.65rem; border: 1px solid rgba(177, 153, 219, .34); border-radius: 999px; padding: .2rem .5rem; background: rgba(177, 153, 219, .12); color: #724972; font-size: .7rem; font-weight: 750; }
+.dark .work-detail-collaboration-content .work-detail-collaboration-shared-item { border-color: rgba(144, 181, 243, .26); background: rgba(12, 30, 61, .88); box-shadow: 0 .3rem .9rem rgba(1, 8, 25, .22); }
+.dark .work-detail-collaboration-content .work-detail-collaboration-shared-item > header { border-bottom-color: rgba(144, 181, 243, .16); }
+.dark .work-detail-collaboration-content .work-detail-collaboration-shared-item > p { color: #c1d0e5; }
+.dark .work-detail-collaboration-scope { border-top-color: rgba(144, 181, 243, .16); }
+.dark .work-detail-reference-error { color: #ffb2c5; }
+
+/* Do not stretch short participant cards to the height of a long neighbour. */
+.work-detail-participant-grid { align-items: start; }
+.work-detail-participant-grid > article { align-content: start; }
+
+.cv-platform-filter { display: flex; align-items: flex-start; gap: .55rem; margin: .65rem 0 .15rem; }
+.cv-platform-filter-label { flex: 0 0 auto; padding-top: .4rem; color: #5a6f89; font-size: .72rem; font-weight: 800; }
+.cv-platform-filter-options { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: .38rem; min-width: 0; }
+.cv-platform-filter-options button { display: inline-flex; align-items: center; gap: .36rem; min-height: 2rem; border: 1px solid rgba(106, 144, 180, .24); border-radius: 999px; padding: .28rem .58rem; background: rgba(255, 255, 255, .78); color: #5a6f89; font-size: .72rem; font-weight: 750; cursor: pointer; }
+.cv-platform-filter-options button:hover, .cv-platform-filter-options button.is-active { border-color: rgba(177, 153, 219, .54); background: rgba(177, 153, 219, .16); color: #724972; }
+.cv-platform-filter-options button span { display: inline-grid; min-width: 1.1rem; min-height: 1.1rem; place-items: center; border-radius: 999px; background: rgba(106, 144, 180, .12); color: inherit; font-size: .62rem; }
+.dark .cv-platform-filter-label { color: #9fb5d3; }
+.dark .cv-platform-filter-options button { border-color: rgba(144, 181, 243, .24); background: rgba(12, 30, 61, .74); color: #c1d0e5; }
+.dark .cv-platform-filter-options button:hover, .dark .cv-platform-filter-options button.is-active { border-color: rgba(177, 153, 219, .58); background: rgba(177, 153, 219, .22); color: #e6dbff; }
 .csp-work-modal .csp-collab-shared-list,
 .csp-work-modal .csp-collab-participant-list { gap: .8rem; }
 .csp-work-modal .csp-collab-shared-item,
@@ -10082,6 +10112,11 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
   .work-detail-secondary-actions button { min-width: 0; }
   .work-detail-close-action { display: none !important; }
   .work-detail-participant-references { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cv-platform-filter { align-items: stretch; flex-direction: column; gap: .3rem; }
+  .cv-platform-filter-label { padding-top: 0; }
+  .cv-platform-filter-options { flex-wrap: nowrap; overflow-x: auto; padding-bottom: .15rem; scrollbar-width: none; }
+  .cv-platform-filter-options::-webkit-scrollbar { display: none; }
+  .cv-platform-filter-options button { flex: 0 0 auto; }
 }
 
 @media (max-width: 380px) {

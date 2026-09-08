@@ -35,7 +35,7 @@ import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
 import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
-import { createReferenceImageFilename, getWorkShareUrl } from '../lib/workSharing';
+import { createReferenceImageFile, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload } from '../lib/workSharing';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
 
@@ -179,6 +179,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codeView, setCodeView] = useState<CodeView>('split');
   const [shareStatus, setShareStatus] = useState<'success' | 'error' | null>(null);
+  const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
@@ -208,6 +209,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     setShowVersionHistory(false);
     setCodeView('split');
     setShareStatus(null);
+    setReferenceImageError(null);
     setIsMobileActionsOpen(false);
     setIsTrashConfirmationOpen(false);
     setIsPermanentDeleteConfirmationOpen(false);
@@ -308,14 +310,29 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   };
 
   const safeFilename = display.title.replace(/[^a-zA-Z0-9ก-๙]/g, '_');
-  const downloadReferenceImage = (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
-    const anchor = document.createElement('a');
-    anchor.href = image.src;
-    anchor.download = createReferenceImageFilename(display.title, participantName, index, image.mimeType, image.src);
-    anchor.rel = 'noopener';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+  const saveReferenceImage = async (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
+    setReferenceImageError(null);
+    try {
+      const file = await createReferenceImageFile(display.title, participantName, index, image.mimeType || '', image.src);
+      const files = [file];
+      const canUseNativeShare = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints)
+        && typeof navigator.share === 'function'
+        && typeof navigator.canShare === 'function'
+        && navigator.canShare({ files });
+
+      if (canUseNativeShare) {
+        try {
+          await navigator.share({ files, title: file.name });
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') return;
+        }
+      }
+
+      if (!triggerBrowserFileDownload(file)) throw new Error('Download is unavailable');
+    } catch {
+      setReferenceImageError('ไม่สามารถเปิดเมนูบันทึกรูปได้ ลองกดค้างที่รูปเพื่อบันทึกอีกครั้ง');
+    }
   };
   const publicCollaborationCopy = display.collaboration
     ? [
@@ -460,10 +477,10 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
         {display.isCollaborationFocused && publicCollaboration?.sharedInformation.length ? <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ข้อมูลกลางของคอลแลป</strong><span>คัดลอกไปใช้สร้างหรือโปรโมตผลงานได้</span></div></div></div>
-          <div className="work-detail-blocks">{publicCollaboration.sharedInformation.map(item => <article className={`work-detail-block ${item.type === 'code' ? 'is-prompt work-detail-collaboration-code-block' : 'is-text'}`} key={item.id}>
+          <div className="work-detail-blocks">{publicCollaboration.sharedInformation.map(item => <article className={`work-detail-block work-detail-collaboration-shared-item ${item.type === 'code' ? 'is-prompt work-detail-collaboration-code-block' : 'is-text'}`} data-collaboration-shared-information key={item.id}>
             <header><div><span>{item.type === 'code' ? 'ข้อมูลแบบโค้ด' : 'ข้อความ'}</span><strong>{item.title || 'ข้อมูลกลางของคอลแลป'}</strong></div>{isMeaningfulCopyText(item.content, item.title) && <CopyButton copied={copiedKey === `collaboration-${item.id}`} label="คัดลอก" onClick={() => copyToClipboard(item.content, `collaboration-${item.id}`)} />}</header>
             {item.type === 'code' ? <CodePresentation code={item.content} view={codeView} onViewChange={setCodeView} /> : <p>{item.content}</p>}
-            {(item.appScope !== 'unspecified' || item.platforms.length > 0) && <small>{item.appScope === 'all_apps' ? 'ใช้กับทุกแอป' : item.platforms.join(' · ')}</small>}
+            {(item.appScope !== 'unspecified' || item.platforms.length > 0) && <footer className="work-detail-collaboration-scope"><span>{item.appScope === 'all_apps' ? 'ใช้กับทุกแอป' : item.platforms.join(' · ')}</span></footer>}
           </article>)}</div>
         </section> : null}
 
@@ -481,7 +498,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
-            {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => downloadReferenceImage(image, participant.creatorName, index)} aria-label={`ดาวน์โหลดรูปอ้างอิงที่ ${index + 1}`} title="ดาวน์โหลดรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
+            {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
+            {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
           </article>)}</div>
         </section> : null}
 

@@ -60,6 +60,14 @@ describe('12E.2.1 Work presentation parity and action cleanup', () => {
     expect(cardSource).toContain('const mainImage = asset.previewImage || asset.previewImages?.[0];');
     expect(detailSource).toContain('className={`work-detail-cover ${activeImageIndex >= 0');
     expect(detailSource).toContain('className="work-detail-reference-download"');
-    expect(detailSource).toContain('ดาวน์โหลดรูปอ้างอิงที่');
+    expect(detailSource).toContain('บันทึกรูปอ้างอิงที่');
+    expect(detailSource).toContain('navigator.canShare({ files })');
+    expect(detailSource).toContain('navigator.share({ files, title: file.name })');
+    expect(detailSource).toContain('triggerBrowserFileDownload(file)');
+  });
+
+  it('marks public shared Collab information as separate readable cards', () => {
+    expect(detailSource).toContain('data-collaboration-shared-information');
+    expect(detailSource).toContain('work-detail-collaboration-scope');
   });
 });

@@ -5,6 +5,7 @@ import {
   selectCategoryCounts,
   selectFilteredAssets,
   selectFolderAssetCounts,
+  selectPlatformCounts,
   selectVaultStats
 } from '../lib/assetSelectors';
 
@@ -14,6 +15,7 @@ interface UseAssetFiltersOptions {
   activeView: 'feed' | 'vault';
   activeVaultTab: VaultTabType;
   selectedCategory: AssetCategory | 'all';
+  selectedPlatform?: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
   selectedStatusFilter: AssetStatus | 'all';
@@ -49,6 +51,11 @@ export function useAssetFilters(options: UseAssetFiltersOptions) {
     [options.assets, collectionOptions]
   );
 
+  const platformCounts = useMemo(
+    () => selectPlatformCounts(options.assets, options),
+    [options]
+  );
+
   const vaultStats = useMemo(
     () => selectVaultStats(options.assets, options.currentUserId, options.bookmarkedAssetIds),
     [options.assets, options.currentUserId, options.bookmarkedAssetIds]
@@ -59,5 +66,5 @@ export function useAssetFilters(options: UseAssetFiltersOptions) {
     [options.assets, options.folders, options.currentUserId]
   );
 
-  return { filteredAssets, categoryCounts, vaultStats, folderAssetCounts };
+  return { filteredAssets, categoryCounts, platformCounts, vaultStats, folderAssetCounts };
 }

@@ -37,3 +37,37 @@ export function createReferenceImageFilename(
   const extension = getImageFileExtension(mimeType, src);
   return `${work}-${participant}-reference-${Math.max(0, index) + 1}.${extension}`;
 }
+
+export async function createReferenceImageFile(
+  workTitle: string,
+  participantName: string,
+  index: number,
+  mimeType: string,
+  src: string
+): Promise<File> {
+  const response = await fetch(src);
+  if (!response.ok) throw new Error('Unable to read the reference image');
+  const image = await response.blob();
+  const resolvedMimeType = mimeType.split(';', 1)[0].trim() || image.type || 'image/png';
+  return new File([
+    image
+  ], createReferenceImageFilename(workTitle, participantName, index, resolvedMimeType, src), { type: resolvedMimeType });
+}
+
+export function shouldUseNativeImageShare(userAgent: string, maxTouchPoints = 0): boolean {
+  return /Android|iPad|iPhone|iPod/i.test(userAgent) || (maxTouchPoints > 1 && /Macintosh/i.test(userAgent));
+}
+
+export function triggerBrowserFileDownload(file: File): boolean {
+  if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return false;
+  const objectUrl = URL.createObjectURL(file);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = file.name;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  globalThis.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  return true;
+}

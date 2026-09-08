@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { createReferenceImageFilename, getImageFileExtension, getWorkShareUrl, sanitizeDownloadName } from './workSharing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createReferenceImageFile, createReferenceImageFilename, getImageFileExtension, getWorkShareUrl, sanitizeDownloadName, shouldUseNativeImageShare, triggerBrowserFileDownload } from './workSharing';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Work sharing and reference image downloads', () => {
   it('creates a direct Work URL and encodes the asset id', () => {
@@ -20,5 +22,33 @@ describe('Work sharing and reference image downloads', () => {
 
   it('creates a descriptive per-reference filename', () => {
     expect(createReferenceImageFilename('คอลแลป X', 'Juon', 0, 'image/jpeg')).toBe('คอลแลป_X-Juon-reference-1.jpg');
+  });
+
+  it('turns a data URL into a named image File for mobile saving', async () => {
+    const file = await createReferenceImageFile('คอลแลป X', 'Juon', 0, 'image/png', 'data:image/png;base64,aGVsbG8=');
+    expect(file.name).toBe('คอลแลป_X-Juon-reference-1.png');
+    expect(file.type).toBe('image/png');
+    expect(await file.text()).toBe('hello');
+  });
+
+  it('uses the native file sheet only on mobile and iPad desktop-mode Safari', () => {
+    expect(shouldUseNativeImageShare('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)')).toBe(true);
+    expect(shouldUseNativeImageShare('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 5)).toBe(true);
+    expect(shouldUseNativeImageShare('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe(false);
+  });
+
+  it('falls back to a Blob URL download without navigating to a data URL', () => {
+    const anchor = { href: '', download: '', rel: '', click: vi.fn(), remove: vi.fn() };
+    const appendChild = vi.fn();
+    const createObjectURL = vi.fn(() => 'blob:reference-image');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } });
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+
+    expect(triggerBrowserFileDownload(new File(['image'], 'reference.png', { type: 'image/png' }))).toBe(true);
+    expect(anchor.href).toBe('blob:reference-image');
+    expect(anchor.download).toBe('reference.png');
+    expect(appendChild).toHaveBeenCalledWith(anchor);
+    expect(anchor.click).toHaveBeenCalledOnce();
   });
 });

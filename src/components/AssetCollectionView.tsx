@@ -3,6 +3,7 @@ import { ArrowLeft, Clock3, Folder as FolderIcon, LockKeyhole, MoreHorizontal, P
 import type { LucideIcon } from 'lucide-react';
 import type { Asset, AssetCategory, AssetStatus, Folder, User } from '../types';
 import { CATEGORIES, FOLDER_COLOR_PRESETS, STATUS_PRESETS } from '../lib/constants';
+import type { PlatformCount } from '../lib/assetSelectors';
 import { CategoryNav } from './CategoryNav';
 import { AssetCard } from './AssetCard';
 import type { VaultTabType } from './PersonalVaultHeader';
@@ -16,16 +17,19 @@ interface AssetCollectionViewProps {
   isLoadingAssets: boolean;
   searchQuery: string;
   selectedCategory: AssetCategory | 'all';
+  selectedPlatform: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
   selectedStatusFilter: AssetStatus | 'all';
   visibilityFilter: 'all' | 'public' | 'private';
   categoryCounts: Record<string, number>;
+  platformCounts: PlatformCount[];
   bookmarkedAssetIds: string[];
   likedAssetIds: string[];
   currentUserId: string | undefined;
   currentUser?: User | null;
   onSelectCategory: (category: AssetCategory | 'all') => void;
+  onSelectPlatform: (platform: string | null) => void;
   onClearTag: () => void;
   onVisibilityFilterChange: (filter: 'all' | 'public' | 'private') => void;
   onOpenAsset: (asset: Asset) => void;
@@ -65,16 +69,19 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
   isLoadingAssets,
   searchQuery,
   selectedCategory,
+  selectedPlatform,
   selectedTag,
   selectedFolderId,
   selectedStatusFilter,
   visibilityFilter,
   categoryCounts,
+  platformCounts,
   bookmarkedAssetIds,
   likedAssetIds,
   currentUserId,
   currentUser = null,
   onSelectCategory,
+  onSelectPlatform,
   onClearTag,
   onVisibilityFilterChange,
   onOpenAsset,
@@ -117,6 +124,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
       showOrganizationFilters && selectedFolderId !== 'all',
       showOrganizationFilters && selectedStatusFilter !== 'all',
       selectedCategory !== 'all',
+      selectedPlatform !== null,
       showOrganizationFilters && visibilityFilter !== 'all',
       Boolean(selectedTag)
     ].filter(Boolean).length;
@@ -174,8 +182,22 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
           {selectedFolderId === 'unassigned' && <button type="button" onClick={() => onSelectFolder('all')}>นอกโฟลเดอร์ ×</button>}
           {selectedStatusFilter !== 'all' && <button type="button" onClick={() => onSelectStatusFilter('all')}>สถานะ: {STATUS_PRESETS[selectedStatusFilter].name} ×</button>}
           {selectedCategory !== 'all' && <button type="button" onClick={() => onSelectCategory('all')}>หมวดหมู่: {CATEGORIES[selectedCategory].name} ×</button>}
+          {selectedPlatform && <button type="button" onClick={() => onSelectPlatform(null)}>แพลตฟอร์ม: {selectedPlatform} ×</button>}
           {showOrganizationFilters && visibilityFilter !== 'all' && <button type="button" onClick={() => onVisibilityFilterChange('all')}>การมองเห็น: {visibilityFilter === 'public' ? 'สาธารณะ' : 'ส่วนตัว'} ×</button>}
           {selectedTag && <button type="button" onClick={onClearTag}>แท็ก: #{selectedTag} ×</button>}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPlatformFilter = () => {
+    if (selectedCategory !== 'app_data') return null;
+    return (
+      <div className="cv-platform-filter" aria-label="กรองตามแอปหรือแพลตฟอร์ม">
+        <span className="cv-platform-filter-label">แอป / แพลตฟอร์ม</span>
+        <div className="cv-platform-filter-options">
+          <button type="button" aria-pressed={selectedPlatform === null} className={selectedPlatform === null ? 'is-active' : ''} onClick={() => onSelectPlatform(null)}>ทั้งหมด</button>
+          {platformCounts.map(({ platform, count }) => <button type="button" key={platform} aria-pressed={selectedPlatform?.toLocaleLowerCase() === platform.toLocaleLowerCase()} className={selectedPlatform?.toLocaleLowerCase() === platform.toLocaleLowerCase() ? 'is-active' : ''} onClick={() => onSelectPlatform(platform)}>{platform}<span>{count}</span></button>)}
         </div>
       </div>
     );
@@ -227,6 +249,8 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
 
   const emptyTitle = searchQuery
     ? `ไม่พบผลงานที่ตรงกับ "${searchQuery}"`
+    : selectedPlatform
+      ? `ไม่พบผลงานที่ใช้ ${selectedPlatform}`
     : selectedTag
       ? `ไม่พบผลงานที่มีแท็ก #${selectedTag}`
       : activeView === 'vault'
@@ -294,6 +318,8 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                   onVisibilityFilterChange={onVisibilityFilterChange}
                 />
               ) : renderVaultFilterBar()}
+
+              {renderPlatformFilter()}
 
               <div className="cv-feed-toolbar">
                 <div className="flex min-w-0 items-center gap-2">

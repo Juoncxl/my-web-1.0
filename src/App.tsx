@@ -59,6 +59,7 @@ function MainApp() {
   const [activeVaultTab, setActiveVaultTab] = useState<VaultTabType>('my_assets');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
+  const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'public' | 'private'>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<AssetStatus | 'all'>('all');
@@ -433,12 +434,13 @@ function MainApp() {
     openReport(asset.id);
   }, [currentUser, openAuthModal, openReport]);
 
-  const { filteredAssets, categoryCounts, vaultStats, folderAssetCounts } = useAssetFilters({
+  const { filteredAssets, categoryCounts, platformCounts, vaultStats, folderAssetCounts } = useAssetFilters({
     assets,
     folders,
     activeView,
     activeVaultTab,
     selectedCategory,
+    selectedPlatform,
     selectedTag,
     selectedFolderId,
     selectedStatusFilter,
@@ -462,16 +464,19 @@ function MainApp() {
     isLoadingAssets,
     searchQuery,
     selectedCategory,
+    selectedPlatform,
     selectedTag,
     selectedFolderId,
     selectedStatusFilter,
     visibilityFilter,
     categoryCounts,
+    platformCounts,
     bookmarkedAssetIds,
     likedAssetIds,
     currentUserId: currentUser?.id,
     currentUser,
-    onSelectCategory: (category: AssetCategory) => setSelectedCategory(category),
+    onSelectCategory: (category: AssetCategory | 'all') => { setSelectedCategory(category); setSelectedPlatform(null); },
+    onSelectPlatform: setSelectedPlatform,
     onClearTag: () => setSelectedTag(null),
     onVisibilityFilterChange: setVisibilityFilter,
     onSelectStatusFilter: setSelectedStatusFilter,

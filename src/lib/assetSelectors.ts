@@ -19,11 +19,17 @@ export interface AssetCollectionOptions {
 
 export interface AssetFilterOptions extends AssetCollectionOptions {
   selectedCategory: AssetCategory | 'all';
+  selectedPlatform?: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
   selectedStatusFilter: AssetStatus | 'all';
   visibilityFilter: VisibilityFilter;
   searchQuery: string;
+}
+
+export interface PlatformCount {
+  platform: string;
+  count: number;
 }
 
 export interface VaultStats {
@@ -68,6 +74,30 @@ export function selectCollectionAssets(
   return assets.filter(asset => isInAssetCollection(asset, options));
 }
 
+/**
+ * The platform view combines Composer metadata with the public Collab identity.
+ * It deliberately does not read the owner-only `collaboration` draft.
+ */
+export function getAssetPlatforms(asset: Asset): string[] {
+  const values = [
+    ...(asset.presentationMetadata?.appPlatforms || []),
+    ...(asset.publicCollaboration?.platforms || [])
+  ];
+  const seen = new Set<string>();
+  return values.reduce<string[]>((platforms, value) => {
+    const clean = value.trim();
+    const key = clean.toLocaleLowerCase();
+    if (!clean || seen.has(key)) return platforms;
+    seen.add(key);
+    platforms.push(clean);
+    return platforms;
+  }, []);
+}
+
+export function isAppPlatformAsset(asset: Asset): boolean {
+  return asset.category === 'app_data' || getAssetPlatforms(asset).length > 0;
+}
+
 function matchesSearch(asset: Asset, searchQuery: string): boolean {
   const query = searchQuery.trim().toLowerCase();
   if (!query) return true;
@@ -83,35 +113,59 @@ function matchesSearch(asset: Asset, searchQuery: string): boolean {
   );
 }
 
+function matchesNonCategoryFilters(asset: Asset, options: AssetFilterOptions): boolean {
+  if (options.activeView === 'vault' && (options.activeVaultTab === 'my_assets' || options.activeVaultTab === 'folders')) {
+    if (options.selectedFolderId === 'unassigned' && asset.folderId) return false;
+    if (
+      options.selectedFolderId !== 'all' &&
+      options.selectedFolderId !== 'unassigned' &&
+      asset.folderId !== options.selectedFolderId
+    ) return false;
+    if (options.selectedStatusFilter !== 'all' && asset.status !== options.selectedStatusFilter) return false;
+    if (options.visibilityFilter === 'public' && !isPublicVaultAsset(asset)) return false;
+    if (options.visibilityFilter === 'private' && !isPrivateVaultAsset(asset)) return false;
+  }
+
+  if (options.selectedTag) {
+    const tag = options.selectedTag.toLowerCase();
+    if (!asset.tags?.some(item => item.toLowerCase() === tag)) return false;
+  }
+  return matchesSearch(asset, options.searchQuery);
+}
+
 export function selectFilteredAssets(
   assets: readonly Asset[],
   options: AssetFilterOptions
 ): Asset[] {
   return selectCollectionAssets(assets, options).filter(asset => {
-    if (options.activeView === 'vault' && (options.activeVaultTab === 'my_assets' || options.activeVaultTab === 'folders')) {
-      if (options.selectedFolderId === 'unassigned' && asset.folderId) return false;
-      if (
-        options.selectedFolderId !== 'all' &&
-        options.selectedFolderId !== 'unassigned' &&
-        asset.folderId !== options.selectedFolderId
-      ) return false;
-      if (
-        options.selectedStatusFilter !== 'all' &&
-        asset.status !== options.selectedStatusFilter
-      ) return false;
-      if (options.visibilityFilter === 'public' && !isPublicVaultAsset(asset)) return false;
-      if (options.visibilityFilter === 'private' && !isPrivateVaultAsset(asset)) return false;
+    if (!matchesNonCategoryFilters(asset, options)) return false;
+    if (options.selectedCategory === 'app_data') {
+      if (!isAppPlatformAsset(asset)) return false;
+      if (options.selectedPlatform) {
+        const selected = options.selectedPlatform.toLocaleLowerCase();
+        if (!getAssetPlatforms(asset).some(platform => platform.toLocaleLowerCase() === selected)) return false;
+      }
+      return true;
     }
-
-    if (options.selectedCategory !== 'all' && asset.category !== options.selectedCategory) {
-      return false;
-    }
-    if (options.selectedTag) {
-      const tag = options.selectedTag.toLowerCase();
-      if (!asset.tags?.some(item => item.toLowerCase() === tag)) return false;
-    }
-    return matchesSearch(asset, options.searchQuery);
+    return options.selectedCategory === 'all' || asset.category === options.selectedCategory;
   });
+}
+
+export function selectPlatformCounts(
+  assets: readonly Asset[],
+  options: AssetFilterOptions
+): PlatformCount[] {
+  const counts = new Map<string, PlatformCount>();
+  for (const asset of selectCollectionAssets(assets, options)) {
+    if (!matchesNonCategoryFilters(asset, options)) continue;
+    for (const platform of getAssetPlatforms(asset)) {
+      const key = platform.toLocaleLowerCase();
+      const current = counts.get(key);
+      if (current) current.count += 1;
+      else counts.set(key, { platform, count: 1 });
+    }
+  }
+  return Array.from(counts.values()).sort((left, right) => left.platform.localeCompare(right.platform, 'th'));
 }
 
 export function selectCategoryCounts(
@@ -122,6 +176,9 @@ export function selectCategoryCounts(
   for (const asset of selectCollectionAssets(assets, options)) {
     counts.all += 1;
     counts[asset.category] = (counts[asset.category] || 0) + 1;
+    if (asset.category !== 'app_data' && isAppPlatformAsset(asset)) {
+      counts.app_data = (counts.app_data || 0) + 1;
+    }
   }
   return counts;
 }

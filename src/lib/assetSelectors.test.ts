@@ -3,6 +3,7 @@ import type { Asset, Folder } from '../types';
 import {
   selectCategoryCounts,
   selectFilteredAssets,
+  selectPlatformCounts,
   selectActiveAssetsInFolder,
   countActiveAssetsInFolder,
   selectFolderAssetCounts,
@@ -127,6 +128,37 @@ describe('asset selectors', () => {
       visibilityFilter: 'public',
       searchQuery: 'system'
     }).map(asset => asset.id)).toEqual(['matching']);
+  });
+
+  it('treats App / Platform as a cross-category view without losing legacy app data', () => {
+    const platformMetadata = (appPlatforms: string[]) => ({
+      contentTypes: [], appPlatforms, audienceRating: 'general' as const, contentWarnings: [], genres: [], imagePromptToolModel: '', workStatus: 'not_started' as const
+    });
+    const assets = [
+      makeAsset({ id: 'khui-work', tags: ['featured'], presentationMetadata: platformMetadata(['Khui AI', 'Doki Chat']) }),
+      makeAsset({ id: 'doki-collab', category: 'collab', publicCollaboration: { platforms: ['Doki Chat'] } as NonNullable<Asset['publicCollaboration']> }),
+      makeAsset({ id: 'legacy-app', category: 'app_data' }),
+      makeAsset({ id: 'plain-lore', category: 'lore' })
+    ];
+    const options = {
+      ...collection,
+      selectedCategory: 'app_data' as const,
+      selectedPlatform: null,
+      selectedTag: null,
+      selectedFolderId: 'all' as const,
+      selectedStatusFilter: 'all' as const,
+      visibilityFilter: 'all' as const,
+      searchQuery: ''
+    };
+
+    expect(selectFilteredAssets(assets, options).map(asset => asset.id)).toEqual(['khui-work', 'doki-collab', 'legacy-app']);
+    expect(selectPlatformCounts(assets, options)).toEqual([
+      { platform: 'Doki Chat', count: 2 },
+      { platform: 'Khui AI', count: 1 }
+    ]);
+    expect(selectFilteredAssets(assets, { ...options, selectedPlatform: 'doki chat' }).map(asset => asset.id)).toEqual(['khui-work', 'doki-collab']);
+    expect(selectFilteredAssets(assets, { ...options, selectedTag: 'featured' }).map(asset => asset.id)).toEqual(['khui-work']);
+    expect(selectCategoryCounts(assets, collection).app_data).toBe(3);
   });
 
   it('maps the folders tab to owned assets and opens the selected folder', () => {
