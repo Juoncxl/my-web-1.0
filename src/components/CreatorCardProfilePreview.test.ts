@@ -13,6 +13,12 @@ describe('public Creator identity on Work cards', () => {
     expect(cardSource).toContain('resolveWorkCreator(asset, resolvedCreatorProfile)');
   });
 
+  it('loads the same canonical public profile in Work Detail for signed-out visitors', () => {
+    expect(detailSource).toContain('usePublicCreatorProfiles(creatorProfileAssets, creatorProfile)');
+    expect(detailSource).toContain('creatorProfile || publicCreatorProfiles.get(asset.userId) || null');
+    expect(detailSource).toContain('resolveWorkCreator(asset, canonicalCreatorProfile)');
+  });
+
   it('opens a compact creator profile without opening the Work card', () => {
     expect(cardSource).toContain('event.stopPropagation();');
     expect(cardSource).toContain('onPreviewCreator?.(resolvedCreatorProfile, event.currentTarget)');

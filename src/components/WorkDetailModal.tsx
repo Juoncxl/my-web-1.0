@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Bookmark,
@@ -36,8 +36,9 @@ import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
 import { getParticipantPromotionCopy } from '../lib/collaborationPresentation';
-import { createReferenceImageFile, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload } from '../lib/workSharing';
+import { createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
 import { getFreshMediaDownload } from '../lib/workMedia';
+import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
 
@@ -187,6 +188,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
+  const creatorProfileAssets = useMemo(() => asset ? [asset] : [], [asset]);
+  const publicCreatorProfiles = usePublicCreatorProfiles(creatorProfileAssets, creatorProfile);
   // Composer Review uses a temporary private asset that is not yet published.
   // It may render inside the owner's editor, but the live route must continue
   // to enforce the normal visibility policy.
@@ -219,7 +222,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   if (!canRender || !asset) return null;
 
-  const creator = resolveWorkCreator(asset, creatorProfile);
+  const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(asset.userId) || null;
+  const creator = resolveWorkCreator(asset, canonicalCreatorProfile);
   const sourceGalleryImages = asset.previewImages?.length
     ? asset.previewImages.filter(Boolean)
     : asset.previewImage ? [asset.previewImage] : [];
@@ -315,10 +319,18 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const saveReferenceImage = async (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
     setReferenceImageError(null);
     try {
-      const freshSource = image.mediaId ? await getFreshMediaDownload(image.mediaId) : null;
+      const filename = createReferenceImageFilename(display.title, participantName, index, image.mimeType || '', image.src);
+      const useNativeSaveSheet = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints);
+      const freshSource = image.mediaId ? await getFreshMediaDownload(image.mediaId, useNativeSaveSheet ? undefined : filename) : null;
+
+      // Android share targets vary by browser and phone brand, and many omit a
+      // gallery save action. A signed URL with Content-Disposition lets the
+      // browser's download manager save the original image consistently.
+      if (!useNativeSaveSheet && freshSource && triggerBrowserUrlDownload(freshSource, filename)) return;
+
       const file = await createReferenceImageFile(display.title, participantName, index, image.mimeType || '', freshSource || image.src);
       const files = [file];
-      const canUseNativeShare = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints)
+      const canUseNativeShare = useNativeSaveSheet
         && typeof navigator.share === 'function'
         && typeof navigator.canShare === 'function'
         && navigator.canShare({ files });

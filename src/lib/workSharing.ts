@@ -55,7 +55,21 @@ export async function createReferenceImageFile(
 }
 
 export function shouldUseNativeImageShare(userAgent: string, maxTouchPoints = 0): boolean {
-  return /Android|iPad|iPhone|iPod/i.test(userAgent) || (maxTouchPoints > 1 && /Macintosh/i.test(userAgent));
+  // iOS/iPadOS exposes "Save Image" in its native share sheet. Android share
+  // targets are OEM/app dependent, so Android uses a direct file download.
+  return /iPad|iPhone|iPod/i.test(userAgent) || (maxTouchPoints > 1 && /Macintosh/i.test(userAgent));
+}
+
+export function triggerBrowserUrlDownload(source: string, filename: string): boolean {
+  if (typeof document === 'undefined' || !source) return false;
+  const anchor = document.createElement('a');
+  anchor.href = source;
+  anchor.download = filename;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  return true;
 }
 
 export function triggerBrowserFileDownload(file: File): boolean {

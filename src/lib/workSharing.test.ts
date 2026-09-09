@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createReferenceImageFile, createReferenceImageFilename, getImageFileExtension, getWorkShareUrl, sanitizeDownloadName, shouldUseNativeImageShare, triggerBrowserFileDownload } from './workSharing';
+import { createReferenceImageFile, createReferenceImageFilename, getImageFileExtension, getWorkShareUrl, sanitizeDownloadName, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from './workSharing';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,10 +31,24 @@ describe('Work sharing and reference image downloads', () => {
     expect(await file.text()).toBe('hello');
   });
 
-  it('uses the native file sheet only on mobile and iPad desktop-mode Safari', () => {
+  it('uses the native save sheet only on iOS and iPad desktop-mode Safari', () => {
     expect(shouldUseNativeImageShare('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)')).toBe(true);
     expect(shouldUseNativeImageShare('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 5)).toBe(true);
+    expect(shouldUseNativeImageShare('Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36')).toBe(false);
     expect(shouldUseNativeImageShare('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe(false);
+  });
+
+  it('uses a direct URL download for signed Storage URLs on Android and desktop', () => {
+    const anchor = { href: '', download: '', rel: '', click: vi.fn(), remove: vi.fn() };
+    const appendChild = vi.fn();
+    vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } });
+
+    expect(triggerBrowserUrlDownload('https://storage.example/signed-image', 'reference.jpg')).toBe(true);
+    expect(anchor.href).toBe('https://storage.example/signed-image');
+    expect(anchor.download).toBe('reference.jpg');
+    expect(anchor.rel).toBe('noopener');
+    expect(anchor.click).toHaveBeenCalledOnce();
+    expect(anchor.remove).toHaveBeenCalledOnce();
   });
 
   it('falls back to a Blob URL download without navigating to a data URL', () => {
