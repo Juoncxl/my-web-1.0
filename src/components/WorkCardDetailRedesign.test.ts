@@ -50,7 +50,7 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
   });
 
   it('keeps Detail natural media, real content, and removes reference-only decoration', () => {
-    expect(detailSource).toContain('className={`work-detail-cover ${activeImageIndex >= 0');
+    expect(detailSource).toContain("className={`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`}");
     expect(detailSource).toContain('resolveWorkPresentationContent(asset)');
     expect(detailSource).not.toContain('ABYSSAL DEEP REFLECTION');
     expect(detailSource).not.toContain('Ethereal Color Keys');

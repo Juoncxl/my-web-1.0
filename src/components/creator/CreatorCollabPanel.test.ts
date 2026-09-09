@@ -60,7 +60,7 @@ describe('Creator Composer D.6.1 Collaboration usability contracts', () => {
   });
 
   it('offers private/public Collab visibility while keeping management data private', () => {
-    expect(workspaceSource).toContain("...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [])");
+    expect(workspaceSource).toContain("...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const])");
     expect(workspaceSource).toContain('collaboration: cloneCreatorCollaborationDraft(draft.collaboration)');
     expect(workspaceSource).toContain('counterMode={counterMode}');
     expect(panelSource).toContain('การมองเห็นคอลแลป');

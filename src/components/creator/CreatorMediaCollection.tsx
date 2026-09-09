@@ -15,6 +15,11 @@ export interface CreatorMediaCollectionProps {
   onRemove: (itemId: string) => void;
   onReorder: (itemId: string, targetId: string) => void;
   onDimensions: (itemId: string, naturalWidth: number, naturalHeight: number) => void;
+  title?: string;
+  description?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  listLabel?: string;
 }
 
 function mediaTypeLabel(item: CreatorMediaItem): string {
@@ -28,7 +33,12 @@ export const CreatorMediaCollection: React.FC<CreatorMediaCollectionProps> = ({
   onSetCover,
   onRemove,
   onReorder,
-  onDimensions
+  onDimensions,
+  title = 'สื่อของผลงาน',
+  description = 'เพิ่มรูปสำหรับผลงาน และเลือกหนึ่งรายการเป็นภาพปก',
+  emptyTitle = 'ยังไม่มีสื่อในผลงาน',
+  emptyDescription = 'เพิ่มรูปเพื่อใช้เป็นภาพปกหรือแกลเลอรีของผลงาน',
+  listLabel = 'รายการสื่อของผลงาน'
 }) => {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -91,10 +101,10 @@ export const CreatorMediaCollection: React.FC<CreatorMediaCollectionProps> = ({
   return <section className="csp-work-section csp-media-collection" aria-labelledby="csp-media-collection-title">
     <div className="csp-section-heading csp-media-collection-heading">
       <div>
-        <h2 id="csp-media-collection-title">สื่อของผลงาน</h2>
-        <p>เพิ่มรูปสำหรับผลงาน และเลือกหนึ่งรายการเป็นภาพปก</p>
+        <h2 id="csp-media-collection-title">{title}</h2>
+        <p>{description}</p>
       </div>
-      <span className="csp-media-count" aria-label={`สื่อ ${countLabel}`}>{countLabel}</span>
+      <span className="csp-media-count" aria-label={`${title} ${countLabel}`}>{countLabel}</span>
     </div>
 
     <input ref={uploadInputRef} className="csp-visually-hidden-file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={handleUploadChange} />
@@ -103,10 +113,10 @@ export const CreatorMediaCollection: React.FC<CreatorMediaCollectionProps> = ({
     </button>
 
     {draft.items.length === 0 ? <div className="csp-media-empty-state">
-      <strong>ยังไม่มีสื่อในผลงาน</strong>
-      <p>เพิ่มรูปเพื่อใช้เป็นภาพปกหรือแกลเลอรีของผลงาน</p>
+      <strong>{emptyTitle}</strong>
+      <p>{emptyDescription}</p>
       <button type="button" className="csp-primary-button" onClick={() => uploadInputRef.current?.click()}>+ เพิ่มรูป</button>
-    </div> : <div className="csp-media-grid" aria-label="รายการสื่อของผลงาน">
+    </div> : <div className="csp-media-grid" aria-label={listLabel}>
       {renderedItems.map((item, index) => {
         const isCover = draft.coverId === item.id;
         return <article

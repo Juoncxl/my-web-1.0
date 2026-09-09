@@ -38,8 +38,8 @@ describe('12E.1 Work Card and Work Detail presentation cleanup', () => {
     expect(detailSource).not.toContain('work-detail-eyebrow');
     expect(detailSource).not.toContain('ตัวอย่างจากข้อมูลปัจจุบัน');
     expect(detailSource).not.toContain('<span>#VAULT-');
-    expect(detailSource).toContain('work-detail-history-control');
-    expect(detailSource).toContain('ประวัติ ({asset.versions?.length || 1})');
+    expect(detailSource).not.toContain('work-detail-history-control');
+    expect(detailSource).not.toContain('showVersionHistory');
     expect(detailSource).toContain('<h3 id="work-detail-title">{display.title}</h3>');
     expect(detailSource).toContain('ยังไม่มีคำอธิบายสั้นสำหรับผลงานชิ้นนี้');
     expect(detailSource).toContain('ยังไม่มีข้อมูลเนื้อหาในผลงานชิ้นนี้');

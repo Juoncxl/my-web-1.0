@@ -477,7 +477,10 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
   const focusedEditor = focusEditorTarget ? getContentEditorValue(contentCanvas, focusEditorTarget.id) : null;
   const handleWorkModeChange = (nextMode: CreatorWorkMode) => {
     setWorkMode(nextMode);
-    if (nextMode === 'collab') setCollaborationAssetId(null);
+    if (nextMode === 'collab') {
+      setCollaborationAssetId(null);
+      if (section === 'media') setSection('collab');
+    }
     if (nextMode !== 'collab' && section === 'collab') setSection('details');
   };
   const saveWork = async () => {
@@ -502,7 +505,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
 
   return <div className="csp-modal-backdrop" role="presentation"><section className="csp-work-modal" data-review-actions={section === 'review'} role="dialog" aria-modal="true" aria-labelledby="csp-work-title">
     <header className="csp-modal-header csp-composer-header"><div><h2 id="csp-work-title">{initialData ? 'แก้ไขผลงาน' : 'สร้างผลงานใหม่'}</h2><p>กำหนดตัวตนและการจัดหมวดหมู่ของผลงาน</p></div><button type="button" className="csp-icon-button" onClick={requestClose} aria-label="ปิดหน้าต่างสร้างผลงาน"><X className="h-4 w-4" /></button></header>
-    <nav className="csp-work-nav" aria-label="เมนูพื้นที่ทำงานผลงาน">{([['details', 'ข้อมูลผลงาน'], ['content', 'เนื้อหา'], ['media', 'สื่อ'], ...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : []), ['settings', 'การตั้งค่าผลงาน'], ['review', 'ตรวจสอบ']] as const).map(([value, label]) => <button type="button" key={value} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)}>{label}</button>)}</nav>
+    <nav className="csp-work-nav" aria-label="เมนูพื้นที่ทำงานผลงาน">{([['details', 'ข้อมูลผลงาน'], ['content', 'เนื้อหา'], ...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const]), ['settings', 'การตั้งค่าผลงาน'], ['review', 'ตรวจสอบ']] as const).map(([value, label]) => <button type="button" key={value} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)}>{label}</button>)}</nav>
     <div className="csp-composer-alert">{error && <div className="csp-inline-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="ปิดข้อความผิดพลาด">×</button></div>}</div>
     <div className="csp-work-body"><main className="csp-work-main">
       {section === 'settings' && <section className="csp-work-section csp-composer-settings" aria-labelledby="csp-composer-settings-title">
@@ -539,18 +542,34 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
         onReorder={(itemId, targetId) => setMediaDraft(previous => reorderMediaItem(previous, itemId, targetId))}
         onDimensions={(itemId, naturalWidth, naturalHeight) => setMediaDraft(previous => setMediaItemDimensions(previous, itemId, naturalWidth, naturalHeight))}
       />}
-      {section === 'collab' && workMode === 'collab' && <CreatorCollabPanel
-        draft={collaboration}
-        visibility={visibility}
-        onVisibilityChange={setVisibility}
-        platformOptions={CREATOR_PLATFORM_OPTIONS}
-        counterMode={counterMode}
-        onCounterModeChange={setCounterMode}
-        creatorProfile={creatorProfile}
-        ownedWorks={ownedWorks}
-        currentWorkId={initialData?.id}
-        onChange={setCollaboration}
-      />}
+      {section === 'collab' && workMode === 'collab' && <div className="csp-collab-workspace">
+        <CreatorMediaCollection
+          draft={mediaDraft}
+          onUpload={handleMediaUpload}
+          onReplace={handleMediaReplace}
+          onSetCover={itemId => setMediaDraft(previous => setCoverMedia(previous, itemId))}
+          onRemove={itemId => setMediaDraft(previous => removeMediaItem(previous, itemId))}
+          onReorder={(itemId, targetId) => setMediaDraft(previous => reorderMediaItem(previous, itemId, targetId))}
+          onDimensions={(itemId, naturalWidth, naturalHeight) => setMediaDraft(previous => setMediaItemDimensions(previous, itemId, naturalWidth, naturalHeight))}
+          title="รูปประกอบคอลแลป"
+          description="เพิ่มรูปรวม รูปสถานที่ รูปบรรยากาศ หรือรูปอื่นที่ไม่ใช่รูปอ้างอิงรายครีเอเตอร์ และเลือกหนึ่งรูปเป็นภาพปก"
+          emptyTitle="ยังไม่มีรูปประกอบคอลแลป"
+          emptyDescription="เพิ่มรูปเพื่อใช้เป็นภาพปกของการ์ดหรือแกลเลอรีส่วนกลางของคอลแลป"
+          listLabel="รายการรูปประกอบคอลแลป"
+        />
+        <CreatorCollabPanel
+          draft={collaboration}
+          visibility={visibility}
+          onVisibilityChange={setVisibility}
+          platformOptions={CREATOR_PLATFORM_OPTIONS}
+          counterMode={counterMode}
+          onCounterModeChange={setCounterMode}
+          creatorProfile={creatorProfile}
+          ownedWorks={ownedWorks}
+          currentWorkId={initialData?.id}
+          onChange={setCollaboration}
+        />
+      </div>}
       {section === 'review' && <section className="csp-work-section csp-review-work-section" aria-labelledby="csp-review-title">
         <div className="csp-section-heading csp-review-heading">
           <div><h2 id="csp-review-title">ตรวจสอบผลงาน</h2><p>ดูตัวอย่างก่อนสร้างผลงานจริง</p></div>

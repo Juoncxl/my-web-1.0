@@ -14,7 +14,6 @@ import {
   FolderInput,
   GitFork,
   Globe2,
-  History,
   Heart,
   ImageIcon,
   LockKeyhole,
@@ -28,7 +27,7 @@ import {
 import type { Asset, AssetIcon, Folder as WorkFolder, User, WorkContentBlock } from '../types';
 import { AUDIENCE_RATING_LABELS, CATEGORIES, STATUS_PRESETS } from '../lib/constants';
 import { canViewAssetDetail } from '../lib/accessPolicy';
-import { formatShortDate, formatThaiDate } from '../lib/dateUtils';
+import { formatThaiDate } from '../lib/dateUtils';
 import { resolveWorkCreator } from '../lib/workPresentation';
 import { resolveWorkPresentationContent } from '../lib/workContent';
 import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
@@ -36,7 +35,7 @@ import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
 import { getParticipantPromotionCopy } from '../lib/collaborationPresentation';
-import { createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
+import { copyPlainText, createGalleryImageFile, createGalleryImageFilename, createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, resolveWorkDetailGalleryImages, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
 import { getFreshMediaDownload } from '../lib/workMedia';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
@@ -183,9 +182,10 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [codeView, setCodeView] = useState<CodeView>('split');
   const [shareStatus, setShareStatus] = useState<'success' | 'error' | null>(null);
   const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
+  const [galleryImageError, setGalleryImageError] = useState<string | null>(null);
+  const [tagCopyStatus, setTagCopyStatus] = useState<'success' | 'error' | null>(null);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
-  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   const creatorProfileAssets = useMemo(() => asset ? [asset] : [], [asset]);
@@ -211,10 +211,11 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   useEffect(() => {
     setActiveImageIndex(coverImageSelected ? 0 : -1);
-    setShowVersionHistory(false);
     setCodeView('split');
     setShareStatus(null);
     setReferenceImageError(null);
+    setGalleryImageError(null);
+    setTagCopyStatus(null);
     setIsMobileActionsOpen(false);
     setIsTrashConfirmationOpen(false);
     setIsPermanentDeleteConfirmationOpen(false);
@@ -224,12 +225,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(asset.userId) || null;
   const creator = resolveWorkCreator(asset, canonicalCreatorProfile);
-  const sourceGalleryImages = asset.previewImages?.length
-    ? asset.previewImages.filter(Boolean)
-    : asset.previewImage ? [asset.previewImage] : [];
-  const galleryImages = coverImage
-    ? [coverImage, ...sourceGalleryImages.filter(image => image !== coverImage)]
-    : sourceGalleryImages;
+  const requestedCover = coverImage || (coverImageSelected ? asset.previewImage || '' : '');
+  const galleryImages = resolveWorkDetailGalleryImages(asset, requestedCover);
+  const activeGalleryImage = activeImageIndex >= 0 ? galleryImages[activeImageIndex] : undefined;
   const explicitLinkedAssets = (asset.linkedAssetIds || [])
     .map(id => allAssets.find(candidate => candidate.id === id))
     .filter((candidate): candidate is Asset => Boolean(candidate))
@@ -286,10 +284,20 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   ];
 
   const copyToClipboard = (text: string, key: string) => {
-    void navigator.clipboard?.writeText(text);
-    setCopiedKey(key);
-    confetti({ particleCount: 25, spread: 50, origin: { y: 0.7 }, colors: ['#8B5CF6', '#EC4899', '#3B82F6'] });
-    window.setTimeout(() => setCopiedKey(null), 2500);
+    void (async () => {
+      const success = await copyPlainText(text);
+      if (key === 'collaboration-tag') setTagCopyStatus(success ? 'success' : 'error');
+      if (!success) {
+        window.setTimeout(() => setTagCopyStatus(null), 2500);
+        return;
+      }
+      setCopiedKey(key);
+      confetti({ particleCount: 25, spread: 50, origin: { y: 0.7 }, colors: ['#8B5CF6', '#EC4899', '#3B82F6'] });
+      window.setTimeout(() => {
+        setCopiedKey(null);
+        if (key === 'collaboration-tag') setTagCopyStatus(null);
+      }, 2500);
+    })();
   };
 
   const handleShare = async () => {
@@ -316,19 +324,19 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   };
 
   const safeFilename = display.title.replace(/[^a-zA-Z0-9ก-๙]/g, '_');
-  const saveReferenceImage = async (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
-    setReferenceImageError(null);
+  const saveImage = async (input: {
+    filename: string;
+    mediaId?: string;
+    src: string;
+    createFile: (source: string) => Promise<File>;
+  }): Promise<boolean> => {
     try {
-      const filename = createReferenceImageFilename(display.title, participantName, index, image.mimeType || '', image.src);
       const useNativeSaveSheet = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints);
-      const freshSource = image.mediaId ? await getFreshMediaDownload(image.mediaId, useNativeSaveSheet ? undefined : filename) : null;
+      const freshSource = input.mediaId ? await getFreshMediaDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename) : null;
 
-      // Android share targets vary by browser and phone brand, and many omit a
-      // gallery save action. A signed URL with Content-Disposition lets the
-      // browser's download manager save the original image consistently.
-      if (!useNativeSaveSheet && freshSource && triggerBrowserUrlDownload(freshSource, filename)) return;
+      if (!useNativeSaveSheet && freshSource && triggerBrowserUrlDownload(freshSource, input.filename)) return true;
 
-      const file = await createReferenceImageFile(display.title, participantName, index, image.mimeType || '', freshSource || image.src);
+      const file = await input.createFile(freshSource || input.src);
       const files = [file];
       const canUseNativeShare = useNativeSaveSheet
         && typeof navigator.share === 'function'
@@ -338,16 +346,40 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       if (canUseNativeShare) {
         try {
           await navigator.share({ files, title: file.name });
-          return;
+          return true;
         } catch (error) {
-          if (error instanceof DOMException && error.name === 'AbortError') return;
+          if (error instanceof DOMException && error.name === 'AbortError') return true;
         }
       }
 
-      if (!triggerBrowserFileDownload(file)) throw new Error('Download is unavailable');
+      return triggerBrowserFileDownload(file);
     } catch {
-      setReferenceImageError('ไม่สามารถเปิดเมนูบันทึกรูปได้ ลองกดค้างที่รูปเพื่อบันทึกอีกครั้ง');
+      return false;
     }
+  };
+
+  const saveReferenceImage = async (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
+    setReferenceImageError(null);
+    const filename = createReferenceImageFilename(display.title, participantName, index, image.mimeType || '', image.src);
+    const success = await saveImage({
+      filename,
+      mediaId: image.mediaId,
+      src: image.src,
+      createFile: source => createReferenceImageFile(display.title, participantName, index, image.mimeType || '', source)
+    });
+    if (!success) setReferenceImageError('ไม่สามารถเปิดเมนูบันทึกรูปได้ ลองกดค้างที่รูปเพื่อบันทึกอีกครั้ง');
+  };
+  const saveGalleryImage = async () => {
+    if (!activeGalleryImage) return;
+    setGalleryImageError(null);
+    const filename = createGalleryImageFilename(display.title, activeImageIndex, activeGalleryImage.mimeType || '', activeGalleryImage.src);
+    const success = await saveImage({
+      filename,
+      mediaId: activeGalleryImage.mediaId,
+      src: activeGalleryImage.src,
+      createFile: source => createGalleryImageFile(display.title, activeImageIndex, activeGalleryImage.mimeType || '', source)
+    });
+    if (!success) setGalleryImageError('ไม่สามารถบันทึกรูปนี้ได้ ลองกดค้างที่รูปเพื่อบันทึกอีกครั้ง');
   };
   const publicCollaborationCopy = display.collaboration
     ? [
@@ -393,20 +425,28 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       <div className="work-detail-body">
         <div className="work-detail-grid">
           <div className="work-detail-media-column" data-work-detail-section="media">
-            <div className={`work-detail-cover ${activeImageIndex >= 0 && galleryImages[activeImageIndex] ? 'has-image' : 'has-fallback'}`}>
-              {activeImageIndex >= 0 && galleryImages[activeImageIndex] && <img src={galleryImages[activeImageIndex]} alt={`ภาพปก ${display.title}`} referrerPolicy="no-referrer" />}
-              {!(activeImageIndex >= 0 && galleryImages[activeImageIndex]) && <div className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}><WorkMark icon={asset.icon} /></div>}
+            <div className={`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`}>
+              {activeGalleryImage && <img src={activeGalleryImage.src} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" />}
+              {!activeGalleryImage && <div className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}><WorkMark icon={asset.icon} /></div>}
+              {display.isCollaborationFocused && activeGalleryImage && <button
+                type="button"
+                className="work-detail-gallery-download"
+                onClick={() => void saveGalleryImage()}
+                aria-label={`บันทึกรูปประกอบคอลแลปรูปที่ ${activeImageIndex + 1}`}
+                title="บันทึกรูป"
+              ><Download aria-hidden="true" /></button>}
             </div>
             {galleryImages.length > 1 && <div className="work-detail-thumbnails" aria-label="รูปภาพประกอบ">
               {galleryImages.map((image, index) => <button
                 type="button"
-                key={`${image.slice(0, 24)}-${index}`}
+                key={`${image.mediaId || image.src.slice(0, 24)}-${index}`}
                 className={activeImageIndex === index ? 'is-active' : ''}
-                onClick={() => setActiveImageIndex(index)}
+                onClick={() => { setActiveImageIndex(index); setGalleryImageError(null); }}
                 aria-label={`ดูรูปที่ ${index + 1}`}
                 aria-pressed={activeImageIndex === index}
-              ><img src={image} alt="" referrerPolicy="no-referrer" /></button>)}
+              ><img src={image.src} alt="" referrerPolicy="no-referrer" /></button>)}
             </div>}
+            {galleryImageError && <p className="work-detail-reference-error work-detail-gallery-error" role="status">{galleryImageError}</p>}
           </div>
 
           <div className="work-detail-copy">
@@ -449,13 +489,6 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
               <p>{imagePromptToolModel || 'ยังไม่ได้ระบุเครื่องมือหรือโมเดลสำหรับพรอมต์นี้'}</p>
             </section>}
 
-            <div className="work-detail-history-control">
-              <button type="button" onClick={() => setShowVersionHistory(value => !value)} aria-expanded={showVersionHistory}><History aria-hidden="true" />ประวัติ ({asset.versions?.length || 1})</button>
-            </div>
-            {showVersionHistory && <div className="work-detail-history">
-              {asset.versions?.length ? asset.versions.map((version, index) => <div key={`${version.version}-${index}`}><strong>v{version.version || index + 1}.0</strong><span>{version.summary || 'บันทึกการแก้ไขเนื้อหา'}</span><time>{formatShortDate(version.updatedAt || asset.updatedAt)}</time></div>)
-                : <div><strong>v1.0</strong><span>สร้างเอกสารครั้งแรก</span><time>{formatShortDate(asset.createdAt)}</time></div>}
-            </div>}
           </div>
         </div>
 
@@ -475,7 +508,18 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-collaboration-card">
             <strong>{publicCollaboration.name || display.collaborationTitle}</strong>
             <div className="work-detail-collaboration-chips">
-              {publicCollaboration.sharedTag && <span>#{publicCollaboration.sharedTag.replace(/^#/, '')}</span>}
+              {publicCollaboration.sharedTag && <div className="work-detail-collaboration-tag-wrap">
+                <button
+                  type="button"
+                  className="work-detail-collaboration-tag-copy"
+                  onClick={() => copyToClipboard(`#${publicCollaboration.sharedTag.replace(/^#/, '')}`, 'collaboration-tag')}
+                  aria-label={`คัดลอกแท็ก #${publicCollaboration.sharedTag.replace(/^#/, '')}`}
+                  title="คัดลอกแท็ก"
+                >{tagCopyStatus === 'success' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}<span>#{publicCollaboration.sharedTag.replace(/^#/, '')}</span></button>
+                <span className={`work-detail-tag-copy-status ${tagCopyStatus ? 'is-visible' : ''}`} role="status" aria-live="polite">
+                  {tagCopyStatus === 'success' ? 'คัดลอกแท็กแล้ว' : tagCopyStatus === 'error' ? 'คัดลอกแท็กไม่สำเร็จ' : ''}
+                </span>
+              </div>}
               {publicCollaboration.platforms.map(platform => <span key={platform}>{platform}</span>)}
             </div>
           </div>

@@ -41,7 +41,7 @@ describe('Creator Composer unified media draft', () => {
     expect(next.items.map(item => item.kind)).toEqual(['image', 'gif']);
     expect(isSupportedCreatorGlobalMediaFile({ type: 'image/png', size: 100 })).toBe(true);
     expect(isSupportedCreatorGlobalMediaFile({ type: 'image/gif', size: 100 })).toBe(false);
-    expect(source).toContain('สื่อ ${countLabel}');
+    expect(source).toContain('aria-label={`${title} ${countLabel}`}');
     expect(source).toContain('accept="image/png,image/jpeg,image/webp"');
     expect(source).not.toContain('เพิ่มรูป / GIF');
     expect(workspaceSource).toContain('accept="image/png,image/jpeg,image/webp,image/gif"');
@@ -56,7 +56,9 @@ describe('Creator Composer unified media draft', () => {
   });
 
   it('selects exactly one item as cover and allows changing it', () => {
-    const draft = draftWith(['one', 'one', 'image'], ['two', 'two', 'image']);
+    const autoCover = addMediaItem({ items: [], coverId: null }, createMediaItem('one', 'image/png', 'one'));
+    const draft = addMediaItem(autoCover, createMediaItem('two', 'image/png', 'two'));
+    expect(autoCover.coverId).toBe('one');
     const first = setCoverMedia(draft, 'one');
     const second = setCoverMedia(first, 'two');
     expect(first.coverId).toBe('one');
@@ -91,11 +93,11 @@ describe('Creator Composer unified media draft', () => {
     expect(next.coverId).toBe('one');
   });
 
-  it('removing the current cover clears cover selection instead of choosing another item', () => {
+  it('promotes the next image when the current cover is removed', () => {
     const draft = setCoverMedia(draftWith(['one', 'one', 'image'], ['two', 'two', 'image']), 'one');
     const next = removeMediaItem(draft, 'one');
-    expect(next.coverId).toBeNull();
-    expect(getCoverMedia(next)).toBeNull();
+    expect(next.coverId).toBe('two');
+    expect(getCoverMedia(next)?.src).toBe('two');
   });
 
   it('replaces an item in place and keeps cover state when the item is the cover', () => {
@@ -170,6 +172,9 @@ describe('Creator Composer unified media draft', () => {
     expect(workspaceSource).toContain('useState<CreatorMediaDraft>');
     expect(workspaceSource).toContain('setMediaDraft(draft.mediaDraft)');
     expect(workspaceSource).toContain("{section === 'media' && <CreatorMediaCollection");
+    expect(workspaceSource).toContain('title="รูปประกอบคอลแลป"');
+    expect(workspaceSource).toContain('className="csp-collab-workspace"');
+    expect(workspaceSource).toContain("workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const]");
   });
 
   it('does not alter the accepted D.3 Content Canvas contract', () => {

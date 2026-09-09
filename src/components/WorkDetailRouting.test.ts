@@ -41,7 +41,7 @@ describe('canonical Work Detail routing', () => {
 
   it('ports recovered presentation without mounting legacy asset-view sections', () => {
     expect(detailSource).toContain('className="work-detail-grid"');
-    expect(detailSource).toContain('`work-detail-cover ${activeImageIndex >= 0');
+    expect(detailSource).toContain("`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`");
     expect(detailSource).toContain('className="work-detail-footer"');
     expect(detailSource).not.toContain("from './asset-view/");
   });
@@ -92,6 +92,8 @@ describe('canonical Work Detail routing', () => {
     expect(detailSource).toContain('isMeaningfulCopyText(item.content, item.title)');
     expect(detailSource).toContain('getParticipantPromotionCopy(participant.houseTag, participant.notes)');
     expect(detailSource).toContain('{participantCopyText && <CopyButton');
+    expect(detailSource).toContain("copyToClipboard(`#${publicCollaboration.sharedTag.replace(/^#/, '')}`, 'collaboration-tag')");
+    expect(detailSource).toContain('คัดลอกแท็กแล้ว');
   });
 
   it('renders collaboration code with the same safe preview tabs as UI Code', () => {

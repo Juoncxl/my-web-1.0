@@ -200,7 +200,7 @@ describe('CreatorWorkWorkspace live draft preview', () => {
   });
 
   it('keeps the five-tab Composer anatomy while preserving temporary inner surfaces', () => {
-    expect(workspaceSource).toContain("...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [])");
+    expect(workspaceSource).toContain("...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const])");
     expect(workspaceSource).toContain("['settings', 'การตั้งค่าผลงาน'], ['review', 'ตรวจสอบ']");
     expect(workspaceSource).toContain('className="csp-work-main"');
     expect(workspaceSource).not.toContain('className="csp-work-sidebar"');
@@ -260,7 +260,8 @@ describe('CreatorWorkWorkspace live draft preview', () => {
   });
 
   it('serializes the complete draft once while Review receives the public persisted projection', () => {
-    expect(workspaceSource).toContain("{section === 'collab' && workMode === 'collab' && <CreatorCollabPanel");
+    expect(workspaceSource).toContain("{section === 'collab' && workMode === 'collab' && <div className=\"csp-collab-workspace\">");
+    expect(workspaceSource).toContain('<CreatorCollabPanel');
     expect(workspaceSource).toContain('collaboration: cloneCreatorCollaborationDraft(draft.collaboration)');
     expect(workspaceSource).toContain('serializeCreatorWorkDraft');
     expect(workspaceSource).toContain('allAssets={ownedWorks}');

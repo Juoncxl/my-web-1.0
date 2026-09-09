@@ -68,7 +68,7 @@ export function createMediaDraftFromLegacy(input: { previewImages?: string[]; pr
     .filter((src, index) => Boolean(src) && sources.indexOf(src) === index)
     .map((src, index) => createMediaItem(src, undefined, `legacy-media-${index}`));
   const coverItem = legacyCover ? items.find(item => item.src === legacyCover) : undefined;
-  return { items, coverId: coverItem?.id || null };
+  return { items, coverId: coverItem?.id || items[0]?.id || null };
 }
 
 export function mediaDraftToPreviewImages(draft: CreatorMediaDraft): string[] {
@@ -83,6 +83,7 @@ export function addMediaItem(draft: CreatorMediaDraft, item: CreatorMediaItem): 
   const next = cloneMediaDraft(draft);
   if (next.items.length >= CREATOR_MEDIA_MAX_ITEMS || next.items.some(existing => existing.src === item.src)) return next;
   next.items.push({ ...item });
+  if (!next.coverId) next.coverId = item.id;
   return next;
 }
 
@@ -95,7 +96,7 @@ export function setCoverMedia(draft: CreatorMediaDraft, itemId: string): Creator
 export function removeMediaItem(draft: CreatorMediaDraft, itemId: string): CreatorMediaDraft {
   const next = cloneMediaDraft(draft);
   next.items = next.items.filter(item => item.id !== itemId);
-  if (next.coverId === itemId) next.coverId = null;
+  if (next.coverId === itemId) next.coverId = next.items[0]?.id || null;
   return next;
 }
 
