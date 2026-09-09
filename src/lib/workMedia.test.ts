@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset } from '../types';
-import { assertNoInlineMedia, collectReferencedMediaIds, dataUrlToBlob, mediaIdFromReference, prepareAssetMedia } from './workMedia';
+import { assertNoInlineMedia, assertNoInlineWorkMedia, collectReferencedMediaIds, dataUrlToBlob, mediaIdFromReference, prepareAssetMedia } from './workMedia';
 
 function createAsset(): Asset {
   const now = new Date().toISOString();
@@ -37,6 +37,16 @@ describe('Work media preparation', () => {
     expect(prepared.asset.publicCollaboration?.participants[0].referenceImages[0].src).toBe(prepared.asset.collaboration?.participants[0].referenceImages[0].src);
     expect(() => assertNoInlineMedia(prepared.asset)).not.toThrow();
     expect(collectReferencedMediaIds(prepared.asset)).toContain(mediaIdFromReference(prepared.asset.collaboration!.participants[0].referenceImages[0].src));
+  });
+
+  it('does not treat an origin-bound creator avatar as Work media', async () => {
+    const asset = createAsset();
+    asset.authorAvatar = 'blob:https://preview.example/avatar';
+    const prepared = await prepareAssetMedia(asset, '11111111-1111-4111-8111-111111111111');
+
+    expect(prepared.asset.authorAvatar).toBeUndefined();
+    expect(prepared.pending).toHaveLength(1);
+    expect(() => assertNoInlineWorkMedia(prepared.asset)).not.toThrow();
   });
 
   it('rejects inline media that reaches a cloud payload', () => {

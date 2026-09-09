@@ -7,6 +7,7 @@
  */
 export const CREATOR_MEDIA_MAX_ITEMS = 6;
 export const CREATOR_MEDIA_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const CREATOR_MEDIA_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 export type CreatorMediaKind = 'image' | 'gif';
 
@@ -42,7 +43,7 @@ export function getCreatorMediaKind(mimeType?: string, src = ''): CreatorMediaKi
 }
 
 export function isSupportedCreatorMediaFile(file: { type: string; size: number }): boolean {
-  return file.type.startsWith('image/') && file.size > 0 && file.size <= CREATOR_MEDIA_MAX_FILE_BYTES;
+  return CREATOR_MEDIA_MIME_TYPES.has(file.type.toLowerCase()) && file.size > 0 && file.size <= CREATOR_MEDIA_MAX_FILE_BYTES;
 }
 
 /** Global Work media v1 deliberately accepts static images only. Legacy GIF

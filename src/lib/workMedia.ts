@@ -111,6 +111,11 @@ function manifestPayload(record: AssetMediaRecord) {
 
 export async function prepareAssetMedia(asset: Asset, userId: string): Promise<PreparedAssetMedia> {
   const next = cloneAsset(asset);
+  // Creator avatars are hydrated from the canonical public profile resolver.
+  // The local profile image store may expose that avatar as an origin-bound
+  // blob URL, but it is not Work media and must never block or enter a Work
+  // payload.
+  if (isInlineMediaUrl(next.authorAvatar)) next.authorAvatar = undefined;
   const pending: PendingMedia[] = [];
   const pendingBySource = new Map<string, PendingMedia>();
   const existing = asset.media || [];
@@ -217,8 +222,15 @@ export async function prepareAssetMedia(asset: Asset, userId: string): Promise<P
   next.collaboration = await prepareCollaboration(next.collaboration);
   next.publicCollaboration = await prepareCollaboration(next.publicCollaboration);
   next.media = [...existing, ...pending.map(item => item.record)];
-  assertNoInlineMedia(next);
+  assertNoInlineWorkMedia(next);
   return { asset: next, pending };
+}
+
+/** Validate the complete Work payload while excluding the creator avatar,
+ * which belongs to the canonical Profile media pipeline. */
+export function assertNoInlineWorkMedia(asset: Asset): void {
+  const { authorAvatar: _profileOwnedAvatar, ...workPayload } = asset;
+  assertNoInlineMedia(workPayload);
 }
 
 export function assertNoInlineMedia(value: unknown): void {

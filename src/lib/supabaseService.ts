@@ -87,6 +87,13 @@ function toServiceError(error: any, fallback: string): string {
   return friendly === message && message ? fallback : friendly || fallback;
 }
 
+function toMediaPreparationError(error: unknown): string {
+  const fallback = 'เตรียมรูปก่อนอัปโหลดไม่สำเร็จ';
+  const message = error instanceof Error ? error.message.trim() : '';
+  const isSafeMediaMessage = /^(?:รูปแบบ data URL ไม่ถูกต้อง|ไม่รองรับไฟล์ชนิด|อ่านไฟล์รูปจากฉบับร่างไม่สำเร็จ|รูปต้องมีขนาดไม่เกิน|พบรูปที่ยังไม่ได้อัปโหลด)/.test(message);
+  return isSafeMediaMessage ? `${fallback}: ${message}` : toServiceError(error, fallback);
+}
+
 function isOptionalRelationUnavailable(error: unknown): boolean {
   const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
   const code = String(record.code || '');
@@ -763,7 +770,7 @@ export const supabaseService = {
       try {
         preparedMedia = await prepareAssetMedia(newAsset, auth.userId);
       } catch (error) {
-        return { data: null, error: toServiceError(error, 'เตรียมรูปก่อนอัปโหลดไม่สำเร็จ') };
+        return { data: null, error: toMediaPreparationError(error) };
       }
       const dbPayload = mapAssetToDb(preparedMedia.asset);
       dbPayload.id = newId;
@@ -955,7 +962,7 @@ export const supabaseService = {
           updatedAt: now
         }, auth.userId);
       } catch (mediaError) {
-        return { data: null, error: toServiceError(mediaError, 'เตรียมรูปก่อนอัปโหลดไม่สำเร็จ') };
+        return { data: null, error: toMediaPreparationError(mediaError) };
       }
       let uploadedMedia = [] as Awaited<ReturnType<typeof uploadPreparedMedia>>;
       try {
