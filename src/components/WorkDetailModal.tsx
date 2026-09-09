@@ -37,6 +37,7 @@ import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
 import { getParticipantPromotionCopy } from '../lib/collaborationPresentation';
 import { createReferenceImageFile, getWorkShareUrl, shouldUseNativeImageShare, triggerBrowserFileDownload } from '../lib/workSharing';
+import { getFreshMediaDownload } from '../lib/workMedia';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
 
@@ -314,7 +315,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const saveReferenceImage = async (image: NonNullable<typeof publicCollaboration>['participants'][number]['referenceImages'][number], participantName: string, index: number) => {
     setReferenceImageError(null);
     try {
-      const file = await createReferenceImageFile(display.title, participantName, index, image.mimeType || '', image.src);
+      const freshSource = image.mediaId ? await getFreshMediaDownload(image.mediaId) : null;
+      const file = await createReferenceImageFile(display.title, participantName, index, image.mimeType || '', freshSource || image.src);
       const files = [file];
       const canUseNativeShare = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints)
         && typeof navigator.share === 'function'

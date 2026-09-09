@@ -221,7 +221,7 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(workspaceSource).not.toContain('Desktop</button>');
     expect(workspaceSource).not.toContain('Mobile</button>');
     expect(workspaceSource).toContain("disabled={isSaving || !(workMode === 'collab' ? collaboration.name.trim() : title.trim())}");
-    expect(workspaceSource).toContain('onClick={onClose}>ยกเลิก</button>');
+    expect(workspaceSource).toContain('onClick={requestClose}>ยกเลิก</button>');
     expect(workspaceSource).toContain("{section === 'review' && <footer className=\"csp-modal-footer\"");
     expect(workspaceSource).toContain("data-review-actions={section === 'review'}");
 

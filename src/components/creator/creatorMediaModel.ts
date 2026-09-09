@@ -13,6 +13,8 @@ export type CreatorMediaKind = 'image' | 'gif';
 export interface CreatorMediaItem {
   id: string;
   src: string;
+  mediaId?: string;
+  localBlobKey?: string;
   kind: CreatorMediaKind;
   mimeType?: string;
   naturalWidth?: number;

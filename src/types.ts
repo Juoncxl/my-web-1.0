@@ -40,6 +40,10 @@ export type IconType = 'emoji' | 'kaomoji' | 'image';
 export interface AssetIcon {
   type: IconType;
   value: string;
+  /** Canonical cloud media id. `value` is only a transient signed/legacy URL. */
+  mediaId?: string;
+  /** Browser-only IndexedDB key used before a draft is uploaded. */
+  localBlobKey?: string;
   /** QA Sandbox key for binary image/GIF data held outside localStorage. */
   storageKey?: string;
   /** Original media type, retained so the editor can restore the GIF mode. */
@@ -72,6 +76,29 @@ export interface WorkContentBlock {
   type: WorkContentBlockType;
   title: string;
   body: string;
+  /** Present for image blocks stored in the private Work media bucket. */
+  mediaId?: string;
+  localBlobKey?: string;
+}
+
+export type AssetMediaPurpose = 'icon' | 'gallery' | 'prompt_example' | 'collab_reference';
+
+export interface AssetMediaRecord {
+  id: string;
+  assetId: string;
+  storagePath: string;
+  purpose: AssetMediaPurpose;
+  contextId?: string | null;
+  mimeType: string;
+  fileSize: number;
+  sortOrder: number;
+  isCover: boolean;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  /** Short-lived display URL. It is never persisted back to the database. */
+  signedUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AssetCollaborationSharedInformation {
@@ -104,6 +131,8 @@ export interface AssetCollaborationParticipant {
   referenceImages: Array<{
     id: string;
     src: string;
+    mediaId?: string;
+    localBlobKey?: string;
     kind: 'image' | 'gif';
     mimeType?: string;
     naturalWidth?: number;
@@ -183,6 +212,8 @@ export interface Asset {
   uiCodeSnippet?: string;
   previewImage?: string; // legacy single image support
   previewImages?: string[]; // up to 6 gallery images
+  /** Hydrated canonical media manifest. */
+  media?: AssetMediaRecord[];
   folderId?: string | null;
   isPublic: boolean;
   visibility: AssetVisibility;

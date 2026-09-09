@@ -41,6 +41,16 @@ import {
   readMockProfile,
   writeMockProfile
 } from './creatorPersistence';
+import {
+  cleanupNewMedia,
+  cloneAssetMediaForFork,
+  collectReferencedMediaIds,
+  hydrateAssetMedia,
+  listAssetMediaForDeletion,
+  prepareAssetMedia,
+  removeAssetMediaObjects,
+  uploadPreparedMedia
+} from './workMedia';
 
 // Local Storage Keys
 const LOCAL_STORAGE_ASSETS = 'creator_vault_local_assets';
@@ -628,7 +638,7 @@ export const supabaseService = {
         return { data: [], error: toServiceError(error, 'โหลดคลังผลงานไม่สำเร็จ') };
       }
 
-      let list = (data || []).map(mapDbToAsset);
+      let list = await hydrateAssetMedia((data || []).map(mapDbToAsset), false, options?.detail === 'summary');
       const ownedCollaborationIds = list
         .filter(asset => asset.userId === sessionUserId && asset.category === 'collab')
         .map(asset => asset.id);
@@ -652,6 +662,12 @@ export const supabaseService = {
           asset.content.toLowerCase().includes(search) ||
           asset.tags?.some(tag => tag.toLowerCase().includes(search))
         );
+      }
+
+      // Owner-only Collaboration drafts are attached after the first public
+      // media pass; hydrate once more so their references receive the same URLs.
+      if (options?.detail !== 'summary' && ownedCollaborationIds.length > 0) {
+        list = await hydrateAssetMedia(list);
       }
 
       return { data: list, error: null };
@@ -743,12 +759,25 @@ export const supabaseService = {
         }
       }
 
-      const dbPayload = mapAssetToDb(newAsset);
+      let preparedMedia;
+      try {
+        preparedMedia = await prepareAssetMedia(newAsset, auth.userId);
+      } catch (error) {
+        return { data: null, error: toServiceError(error, 'เตรียมรูปก่อนอัปโหลดไม่สำเร็จ') };
+      }
+      const dbPayload = mapAssetToDb(preparedMedia.asset);
       dbPayload.id = newId;
       dbPayload.user_id = auth.userId;
       dbPayload.created_at = now;
       dbPayload.likes_count = 0;
       dbPayload.fork_count = 0;
+      // Keep an incomplete Work owner-only until every file and owner draft is durable.
+      const finalVisibility = dbPayload.visibility;
+      const finalIsPublic = dbPayload.is_public;
+      const finalStatus = dbPayload.status;
+      dbPayload.visibility = 'private';
+      dbPayload.is_public = false;
+      dbPayload.status = 'draft';
 
       const { data, error } = await supabase
         .from('assets')
@@ -759,19 +788,40 @@ export const supabaseService = {
       if (error || !data) {
         return { data: null, error: toServiceError(error, 'บันทึกผลงานบนคลาวด์ไม่สำเร็จ') };
       }
-      if (newAsset.collaboration) {
+      let uploadedMedia = [] as Awaited<ReturnType<typeof uploadPreparedMedia>>;
+      try {
+        uploadedMedia = await uploadPreparedMedia(preparedMedia);
+      } catch (mediaError) {
+        await supabase.from('assets').delete().eq('id', newAsset.id).eq('user_id', auth.userId);
+        return { data: null, error: toServiceError(mediaError, 'อัปโหลดรูปไม่สำเร็จ') };
+      }
+      if (preparedMedia.asset.collaboration) {
         const { error: privateDraftError } = await supabase.from('asset_collaboration_drafts').upsert({
           asset_id: newAsset.id,
           owner_id: auth.userId,
-          draft: newAsset.collaboration,
+          draft: preparedMedia.asset.collaboration,
           updated_at: now
         }, { onConflict: 'asset_id' });
         if (privateDraftError) {
+          await cleanupNewMedia(uploadedMedia);
           await supabase.from('assets').delete().eq('id', newAsset.id).eq('user_id', auth.userId);
           return { data: null, error: toServiceError(privateDraftError, 'บันทึกข้อมูลจัดการคอลแลปไม่สำเร็จ') };
         }
       }
-      return { data: { ...mapDbToAsset(data), collaboration: newAsset.collaboration || null }, error: null };
+      const { data: finalized, error: finalizeError } = await supabase
+        .from('assets')
+        .update({ visibility: finalVisibility, is_public: finalIsPublic, status: finalStatus })
+        .eq('id', newAsset.id)
+        .eq('user_id', auth.userId)
+        .select()
+        .single();
+      if (finalizeError || !finalized) {
+        await cleanupNewMedia(uploadedMedia);
+        await supabase.from('assets').delete().eq('id', newAsset.id).eq('user_id', auth.userId);
+        return { data: null, error: toServiceError(finalizeError, 'เผยแพร่สถานะผลงานไม่สำเร็จ') };
+      }
+      const [hydrated] = await hydrateAssetMedia([{ ...mapDbToAsset(finalized), collaboration: preparedMedia.asset.collaboration || null }], true);
+      return { data: hydrated, error: null };
     } catch (error) {
       return { data: null, error: toServiceError(error, 'บันทึกผลงานบนคลาวด์ไม่สำเร็จ') };
     }
@@ -869,7 +919,7 @@ export const supabaseService = {
         }
       }
 
-      const existing = mapDbToAsset(existingRow);
+      const [existing] = await hydrateAssetMedia([mapDbToAsset(existingRow)]);
       const safeUpdates: Partial<Asset> = {};
       const mutableKeys: Array<keyof Asset> = [
         'authorName', 'authorAvatar', 'title', 'icon', 'category', 'shortDescription',
@@ -896,8 +946,31 @@ export const supabaseService = {
         ];
       }
 
+      let preparedMedia;
+      try {
+        preparedMedia = await prepareAssetMedia({
+          ...existing,
+          ...safeUpdates,
+          versions: updatedVersions,
+          updatedAt: now
+        }, auth.userId);
+      } catch (mediaError) {
+        return { data: null, error: toServiceError(mediaError, 'เตรียมรูปก่อนอัปโหลดไม่สำเร็จ') };
+      }
+      let uploadedMedia = [] as Awaited<ReturnType<typeof uploadPreparedMedia>>;
+      try {
+        uploadedMedia = await uploadPreparedMedia(preparedMedia);
+      } catch (mediaError) {
+        return { data: null, error: toServiceError(mediaError, 'อัปโหลดรูปไม่สำเร็จ') };
+      }
+
       const dbPayload = mapAssetToDb({
         ...safeUpdates,
+        icon: preparedMedia.asset.icon,
+        previewImage: preparedMedia.asset.previewImage,
+        previewImages: preparedMedia.asset.previewImages,
+        contentBlocks: preparedMedia.asset.contentBlocks,
+        publicCollaboration: preparedMedia.asset.publicCollaboration,
         versions: updatedVersions,
         updatedAt: now
       });
@@ -914,18 +987,31 @@ export const supabaseService = {
         .eq('user_id', auth.userId)
         .select()
         .maybeSingle();
-      if (error) return { data: null, error: toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') };
-      if (!data) return { data: null, error: 'ไม่พบผลงานของคุณที่ต้องการแก้ไข' };
-
-      if (updates.collaboration !== undefined) {
-        const privateDraftMutation = updates.collaboration
-          ? supabase.from('asset_collaboration_drafts').upsert({ asset_id: id, owner_id: auth.userId, draft: updates.collaboration, updated_at: now }, { onConflict: 'asset_id' })
-          : supabase.from('asset_collaboration_drafts').delete().eq('asset_id', id).eq('owner_id', auth.userId);
-        const { error: privateDraftError } = await privateDraftMutation;
-        if (privateDraftError) return { data: null, error: toServiceError(privateDraftError, 'บันทึกข้อมูลจัดการคอลแลปไม่สำเร็จ') };
+      if (error || !data) {
+        await cleanupNewMedia(uploadedMedia);
+        return { data: null, error: error ? toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') : 'ไม่พบผลงานของคุณที่ต้องการแก้ไข' };
       }
 
-      return { data: { ...mapDbToAsset(data), collaboration: updates.collaboration ?? existing.collaboration ?? null }, error: null };
+      if (updates.collaboration !== undefined) {
+        const privateDraftMutation = preparedMedia.asset.collaboration
+          ? supabase.from('asset_collaboration_drafts').upsert({ asset_id: id, owner_id: auth.userId, draft: preparedMedia.asset.collaboration, updated_at: now }, { onConflict: 'asset_id' })
+          : supabase.from('asset_collaboration_drafts').delete().eq('asset_id', id).eq('owner_id', auth.userId);
+        const { error: privateDraftError } = await privateDraftMutation;
+        if (privateDraftError) {
+          const rollbackPayload = { ...existingRow };
+          delete rollbackPayload.id;
+          delete rollbackPayload.user_id;
+          await supabase.from('assets').update(rollbackPayload).eq('id', id).eq('user_id', auth.userId);
+          await cleanupNewMedia(uploadedMedia);
+          return { data: null, error: toServiceError(privateDraftError, 'บันทึกข้อมูลจัดการคอลแลปไม่สำเร็จ') };
+        }
+      }
+
+      const [hydrated] = await hydrateAssetMedia([{ ...mapDbToAsset(data), collaboration: preparedMedia.asset.collaboration ?? existing.collaboration ?? null }], true);
+      const referencedIds = collectReferencedMediaIds(preparedMedia.asset);
+      const removedMedia = (existing.media || []).filter(item => !referencedIds.has(item.id));
+      if (removedMedia.length) await cleanupNewMedia(removedMedia);
+      return { data: hydrated, error: null };
     } catch (error) {
       return { data: null, error: toServiceError(error, 'บันทึกการแก้ไขไม่สำเร็จ') };
     }
@@ -1020,6 +1106,7 @@ export const supabaseService = {
     }
 
     try {
+      const mediaToDelete = await listAssetMediaForDeletion(id);
       const { data, error } = await supabase
         .from('assets')
         .delete()
@@ -1030,6 +1117,7 @@ export const supabaseService = {
         .maybeSingle();
       if (error) return { success: false, error: toServiceError(error, 'ลบผลงานถาวรไม่สำเร็จ') };
       if (!data) return { success: false, error: 'ไม่พบผลงานของคุณในถังขยะ' };
+      await removeAssetMediaObjects(mediaToDelete);
       return { success: true, error: null };
     } catch (error) {
       return { success: false, error: toServiceError(error, 'ลบผลงานถาวรไม่สำเร็จ') };
@@ -1054,12 +1142,20 @@ export const supabaseService = {
     }
 
     try {
+      const { data: deletedAssets, error: listError } = await supabase
+        .from('assets')
+        .select('id')
+        .eq('user_id', auth.userId)
+        .not('deleted_at', 'is', null);
+      if (listError) return { success: false, error: toServiceError(listError, 'ตรวจสอบถังขยะไม่สำเร็จ') };
+      const mediaToDelete = await listAssetMediaForDeletion((deletedAssets || []).map(asset => asset.id));
       const { error } = await supabase
         .from('assets')
         .delete()
         .eq('user_id', auth.userId)
         .not('deleted_at', 'is', null);
       if (error) return { success: false, error: toServiceError(error, 'ล้างถังขยะไม่สำเร็จ') };
+      await removeAssetMediaObjects(mediaToDelete);
       return { success: true, error: null };
     } catch (error) {
       return { success: false, error: toServiceError(error, 'ล้างถังขยะไม่สำเร็จ') };
@@ -1128,6 +1224,34 @@ export const supabaseService = {
         };
       }
 
+
+      let forked = mapDbToAsset(data);
+      try {
+        const clonedMedia = await cloneAssetMediaForFork(originalAsset, forked, auth.userId);
+        forked = clonedMedia.asset;
+        const forkPayload = mapAssetToDb(forked);
+        delete forkPayload.id;
+        delete forkPayload.user_id;
+        delete forkPayload.likes_count;
+        delete forkPayload.fork_count;
+        const { data: updatedFork, error: forkMediaError } = await supabase
+          .from('assets')
+          .update(forkPayload)
+          .eq('id', newId)
+          .eq('user_id', auth.userId)
+          .select()
+          .single();
+        if (forkMediaError || !updatedFork) {
+          await cleanupNewMedia(clonedMedia.created);
+          await supabase.from('assets').delete().eq('id', newId).eq('user_id', auth.userId);
+          return { data: null, sourceForkCount: null, error: toServiceError(forkMediaError, 'บันทึกรูปของสำเนาผลงานไม่สำเร็จ') };
+        }
+        forked = (await hydrateAssetMedia([mapDbToAsset(updatedFork)], true))[0];
+      } catch (forkMediaError) {
+        await supabase.from('assets').delete().eq('id', newId).eq('user_id', auth.userId);
+        return { data: null, sourceForkCount: null, error: toServiceError(forkMediaError, 'คัดลอกรูปของผลงานไม่สำเร็จ') };
+      }
+
       const { data: source, error: sourceError } = await supabase
         .from('assets')
         .select('fork_count')
@@ -1136,7 +1260,7 @@ export const supabaseService = {
       if (sourceError) logServiceError('fetch source fork count', sourceError);
 
       return {
-        data: mapDbToAsset(data),
+        data: forked,
         sourceForkCount: source?.fork_count ?? null,
         error: null
       };

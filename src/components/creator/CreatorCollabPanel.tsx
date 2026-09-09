@@ -73,12 +73,7 @@ async function copyCollabText(value: string): Promise<boolean> {
 }
 
 function readReferenceImage(file: File): Promise<string | null> {
-  return new Promise(resolve => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
-    reader.onerror = () => resolve(null);
-    reader.readAsDataURL(file);
-  });
+  return Promise.resolve(URL.createObjectURL(file));
 }
 
 interface PlatformPickerProps { selected: string[]; options: string[]; label: string; onChange: (platforms: string[]) => void; }

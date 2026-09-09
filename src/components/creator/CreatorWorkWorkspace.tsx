@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { normalizeAssetVisibility } from '../../lib/assetVisibility';
+import { composerDraftKey, deleteComposerDraft, loadComposerDraft, saveComposerDraft } from '../../lib/composerDraftStore';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
 import { CreatorContentCanvas, CreatorFocusEditor, type CreatorUiCodeView } from './CreatorContentCanvas';
 import { CreatorMediaCollection } from './CreatorMediaCollection';
@@ -18,6 +19,7 @@ import {
   CREATOR_MEDIA_MAX_ITEMS,
   getCoverMedia,
   isSupportedCreatorGlobalMediaFile,
+  isSupportedCreatorMediaFile,
   mediaDraftToPreviewImages,
   removeMediaItem,
   replaceMediaItem,
@@ -290,8 +292,11 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
   const [fullPreviewKind, setFullPreviewKind] = useState<CreatorReviewMode | 'ui-code'>('ui-code');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const [draftPersistenceReady, setDraftPersistenceReady] = useState(false);
+  const draftStoreKey = creatorProfile?.id ? composerDraftKey(creatorProfile.id, initialData?.id) : '';
   useEffect(() => {
     if (!isOpen) return;
+    setDraftPersistenceReady(false);
     setError('');
     setSection('details');
     setFocusEditorTarget(null);
@@ -338,6 +343,34 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     setBlocks(draft.contentBlocks);
     setContentCanvas(draft.contentCanvas);
   }, [initialData, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !draftStoreKey) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await loadComposerDraft(draftStoreKey);
+        if (cancelled) return;
+        const serverTime = initialData?.updatedAt ? new Date(initialData.updatedAt).getTime() : 0;
+        const draftTime = stored?.savedAt ? new Date(stored.savedAt).getTime() : 0;
+        if (stored && draftTime > serverTime) {
+          const restore = window.confirm('พบฉบับร่างที่ใหม่กว่าข้อมูลบนเซิร์ฟเวอร์\n\nกด “ตกลง” เพื่อกู้คืน หรือ “ยกเลิก” เพื่อทิ้งฉบับร่าง');
+          if (restore) {
+            const draft = stored.draft;
+            setTitle(draft.title); setContentTypes(draft.contentTypes); setWorkMode(draft.workMode); setPublicationStatus(draft.publicationStatus); setWorkStatus(draft.workStatus); setDescription(draft.description); setVisibility(draft.visibility); setFolderId(draft.folderId);
+            setBlocks(draft.contentBlocks); setContentCanvas(draft.contentCanvas); setTags(draft.tags); setAppPlatforms(draft.appPlatforms); setAudienceRating(draft.audienceRating); setContentWarnings(draft.contentWarnings); setGenres(draft.genres);
+            setIconKind(draft.icon.type === 'emoji' ? 'emoji' : draft.icon.mimeType === 'image/gif' ? 'gif' : 'image'); setIconValue(draft.icon.type === 'emoji' ? draft.icon.value : '✦'); setIconImage(draft.icon.type === 'image' ? draft.icon.value : ''); setIconStorageKey(draft.icon.storageKey); setIconMimeType(draft.icon.mimeType);
+            setMediaDraft(draft.mediaDraft); setCollaboration(draft.collaboration); setCollaborationAssetId(draft.collaborationAssetId);
+          } else await deleteComposerDraft(draftStoreKey);
+        }
+      } catch (draftError) {
+        if (!cancelled) setError(draftError instanceof Error ? draftError.message : 'กู้ฉบับร่างไม่สำเร็จ');
+      } finally {
+        if (!cancelled) setDraftPersistenceReady(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [draftStoreKey, initialData?.updatedAt, isOpen]);
   const persistedContentBlocks = useMemo(() => {
     return createCreatorContentBlocks(contentTypes, contentCanvas);
   }, [contentCanvas, contentTypes]);
@@ -376,6 +409,18 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     collaboration,
     collaborationAssetId
   }), [appPlatforms, audienceRating, collaboration, collaborationAssetId, contentCanvas, contentTypes, contentWarnings, coverImage, description, draftContent, folderId, genres, iconImage, iconKind, iconMimeType, iconStorageKey, iconValue, mediaDraft, mediaPreviewImages, persistedContentBlocks, publicationStatus, tags, title, uiCodeSnippet, visibility, workStatus, workMode]);
+  useEffect(() => {
+    if (!isOpen || !draftPersistenceReady || !draftStoreKey || isSaving) return;
+    const timer = window.setTimeout(() => {
+      void saveComposerDraft(draftStoreKey, draftPreview, initialData?.updatedAt).catch(draftError => {
+        const message = draftError instanceof DOMException && draftError.name === 'QuotaExceededError'
+          ? 'พื้นที่เก็บฉบับร่างในเครื่องเต็ม รูปและข้อความยังอยู่ในหน้านี้ แต่ควรบันทึกงานก่อนปิด'
+          : 'บันทึกฉบับร่างอัตโนมัติไม่สำเร็จ รูปและข้อความยังอยู่ในหน้านี้';
+        setError(message);
+      });
+    }, 750);
+    return () => window.clearTimeout(timer);
+  }, [draftPersistenceReady, draftPreview, draftStoreKey, initialData?.updatedAt, isOpen, isSaving]);
   const reviewAsset = useMemo(() => {
     const serialized = serializeCreatorWorkDraft({
       ...draftPreview,
@@ -405,18 +450,14 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     if (files.length > remaining) { setError(`ผลงานหนึ่งชิ้นเพิ่มสื่อได้สูงสุด ${CREATOR_MEDIA_MAX_ITEMS} รูป`); return; }
     files.forEach(file => {
       if (!isSupportedCreatorGlobalMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 10MB ต่อรูป'); return; }
-      const reader = new FileReader();
-      reader.onload = () => { if (typeof reader.result === 'string') setMediaDraft(previous => addMediaItem(previous, createMediaItem(reader.result as string, file.type))); };
-      reader.readAsDataURL(file);
+      setMediaDraft(previous => addMediaItem(previous, createMediaItem(URL.createObjectURL(file), file.type)));
     });
   };
   const handleMediaReplace = (itemId: string, file: File) => {
     if (!isSupportedCreatorGlobalMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 10MB ต่อรูป'); return; }
-    const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === 'string') setMediaDraft(previous => replaceMediaItem(previous, itemId, createMediaItem(reader.result as string, file.type, itemId))); };
-    reader.readAsDataURL(file);
+    setMediaDraft(previous => replaceMediaItem(previous, itemId, createMediaItem(URL.createObjectURL(file), file.type, itemId)));
   };
-  const handleIconFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !file.type.startsWith('image/')) return; const reader = new FileReader(); reader.onload = () => { if (typeof reader.result === 'string') { setIconImage(reader.result); setIconStorageKey(undefined); setIconMimeType(file.type); } }; reader.readAsDataURL(file); setIconKind(file.type === 'image/gif' ? 'gif' : 'image'); };
+  const handleIconFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !isSupportedCreatorMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG, WebP หรือ GIF ขนาดไม่เกิน 10MB'); return; } setIconImage(URL.createObjectURL(file)); setIconStorageKey(undefined); setIconMimeType(file.type); setIconKind(file.type === 'image/gif' ? 'gif' : 'image'); event.target.value = ''; };
   const addTag = () => { const clean = tagInput.trim().replace(/^#/, ''); if (!clean || tags.includes(clean) || tags.length >= 10) return; setTags(previous => [...previous, clean]); setTagInput(''); };
   const addPlatform = () => { const clean = platformInput.trim(); if (!clean || appPlatforms.includes(clean)) return; setAppPlatforms(previous => [...previous, clean]); setPlatformInput(''); };
   const addWarning = () => { const clean = warningInput.trim(); if (!clean || contentWarnings.includes(clean)) return; setContentWarnings(previous => [...previous, clean]); setWarningInput(''); };
@@ -448,11 +489,19 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     }
     setIsSaving(true); setError('');
     const result = await onSave(draftPreview);
-    setIsSaving(false); if (!result.success) { setError(result.error || (initialData ? 'แก้ไขผลงานไม่สำเร็จ' : 'สร้างผลงานไม่สำเร็จ')); return; } onClose();
+    setIsSaving(false); if (!result.success) { setError(result.error || (initialData ? 'แก้ไขผลงานไม่สำเร็จ' : 'สร้างผลงานไม่สำเร็จ')); return; }
+    if (draftStoreKey) await deleteComposerDraft(draftStoreKey).catch(() => undefined);
+    onClose();
+  };
+  const requestClose = () => {
+    if (!draftPersistenceReady || !draftStoreKey) { onClose(); return; }
+    const keep = window.confirm('ต้องการเก็บฉบับร่างนี้ไว้เพื่อกลับมาทำต่อหรือไม่?\n\nกด “ตกลง” เพื่อเก็บ หรือ “ยกเลิก” เพื่อทิ้ง');
+    if (!keep) void deleteComposerDraft(draftStoreKey);
+    onClose();
   };
 
   return <div className="csp-modal-backdrop" role="presentation"><section className="csp-work-modal" data-review-actions={section === 'review'} role="dialog" aria-modal="true" aria-labelledby="csp-work-title">
-    <header className="csp-modal-header csp-composer-header"><div><h2 id="csp-work-title">{initialData ? 'แก้ไขผลงาน' : 'สร้างผลงานใหม่'}</h2><p>กำหนดตัวตนและการจัดหมวดหมู่ของผลงาน</p></div><button type="button" className="csp-icon-button" onClick={onClose} aria-label="ปิดหน้าต่างสร้างผลงาน"><X className="h-4 w-4" /></button></header>
+    <header className="csp-modal-header csp-composer-header"><div><h2 id="csp-work-title">{initialData ? 'แก้ไขผลงาน' : 'สร้างผลงานใหม่'}</h2><p>กำหนดตัวตนและการจัดหมวดหมู่ของผลงาน</p></div><button type="button" className="csp-icon-button" onClick={requestClose} aria-label="ปิดหน้าต่างสร้างผลงาน"><X className="h-4 w-4" /></button></header>
     <nav className="csp-work-nav" aria-label="เมนูพื้นที่ทำงานผลงาน">{([['details', 'ข้อมูลผลงาน'], ['content', 'เนื้อหา'], ['media', 'สื่อ'], ...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : []), ['settings', 'การตั้งค่าผลงาน'], ['review', 'ตรวจสอบ']] as const).map(([value, label]) => <button type="button" key={value} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)}>{label}</button>)}</nav>
     <div className="csp-composer-alert">{error && <div className="csp-inline-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="ปิดข้อความผิดพลาด">×</button></div>}</div>
     <div className="csp-work-body"><main className="csp-work-main">
@@ -524,7 +573,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
         />
       </section>}
     </main></div>
-    {section === 'review' && <footer className="csp-modal-footer"><span>{isSaving ? (initialData ? 'กำลังบันทึก…' : 'กำลังสร้าง…') : (initialData ? 'พร้อมบันทึกการแก้ไข' : 'พร้อมสร้างผลงาน')}</span><button type="button" className="csp-secondary-button" onClick={onClose}>ยกเลิก</button><button type="button" className="csp-primary-button" disabled={isSaving || !(workMode === 'collab' ? collaboration.name.trim() : title.trim())} onClick={() => void saveWork()}>{isSaving ? 'กำลังบันทึก…' : initialData ? 'บันทึกการแก้ไข' : 'สร้างผลงาน'}</button></footer>}
+      {section === 'review' && <footer className="csp-modal-footer"><span>{isSaving ? (initialData ? 'กำลังบันทึก…' : 'กำลังสร้าง…') : (initialData ? 'พร้อมบันทึกการแก้ไข' : 'พร้อมสร้างผลงาน')}</span><button type="button" className="csp-secondary-button" onClick={requestClose}>ยกเลิก</button><button type="button" className="csp-primary-button" disabled={isSaving || !(workMode === 'collab' ? collaboration.name.trim() : title.trim())} onClick={() => void saveWork()}>{isSaving ? 'กำลังบันทึก…' : initialData ? 'บันทึกการแก้ไข' : 'สร้างผลงาน'}</button></footer>}
   </section>
   {focusEditorTarget && focusedEditor && <CreatorFocusEditor title={focusEditorTarget.title} value={focusedEditor.value} counterMode={counterMode} code={focusEditorTarget.id === 'ui-code'} onChange={value => updateCanvas(updateContentEditorValue(contentCanvas, focusEditorTarget.id, value))} onClose={() => setFocusEditorTarget(null)} />}
       {fullPreviewOpen && fullPreviewKind === 'ui-code' && <div className="csp-focus-preview-backdrop" role="presentation"><section className="csp-focus-preview" role="dialog" aria-modal="true" aria-labelledby="csp-focus-preview-title"><header className="csp-focus-editor-header"><div><span>พรีวิวเต็ม</span><h2 id="csp-focus-preview-title">โค้ดหน้า UI</h2></div><button type="button" className="csp-icon-button" onClick={() => setFullPreviewOpen(false)} aria-label="ปิดพรีวิวเต็ม">×</button></header><div className="csp-focus-preview-body"><SandboxedCodePreview code={contentCanvas.uiCode} minHeight="520px" /></div></section></div>}
