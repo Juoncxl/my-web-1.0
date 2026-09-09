@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { Asset } from '../../types';
-import { buildWorkDraftPreview, createBlankCreatorWorkDraft, createCreatorWorkDraftFromAsset, limitWorkIconInput, normalizeCreatorContentTypes, type CreatorWorkDraft } from './CreatorWorkWorkspace';
+import { areCreatorWorkDraftsEquivalent, buildWorkDraftPreview, createBlankCreatorWorkDraft, createCreatorWorkDraftFromAsset, creatorWorkDraftFingerprint, limitWorkIconInput, normalizeCreatorContentTypes, type CreatorWorkDraft } from './CreatorWorkWorkspace';
 import { createBlankContentCanvasDraft } from './creatorContentModel';
 import { createBlankMediaDraft } from './creatorMediaModel';
 import { createBlankCollaborationDraft } from './creatorCollabModel';
@@ -28,6 +28,29 @@ describe('CreatorWorkWorkspace live draft preview', () => {
       title: '', description: '', folderId: null, content: '', contentBlocks: [], uiCodeSnippet: '', previewImages: [], tags: [],
       contentTypes: [], workMode: 'standard', publicationStatus: 'draft', workStatus: 'not_started', visibility: 'private', status: 'idea', appPlatforms: [], audienceRating: 'general', contentWarnings: [], genres: []
     });
+  });
+
+  it('does not treat a blank Create form as a recoverable draft', () => {
+    const firstBlank = buildWorkDraftPreview(createBlankCreatorWorkDraft());
+    const reopenedBlank = buildWorkDraftPreview(createBlankCreatorWorkDraft());
+    expect(areCreatorWorkDraftsEquivalent(firstBlank, reopenedBlank)).toBe(true);
+
+    const typedDraft = buildWorkDraftPreview({ ...createBlankCreatorWorkDraft(), title: 'งานที่กำลังเขียน' });
+    expect(areCreatorWorkDraftsEquivalent(firstBlank, typedDraft)).toBe(false);
+  });
+
+  it('keeps local image drafts meaningful while ignoring their temporary Blob URL', () => {
+    const draftWithLocalImage = buildWorkDraftPreview({
+      ...createBlankCreatorWorkDraft(),
+      mediaDraft: { items: [{ id: 'first', src: 'blob:temporary-one', kind: 'image', mimeType: 'image/png' }], coverId: 'first' }
+    });
+    const reopenedImageDraft = buildWorkDraftPreview({
+      ...createBlankCreatorWorkDraft(),
+      mediaDraft: { items: [{ id: 'second', src: 'blob:temporary-two', kind: 'image', mimeType: 'image/png' }], coverId: 'second' }
+    });
+
+    expect(creatorWorkDraftFingerprint(draftWithLocalImage)).toBe(creatorWorkDraftFingerprint(reopenedImageDraft));
+    expect(areCreatorWorkDraftsEquivalent(buildWorkDraftPreview(createBlankCreatorWorkDraft()), draftWithLocalImage)).toBe(false);
   });
 
   it('derives the preview from current draft values without mutating the input', () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { normalizeAssetVisibility } from '../../lib/assetVisibility';
@@ -132,6 +132,64 @@ export function buildWorkDraftPreview(draft: CreatorWorkDraft): CreatorWorkDraft
     collaboration: cloneCreatorCollaborationDraft(draft.collaboration),
     collaborationAssetId: draft.collaborationAssetId
   };
+}
+
+/**
+ * Draft data contains a few browser-only values (notably Blob URLs and ids
+ * created for empty custom fields).  They must not turn an untouched Composer
+ * into a "changed" draft when it is opened again.
+ */
+function draftMediaSource(value?: string): string {
+  if (!value) return '';
+  return value.startsWith('blob:') ? '__local_blob__' : value;
+}
+
+function draftMediaFingerprint(items: CreatorMediaDraft['items'], coverId: string | null) {
+  return {
+    items: items.map(item => ({
+      src: draftMediaSource(item.src), mediaId: item.mediaId || '', localBlob: Boolean(item.localBlobKey), kind: item.kind,
+      mimeType: item.mimeType || '', naturalWidth: item.naturalWidth || 0, naturalHeight: item.naturalHeight || 0
+    })),
+    coverIndex: items.findIndex(item => item.id === coverId)
+  };
+}
+
+/** A stable, semantic representation used only for local draft recovery. */
+export function creatorWorkDraftFingerprint(draft: CreatorWorkDraft): string {
+  const canvas = draft.contentCanvas;
+  const collaboration = draft.collaboration;
+  return JSON.stringify({
+    title: draft.title.trim(), category: draft.category, contentTypes: [...draft.contentTypes], workMode: draft.workMode,
+    publicationStatus: draft.publicationStatus, workStatus: draft.workStatus, description: draft.description.trim(),
+    visibility: draft.visibility, status: draft.status, folderId: draft.folderId,
+    icon: { type: draft.icon.type, value: draft.icon.type === 'image' ? draftMediaSource(draft.icon.value) : draft.icon.value, storageKey: draft.icon.storageKey || '', mimeType: draft.icon.mimeType || '' },
+    media: draftMediaFingerprint(draft.mediaDraft.items, draft.mediaDraft.coverId),
+    tags: [...draft.tags], appPlatforms: [...draft.appPlatforms], audienceRating: draft.audienceRating,
+    contentWarnings: [...draft.contentWarnings], genres: [...draft.genres], collaborationAssetId: draft.collaborationAssetId,
+    contentCanvas: {
+      character: canvas.character.trim(), story: canvas.story.trim(), uiCode: canvas.uiCode.trim(),
+      imagePrompt: { prompt: canvas.imagePrompt.prompt.trim(), toolModel: (canvas.imagePrompt.toolModel || canvas.imagePrompt.model || '').trim(), exampleImages: canvas.imagePrompt.exampleImages.map(draftMediaSource) },
+      // IDs are implementation details. Blank fields are created with a timestamp,
+      // so only their editable values belong in the recovery comparison.
+      botPrompt: canvas.botPrompt.customFields.map(field => ({ title: field.title.trim(), value: field.value.trim() })).filter(field => field.title || field.value)
+    },
+    collaboration: {
+      name: collaboration.name.trim(), sharedTag: collaboration.sharedTag.trim(), platforms: [...collaboration.platforms],
+      sharedInformation: collaboration.sharedInformation.map(item => ({ title: item.title.trim(), type: item.type, content: item.content.trim(), appScope: item.appScope, platforms: [...item.platforms] })),
+      deadlines: collaboration.deadlines.map(item => ({ kind: item.kind, label: item.label.trim(), date: item.date })),
+      participants: collaboration.participants.map(item => ({
+        isOwner: item.isOwner, creatorName: item.creatorName.trim(), houseTag: item.houseTag.trim(), platforms: [...item.platforms],
+        contact: item.contact.trim(), externalWorkName: item.externalWorkName.trim(), dataStatus: item.dataStatus, imageStatus: item.imageStatus,
+        notes: item.notes.trim(), referenceImages: draftMediaFingerprint(item.referenceImages, null).items,
+        linkedWorkIds: [...item.linkedWorkIds], deadlineOverrides: item.deadlineOverrides, useDeadlineOverrides: item.useDeadlineOverrides
+      })),
+      visibilityPolicy: collaboration.visibilityPolicy
+    }
+  });
+}
+
+export function areCreatorWorkDraftsEquivalent(left: CreatorWorkDraft, right: CreatorWorkDraft): boolean {
+  return creatorWorkDraftFingerprint(left) === creatorWorkDraftFingerprint(right);
 }
 
 interface CreatorWorkWorkspaceProps {
@@ -293,6 +351,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [draftPersistenceReady, setDraftPersistenceReady] = useState(false);
+  const initialDraftRef = useRef<CreatorWorkDraft>(buildWorkDraftPreview(createBlankCreatorWorkDraft()));
   const draftStoreKey = creatorProfile?.id ? composerDraftKey(creatorProfile.id, initialData?.id) : '';
   useEffect(() => {
     if (!isOpen) return;
@@ -308,6 +367,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     setIsSaving(false);
     if (!initialData) {
       const blank = createBlankCreatorWorkDraft();
+      initialDraftRef.current = buildWorkDraftPreview(blank);
       setTitle(blank.title); setContentTypes(blank.contentTypes); setWorkMode(blank.workMode); setPublicationStatus(blank.publicationStatus); setWorkStatus(blank.workStatus); setDescription(blank.description); setVisibility(blank.visibility); setFolderId(blank.folderId);
       setBlocks(blank.contentBlocks); setContentCanvas(blank.contentCanvas);
       setTags(blank.tags); setTagInput(''); setAppPlatforms(blank.appPlatforms); setPlatformInput(''); setAudienceRating(blank.audienceRating); setContentWarnings(blank.contentWarnings); setWarningInput(''); setGenres(blank.genres); setIconKind('emoji'); setIconValue(blank.icon.value); setIconImage(''); setIconStorageKey(undefined); setIconMimeType(undefined); setMediaDraft(blank.mediaDraft); setCollaboration(blank.collaboration); setCollaborationAssetId(null);
@@ -315,6 +375,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     }
 
     const draft = createCreatorWorkDraftFromAsset(initialData);
+    initialDraftRef.current = buildWorkDraftPreview(draft);
     setTitle(draft.title);
     setContentTypes(draft.contentTypes);
     setWorkMode(draft.workMode);
@@ -353,7 +414,8 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
         if (cancelled) return;
         const serverTime = initialData?.updatedAt ? new Date(initialData.updatedAt).getTime() : 0;
         const draftTime = stored?.savedAt ? new Date(stored.savedAt).getTime() : 0;
-        if (stored && draftTime > serverTime) {
+        const hasRecoverableChanges = stored && !areCreatorWorkDraftsEquivalent(stored.draft, initialDraftRef.current);
+        if (stored && hasRecoverableChanges && draftTime > serverTime) {
           const restore = window.confirm('พบฉบับร่างที่ใหม่กว่าข้อมูลบนเซิร์ฟเวอร์\n\nกด “ตกลง” เพื่อกู้คืน หรือ “ยกเลิก” เพื่อทิ้งฉบับร่าง');
           if (restore) {
             const draft = stored.draft;
@@ -362,7 +424,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
             setIconKind(draft.icon.type === 'emoji' ? 'emoji' : draft.icon.mimeType === 'image/gif' ? 'gif' : 'image'); setIconValue(draft.icon.type === 'emoji' ? draft.icon.value : '✦'); setIconImage(draft.icon.type === 'image' ? draft.icon.value : ''); setIconStorageKey(draft.icon.storageKey); setIconMimeType(draft.icon.mimeType);
             setMediaDraft(draft.mediaDraft); setCollaboration(draft.collaboration); setCollaborationAssetId(draft.collaborationAssetId);
           } else await deleteComposerDraft(draftStoreKey);
-        }
+        } else if (stored) await deleteComposerDraft(draftStoreKey);
       } catch (draftError) {
         if (!cancelled) setError(draftError instanceof Error ? draftError.message : 'กู้ฉบับร่างไม่สำเร็จ');
       } finally {
@@ -410,7 +472,8 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     collaborationAssetId
   }), [appPlatforms, audienceRating, collaboration, collaborationAssetId, contentCanvas, contentTypes, contentWarnings, coverImage, description, draftContent, folderId, genres, iconImage, iconKind, iconMimeType, iconStorageKey, iconValue, mediaDraft, mediaPreviewImages, persistedContentBlocks, publicationStatus, tags, title, uiCodeSnippet, visibility, workStatus, workMode]);
   useEffect(() => {
-    if (!isOpen || !draftPersistenceReady || !draftStoreKey || isSaving) return;
+    const hasUnsavedChanges = !areCreatorWorkDraftsEquivalent(draftPreview, initialDraftRef.current);
+    if (!isOpen || !draftPersistenceReady || !draftStoreKey || isSaving || !hasUnsavedChanges) return;
     const timer = window.setTimeout(() => {
       void saveComposerDraft(draftStoreKey, draftPreview, initialData?.updatedAt).catch(draftError => {
         const message = draftError instanceof DOMException && draftError.name === 'QuotaExceededError'
@@ -498,8 +561,14 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
   };
   const requestClose = () => {
     if (!draftPersistenceReady || !draftStoreKey) { onClose(); return; }
+    if (areCreatorWorkDraftsEquivalent(draftPreview, initialDraftRef.current)) {
+      void deleteComposerDraft(draftStoreKey).catch(() => undefined);
+      onClose();
+      return;
+    }
     const keep = window.confirm('ต้องการเก็บฉบับร่างนี้ไว้เพื่อกลับมาทำต่อหรือไม่?\n\nกด “ตกลง” เพื่อเก็บ หรือ “ยกเลิก” เพื่อทิ้ง');
-    if (!keep) void deleteComposerDraft(draftStoreKey);
+    if (keep) void saveComposerDraft(draftStoreKey, draftPreview, initialData?.updatedAt).catch(() => undefined);
+    else void deleteComposerDraft(draftStoreKey);
     onClose();
   };
 
