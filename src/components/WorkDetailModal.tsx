@@ -34,7 +34,7 @@ import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
 import { isValidWorkIcon } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
-import { getParticipantPromotionCopy } from '../lib/collaborationPresentation';
+import { getParticipantContentCopy, getParticipantTagCopy } from '../lib/collaborationPresentation';
 import { copyPlainText, createGalleryImageFile, createGalleryImageFilename, createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, resolveWorkDetailGalleryImages, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
 import { getFreshMediaDownload } from '../lib/workMedia';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
@@ -391,7 +391,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       ...display.collaboration.participants.map(participant => `### ${participant.creatorName || 'ผู้เข้าร่วม'}\n${participant.houseTag ? `#${participant.houseTag.replace(/^#/, '')}\n` : ''}${participant.externalWorkName || ''}`)
     ].filter(Boolean).join('\n\n')
     : '';
-  const participantCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => getParticipantPromotionCopy(participant.houseTag, participant.notes);
+  const participantTagCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => getParticipantTagCopy(participant.houseTag);
+  const participantContentCopy = (participant: NonNullable<typeof publicCollaboration>['participants'][number]) => getParticipantContentCopy(participant.notes);
   const markdown = `# ${display.title}\n**หมวดหมู่:** ${category.name} (${category.nameEn})\n**ผู้สร้าง:** ${creator.displayName}\n**วันที่สร้าง:** ${asset.createdAt}\n**ลิขสิทธิ์ / Proof Hash:** #VAULT-${asset.id.slice(0, 8).toUpperCase()}\n\n## คำอธิบายสั้น\n${display.summary || shortDescription}\n\n---\n\n## เนื้อหาหลัก\n${mainContentCopy}\n${publicCollaborationCopy ? `\n\n---\n\n${publicCollaborationCopy}` : ''}${uiCode ? `\n---\n\n## โค้ด UI Snippet\n\`\`\`html\n${uiCode}\n\`\`\`` : ''}\n`;
   const confirmMoveToTrash = () => {
     if (!onDelete) return;
@@ -542,10 +543,11 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         {display.isCollaborationFocused && publicCollaboration?.participants.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div></div>
           <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => {
-            const participantCopyText = participantCopy(participant);
+            const participantTagText = participantTagCopy(participant);
+            const participantContentText = participantContentCopy(participant);
             return <article key={participant.id}>
-            <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantCopyText && <CopyButton copied={copiedKey === `participant-${participant.id}`} label="คัดลอก" onClick={() => copyToClipboard(participantCopyText, `participant-${participant.id}`)} />}</header>
-            <div className="work-detail-collaboration-chips">{participant.houseTag && <span>#{participant.houseTag.replace(/^#/, '')}</span>}{participant.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
+            <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
+            <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
             {participant.externalWorkName && <p><strong>ผลงาน:</strong> {participant.externalWorkName}</p>}
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}

@@ -167,6 +167,7 @@ export function creatorWorkDraftFingerprint(draft: CreatorWorkDraft): string {
     tags: [...draft.tags], appPlatforms: [...draft.appPlatforms], audienceRating: draft.audienceRating,
     contentWarnings: [...draft.contentWarnings], genres: [...draft.genres], collaborationAssetId: draft.collaborationAssetId,
     contentCanvas: {
+      sectionOrder: [...(canvas.sectionOrder || [])],
       character: canvas.character.trim(), story: canvas.story.trim(), uiCode: canvas.uiCode.trim(),
       imagePrompt: { prompt: canvas.imagePrompt.prompt.trim(), toolModel: (canvas.imagePrompt.toolModel || canvas.imagePrompt.model || '').trim(), exampleImages: canvas.imagePrompt.exampleImages.map(draftMediaSource) },
       // IDs are implementation details. Blank fields are created with a timestamp,

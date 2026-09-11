@@ -6,14 +6,19 @@ import {
   countThaiCharacters,
   createBlankContentCanvasDraft,
   cloneContentCanvasDraft,
+  createContentCanvasDraftFromLegacy,
   getContentEditorValue,
   getSelectedContentTypes,
+  getVisibleCreatorContentSectionIds,
+  normalizeCreatorContentSectionOrder,
+  reorderCreatorContentSections,
   removeBotCustomField,
   updateBotCustomFieldTitle,
   updateContentEditorValue,
   updateImagePromptExamples,
   updateImagePromptToolModel,
-  type CreatorContentCanvasDraft
+  type CreatorContentCanvasDraft,
+  type CreatorContentSectionId
 } from './creatorContentModel';
 
 const canvasSource = readFileSync(new URL('./CreatorContentCanvas.tsx', import.meta.url), 'utf8');
@@ -160,5 +165,51 @@ describe('CreatorContentCanvas dynamic draft model', () => {
     const savedAcrossTabs = updateContentEditorValue(initial, `bot-custom:${initial.botPrompt.customFields[0].id}`, 'ข้อความที่ต้องอยู่ต่อ');
     expect(savedAcrossTabs.botPrompt.customFields[0].value).toBe('ข้อความที่ต้องอยู่ต่อ');
     expect(workspaceSource).toContain('contentCanvas');
+  });
+
+  it('normalizes a new order while retaining hidden section positions', () => {
+    const initial = blank();
+    const customId = initial.botPrompt.customFields[0].id;
+    const ordered = normalizeCreatorContentSectionOrder(
+      ['story', `bot-custom:${customId}`],
+      ['character', 'lore', 'bot_prompt'],
+      initial.botPrompt.customFields
+    );
+    expect(ordered).toEqual(['story', `bot-custom:${customId}`, 'character']);
+    expect(getVisibleCreatorContentSectionIds({ ...initial, sectionOrder: ordered }, ['character', 'bot_prompt']))
+      .toEqual([`bot-custom:${customId}`, 'character']);
+  });
+
+  it('reorders base sections and custom bot fields without changing field content', () => {
+    const initial = blank();
+    const customId = initial.botPrompt.customFields[0].id;
+    const draft = {
+      ...initial,
+      character: 'character',
+      story: 'story',
+      sectionOrder: ['character', 'story', `bot-custom:${customId}`] as CreatorContentSectionId[]
+    };
+    const moved = reorderCreatorContentSections(draft, `bot-custom:${customId}`, 'character', true);
+    expect(moved.sectionOrder).toEqual([`bot-custom:${customId}`, 'character', 'story']);
+    expect(moved.botPrompt.customFields[0].value).toBe('');
+  });
+
+  it('derives legacy block order instead of forcing canonical order', () => {
+    const draft = createContentCanvasDraftFromLegacy({
+      category: 'prompts',
+      contentBlocks: [
+        { id: 'creator-story', type: 'Text', title: 'เนื้อเรื่องและโลกทัศน์', body: 'story' },
+        { id: 'creator-character', type: 'Text', title: 'ข้อมูลตัวละคร', body: 'character' },
+        { id: 'creator-bot-custom', type: 'Text', title: 'Bot', body: 'bot' }
+      ]
+    });
+    expect(draft.sectionOrder).toEqual(['story', 'character', 'bot-custom:custom']);
+  });
+
+  it('exposes pointer drag, keyboard fallback, and live status affordances', () => {
+    expect(canvasSource).toContain('onPointerDown');
+    expect(canvasSource).toContain('onPointerCancel');
+    expect(canvasSource).toContain('aria-live="polite"');
+    expect(canvasSource).toContain('เลื่อนการ์ดขึ้น');
   });
 });

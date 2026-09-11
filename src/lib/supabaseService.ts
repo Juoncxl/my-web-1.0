@@ -1,8 +1,8 @@
-import type { Asset, Folder, User, AssetStatus, AssetVersion, ProfileSocialLink } from '../types';
+import type { Asset, AssetIcon, Folder, User, AssetStatus, AssetVersion, ProfileSocialLink } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { formatFriendlyErrorMessage } from './apiHelper';
 import { isLegacyGuestUserId } from './accessPolicy';
-import { normalizeAssetVisibility } from './assetVisibility';
+import { isValidWorkIcon, normalizeAssetVisibility } from './assetVisibility';
 import { isMockPersistence } from './persistenceMode';
 import { normalizeProfileUsername, resolveProfileBySlug, type ProfileLookupResult } from './profileIdentity';
 import {
@@ -468,6 +468,50 @@ function normalizeAssetQueryLimit(value: number | undefined): number | undefined
   return Math.min(100, Math.max(1, Math.trunc(value!)));
 }
 
+const SUMMARY_ICON_BATCH_SIZE = 24;
+
+function parseStoredAssetIcon(value: unknown): AssetIcon | null {
+  const icon = parseStoredJson<unknown>(value, null);
+  if (!icon || typeof icon !== 'object') return null;
+  const candidate = icon as Partial<AssetIcon>;
+  if (candidate.type !== 'emoji' && candidate.type !== 'kaomoji' && candidate.type !== 'image') return null;
+  return typeof candidate.value === 'string' ? candidate as AssetIcon : null;
+}
+
+/**
+ * Summary rows deliberately omit `assets.icon` because old rows can contain
+ * multi-megabyte base64/GIF values. Fetch only the icons for the rows already
+ * on screen, in small batches, and leave the media-hydrated signed URL intact.
+ */
+async function hydrateLegacySummaryIcons(supabase: any, assets: Asset[]): Promise<Asset[]> {
+  if (!assets.length) return assets;
+  const legacyIcons = new Map<string, AssetIcon>();
+  for (let start = 0; start < assets.length; start += SUMMARY_ICON_BATCH_SIZE) {
+    const ids = assets.slice(start, start + SUMMARY_ICON_BATCH_SIZE).map(asset => asset.id);
+    try {
+      const { data, error } = await supabase.from('assets').select('id,icon').in('id', ids);
+      if (error || !data) continue;
+      data.forEach((row: { id?: string; icon?: unknown }) => {
+        if (!row.id) return;
+        const icon = parseStoredAssetIcon(row.icon);
+        if (icon && isValidWorkIcon(icon)) legacyIcons.set(row.id, icon);
+      });
+    } catch (error) {
+      // Icon hydration is an enhancement. A failed optional request must not
+      // turn an otherwise valid Feed/Vault response into an error.
+      logServiceError('hydrateLegacySummaryIcons', error);
+    }
+  }
+
+  return assets.map(asset => {
+    const icon = legacyIcons.get(asset.id);
+    // `asset_media` is authoritative for current uploaded media because it
+    // carries a signed URL and media id. Only replace the default/legacy slot.
+    if (!icon || asset.icon?.mediaId) return asset;
+    return { ...asset, icon };
+  });
+}
+
 async function fetchAssetsFromMock(options?: FetchAssetsOptions): Promise<{ data: Asset[]; error: string | null }> {
   // QA Sandbox is intentionally local-only. Cloud migration is an explicit
   // Settings action; a normal read must never wait on or merge remote tables.
@@ -646,6 +690,7 @@ export const supabaseService = {
       }
 
       let list = await hydrateAssetMedia((data || []).map(mapDbToAsset), false, options?.detail === 'summary');
+      if (options?.detail === 'summary') list = await hydrateLegacySummaryIcons(supabase, list);
       const ownedCollaborationIds = list
         .filter(asset => asset.userId === sessionUserId && asset.category === 'collab')
         .map(asset => asset.id);

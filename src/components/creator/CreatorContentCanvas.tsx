@@ -1,11 +1,15 @@
-import React, { useMemo, useRef } from 'react';
-import { ImagePlus, Plus, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, GripVertical, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
 import {
   CREATOR_CONTENT_TYPE_META,
   addBotCustomField,
   formatContentCounter,
   getSelectedContentTypes,
+  getVisibleCreatorContentSectionIds,
+  moveCreatorContentSectionByOffset,
+  normalizeCreatorContentSectionOrder,
+  reorderCreatorContentSections,
   removeBotCustomField,
   updateBotCustomFieldTitle,
   updateContentEditorValue,
@@ -15,6 +19,7 @@ import {
   type CreatorContentCanvasDraft,
   type CreatorContentCounterMode,
   type CreatorContentEditorId,
+  type CreatorContentSectionId,
   type CreatorContentType
 } from './creatorContentModel';
 
@@ -139,6 +144,23 @@ const ContentSection: React.FC<ContentSectionProps> = ({
   </article>;
 };
 
+interface BotCustomFieldSectionProps {
+  field: CreatorBotCustomField;
+  draft: CreatorContentCanvasDraft;
+  counterMode: CreatorContentCounterMode;
+  onChange: (draft: CreatorContentCanvasDraft) => void;
+  onExpand: (editorId: CreatorContentEditorId, title: string) => void;
+}
+
+const BotCustomFieldSection: React.FC<BotCustomFieldSectionProps> = ({ field, draft, counterMode, onChange, onExpand }) => <article className="csp-content-canvas-section" data-content-section={`bot-custom:${field.id}`}>
+  <div className="csp-content-section-heading"><div><h3>{field.title || 'ช่องข้อมูลใหม่'}</h3><p>ช่องข้อมูลแบบกำหนดเองของพรอมต์ / เทมเพลตบอท</p></div></div>
+  <div className="csp-custom-field-heading">
+    <label htmlFor={`csp-custom-title-${field.id}`}>ชื่อช่องข้อมูล<input id={`csp-custom-title-${field.id}`} value={field.title} placeholder="ช่องข้อมูลใหม่" onChange={event => onChange(updateBotCustomFieldTitle(draft, field.id, event.target.value))} /></label>
+    <button type="button" className="csp-content-remove-button" onClick={() => onChange(removeBotCustomField(draft, field.id))}><Trash2 className="h-4 w-4" />ลบช่องนี้</button>
+  </div>
+  <ContentLongEditor editorId={`bot-custom:${field.id}`} label="เนื้อหา" placeholder="เขียนข้อมูลของช่องนี้ที่นี่" value={field.value} counterMode={counterMode} onChange={value => onChange(updateContentEditorValue(draft, `bot-custom:${field.id}`, value))} onExpand={onExpand} />
+</article>;
+
 const SUPPORTED_CANVAS_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 function isSupportedCanvasImage(file: File): boolean { return SUPPORTED_CANVAS_IMAGE_TYPES.has(file.type) && file.size > 0 && file.size <= 10 * 1024 * 1024; }
 
@@ -167,12 +189,85 @@ export const CreatorContentCanvas: React.FC<CreatorContentCanvasProps> = ({
   uiCodeView,
   onUiCodeViewChange
 }) => {
-  const sectionRefs = useRef<Partial<Record<CreatorContentType, HTMLElement>>>({});
+  const sectionRefs = useRef<Partial<Record<CreatorContentType | CreatorContentSectionId, HTMLElement>>>({});
   const selected = useMemo(() => getSelectedContentTypes(selectedContentTypes), [selectedContentTypes]);
+  const orderedSectionIds = useMemo(() => getVisibleCreatorContentSectionIds(draft, selected), [draft, selected]);
+  const [draggingId, setDraggingId] = useState<CreatorContentSectionId | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: CreatorContentSectionId; before: boolean } | null>(null);
+  const [dragStatus, setDragStatus] = useState('');
+
+  useEffect(() => {
+    const normalized = normalizeCreatorContentSectionOrder(draft.sectionOrder, selected, draft.botPrompt.customFields);
+    if (normalized.length !== draft.sectionOrder.length || normalized.some((id, index) => id !== draft.sectionOrder[index])) {
+      onChange({ ...draft, sectionOrder: normalized });
+    }
+  }, [draft, selected, onChange]);
+
   const focusSection = (type: CreatorContentType) => {
-    const element = sectionRefs.current[type];
+    const sectionId = type === 'lore' ? 'story' : type === 'image_prompt' ? 'image-prompt' : type === 'ui_code' ? 'ui-code' : type;
+    const element = sectionRefs.current[sectionId];
     element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     element?.querySelector<HTMLElement>('[data-content-editor]')?.focus();
+  };
+
+  const clearDragState = () => { setDraggingId(null); setDropTarget(null); };
+  const updateDropTarget = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!draggingId) return;
+    const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-content-section-card]');
+    const targetId = element?.dataset.contentSectionId as CreatorContentSectionId | undefined;
+    if (!targetId || targetId === draggingId) { setDropTarget(null); return; }
+    const rect = element.getBoundingClientRect();
+    setDropTarget({ id: targetId, before: event.clientY < rect.top + rect.height / 2 });
+  };
+  const finishDrag = (event: React.PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    if (!draggingId) return;
+    const sourceId = draggingId;
+    if (!cancelled && dropTarget) {
+      onChange(reorderCreatorContentSections(draft, sourceId, dropTarget.id, dropTarget.before));
+      const destination = orderedSectionIds.indexOf(dropTarget.id) + (dropTarget.before ? 1 : 0);
+      setDragStatus(`ย้ายการ์ดไปตำแหน่งที่ ${Math.max(1, destination)}`);
+    } else if (cancelled) {
+      setDragStatus('ยกเลิกการลาก การ์ดยังคงอยู่ตำแหน่งเดิม');
+    }
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* pointer capture may already be released */ }
+    clearDragState();
+  };
+  const startDrag = (event: React.PointerEvent<HTMLButtonElement>, sectionId: CreatorContentSectionId) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingId(sectionId);
+    setDropTarget(null);
+    setDragStatus(`กำลังลาก ${sectionId}`);
+  };
+  const moveWithKeyboard = (sectionId: CreatorContentSectionId, offset: -1 | 1) => {
+    const next = moveCreatorContentSectionByOffset(draft, sectionId, orderedSectionIds, offset);
+    onChange(next);
+    const index = orderedSectionIds.indexOf(sectionId) + offset;
+    setDragStatus(`ย้ายการ์ดไปตำแหน่งที่ ${index + 1}`);
+  };
+
+  const renderSection = (sectionId: CreatorContentSectionId) => {
+    const type: CreatorContentType | null = sectionId === 'character' ? 'character' : sectionId === 'story' ? 'lore' : sectionId === 'image-prompt' ? 'image_prompt' : sectionId === 'ui-code' ? 'ui_code' : null;
+    const field = sectionId.startsWith('bot-custom:') ? draft.botPrompt.customFields.find(item => item.id === sectionId.slice('bot-custom:'.length)) : null;
+    if (!type && !field) return null;
+    const index = orderedSectionIds.indexOf(sectionId);
+    return <div
+      key={sectionId}
+      className={`csp-content-section-card ${draggingId === sectionId ? 'is-dragging' : ''} ${dropTarget?.id === sectionId && dropTarget.before ? 'is-drop-before' : ''} ${dropTarget?.id === sectionId && !dropTarget.before ? 'is-drop-after' : ''}`}
+      data-content-section-card
+      data-content-section-id={sectionId}
+      ref={element => { if (element) sectionRefs.current[sectionId] = element; }}
+    >
+      <div className="csp-content-section-reorder-controls" aria-label={`จัดเรียง${type ? findMeta(type).label : field?.title || 'ช่องข้อมูล'}`}>
+        <button type="button" className="csp-content-section-drag-handle" aria-label={`ลาก${type ? findMeta(type).label : field?.title || 'ช่องข้อมูล'} เพื่อจัดเรียง`} onPointerDown={event => startDrag(event, sectionId)} onPointerMove={updateDropTarget} onPointerUp={event => finishDrag(event)} onPointerCancel={event => finishDrag(event, true)}><GripVertical aria-hidden="true" /></button>
+        <span className="csp-content-section-move-buttons">
+          <button type="button" aria-label="เลื่อนการ์ดขึ้น" disabled={index <= 0} onClick={() => moveWithKeyboard(sectionId, -1)}><ChevronUp aria-hidden="true" /></button>
+          <button type="button" aria-label="เลื่อนการ์ดลง" disabled={index < 0 || index >= orderedSectionIds.length - 1} onClick={() => moveWithKeyboard(sectionId, 1)}><ChevronDown aria-hidden="true" /></button>
+        </span>
+      </div>
+      {type && <ContentSection type={type} draft={draft} counterMode={counterMode} onChange={onChange} onExpand={onExpand} onOpenFullPreview={onOpenFullPreview} uiCodeView={uiCodeView} onUiCodeViewChange={onUiCodeViewChange} onExampleImagesChange={images => onChange(updateImagePromptExamples(draft, images))} />}
+      {field && <BotCustomFieldSection field={field} draft={draft} counterMode={counterMode} onChange={onChange} onExpand={onExpand} />}
+    </div>;
   };
 
   return <section className="csp-content-canvas" aria-labelledby="csp-content-canvas-title">
@@ -181,7 +276,12 @@ export const CreatorContentCanvas: React.FC<CreatorContentCanvasProps> = ({
       {selected.length > 0 && <div className="csp-content-summary-controls"><div className="csp-content-type-summary" aria-label="ประเภทเนื้อหาที่เลือก">{selected.map(type => <button type="button" key={type} className="csp-content-summary-button" onClick={() => focusSection(type)}>{findMeta(type).label}</button>)}</div><button type="button" className="csp-content-edit-types-button" onClick={onGoToDetails}>แก้ไขประเภท</button></div>}
     </div>
     <div className="csp-content-counter-switcher" aria-label="รูปแบบตัวนับ"><span>ตัวนับ:</span><button type="button" className={counterMode === 'characters' ? 'is-active' : ''} aria-pressed={counterMode === 'characters'} onClick={() => onCounterModeChange('characters')}>ตัวอักษร</button><button type="button" className={counterMode === 'tokens' ? 'is-active' : ''} aria-pressed={counterMode === 'tokens'} onClick={() => onCounterModeChange('tokens')}>โทเคนโดยประมาณ</button></div>
-    {selected.length === 0 ? <div className="csp-content-empty-state"><strong>ยังไม่ได้เลือกประเภทเนื้อหา</strong><p>เลือกประเภทเนื้อหาก่อน เพื่อให้ CXL เตรียมช่องเขียนที่เหมาะกับงานนี้</p><button type="button" className="csp-primary-button" onClick={onGoToDetails}>ไปเลือกประเภทเนื้อหา</button></div> : <div className="csp-content-section-list">{selected.map(type => <div key={type} ref={element => { if (element) sectionRefs.current[type] = element; }}><ContentSection type={type} draft={draft} counterMode={counterMode} onChange={onChange} onExpand={onExpand} onOpenFullPreview={onOpenFullPreview} uiCodeView={uiCodeView} onUiCodeViewChange={onUiCodeViewChange} onExampleImagesChange={images => onChange(updateImagePromptExamples(draft, images))} /></div>)}</div>}
+    {selected.length === 0 ? <div className="csp-content-empty-state"><strong>ยังไม่ได้เลือกประเภทเนื้อหา</strong><p>เลือกประเภทเนื้อหาก่อน เพื่อให้ CXL เตรียมช่องเขียนที่เหมาะกับงานนี้</p><button type="button" className="csp-primary-button" onClick={onGoToDetails}>ไปเลือกประเภทเนื้อหา</button></div> : <>
+      <div className="csp-content-reorder-hint">ลากที่ปุ่ม <GripVertical aria-hidden="true" /> เพื่อจัดเรียงหัวข้อและเนื้อหา หรือใช้ปุ่มขึ้นลง</div>
+      <div className="csp-content-section-list">{orderedSectionIds.map(renderSection)}</div>
+      {selected.includes('bot_prompt') && <button type="button" className="csp-add-custom-field-button" onClick={() => onChange(addBotCustomField(draft))}><Plus className="h-4 w-4" />เพิ่มช่องข้อมูล</button>}
+    </>}
+    <div className="csp-content-reorder-status" role="status" aria-live="polite">{dragStatus}</div>
   </section>;
 };
 

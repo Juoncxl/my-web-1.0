@@ -1,5 +1,5 @@
 import type { Asset, AssetIcon, User, WorkContentBlock } from '../../types';
-import { CREATOR_CONTENT_TYPE_META, getSelectedContentTypes, type CreatorContentCanvasDraft, type CreatorContentType } from './creatorContentModel';
+import { CREATOR_CONTENT_TYPE_META, getVisibleCreatorContentSectionIds, type CreatorContentCanvasDraft, type CreatorContentSectionId, type CreatorContentType } from './creatorContentModel';
 
 export type CreatorReviewMode = 'card' | 'detail';
 
@@ -31,22 +31,23 @@ function addTextBlock(blocks: WorkContentBlock[], id: string, title: string, bod
 }
 
 export function createCreatorContentBlocks(contentTypes: CreatorContentType[], canvas: CreatorContentCanvasDraft): WorkContentBlock[] {
-  const selected = getSelectedContentTypes(contentTypes);
   const contentBlocks: WorkContentBlock[] = [];
-
-  if (selected.includes('character')) addTextBlock(contentBlocks, 'creator-character', 'ข้อมูลตัวละคร', canvas.character);
-  if (selected.includes('lore')) addTextBlock(contentBlocks, 'creator-story', 'เนื้อเรื่องและโลกทัศน์', canvas.story);
-  if (selected.includes('image_prompt')) {
-    addTextBlock(contentBlocks, 'creator-image-prompt', 'คำสั่งเจนรูป', canvas.imagePrompt.prompt, 'Prompt');
-    addTextBlock(contentBlocks, 'creator-image-tool-model', 'เครื่องมือ / โมเดลที่ใช้', canvas.imagePrompt.toolModel, 'Note');
-    canvas.imagePrompt.exampleImages.forEach((src, index) => {
-      if (src) contentBlocks.push({ id: `creator-image-example-${index}`, type: 'Image', title: `รูปตัวอย่าง ${index + 1}`, body: src });
-    });
-  }
-  if (selected.includes('ui_code')) addTextBlock(contentBlocks, 'creator-ui-code', 'โค้ดหน้า UI', canvas.uiCode, 'UI Code');
-  if (selected.includes('bot_prompt')) {
-    canvas.botPrompt.customFields.forEach(field => addTextBlock(contentBlocks, `creator-bot-${field.id}`, field.title || 'ช่องข้อมูล', field.value));
-  }
+  const appendSection = (sectionId: CreatorContentSectionId) => {
+    if (sectionId === 'character') addTextBlock(contentBlocks, 'creator-character', 'ข้อมูลตัวละคร', canvas.character);
+    else if (sectionId === 'story') addTextBlock(contentBlocks, 'creator-story', 'เนื้อเรื่องและโลกทัศน์', canvas.story);
+    else if (sectionId === 'image-prompt') {
+      addTextBlock(contentBlocks, 'creator-image-prompt', 'คำสั่งเจนรูป', canvas.imagePrompt.prompt, 'Prompt');
+      addTextBlock(contentBlocks, 'creator-image-tool-model', 'เครื่องมือ / โมเดลที่ใช้', canvas.imagePrompt.toolModel, 'Note');
+      canvas.imagePrompt.exampleImages.forEach((src, index) => {
+        if (src) contentBlocks.push({ id: `creator-image-example-${index}`, type: 'Image', title: `รูปตัวอย่าง ${index + 1}`, body: src });
+      });
+    } else if (sectionId === 'ui-code') addTextBlock(contentBlocks, 'creator-ui-code', 'โค้ดหน้า UI', canvas.uiCode, 'UI Code');
+    else if (sectionId.startsWith('bot-custom:')) {
+      const field = canvas.botPrompt.customFields.find(item => item.id === sectionId.slice('bot-custom:'.length));
+      if (field) addTextBlock(contentBlocks, `creator-bot-${field.id}`, field.title || 'ช่องข้อมูล', field.value);
+    }
+  };
+  getVisibleCreatorContentSectionIds(canvas, contentTypes).forEach(appendSection);
   return contentBlocks;
 }
 

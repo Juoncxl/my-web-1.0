@@ -27,6 +27,30 @@ beforeEach(() => {
 });
 
 describe('social persistence', () => {
+  it('hydrates legacy summary icons in a separate bounded request without adding icon to the main select', async () => {
+    const mainRows = [{
+      id: 'asset-1', user_id: 'user-1', title: 'Legacy icon', category: 'character',
+      visibility: 'public', is_public: true, created_at: '2026-01-01T00:00:00.000Z'
+    }];
+    const mainQuery: any = {};
+    mainQuery.select = vi.fn(() => mainQuery);
+    mainQuery.eq = vi.fn(() => mainQuery);
+    mainQuery.is = vi.fn(() => mainQuery);
+    mainQuery.order = vi.fn(() => mainQuery);
+    mainQuery.limit = vi.fn().mockResolvedValue({ data: mainRows, error: null });
+    const mediaQuery: any = { select: vi.fn(() => mediaQuery), in: vi.fn().mockResolvedValue({ data: [], error: null }) };
+    const iconQuery: any = { select: vi.fn(() => iconQuery), in: vi.fn().mockResolvedValue({ data: [{ id: 'asset-1', icon: JSON.stringify({ type: 'emoji', value: '🌙' }) }], error: null }) };
+    const from = vi.fn((table: string) => table === 'assets' && from.mock.calls.length > 1 ? iconQuery : table === 'asset_media' ? mediaQuery : mainQuery);
+    getSupabaseClientMock.mockReturnValue(authenticatedClient(from));
+
+    const result = await supabaseService.fetchAssets({ publicOnly: true, detail: 'summary', limit: 1 });
+
+    expect(result.error).toBeNull();
+    expect(result.data[0].icon).toEqual({ type: 'emoji', value: '🌙' });
+    expect(mainQuery.select.mock.calls[0][0]).not.toContain(',icon');
+    expect(iconQuery.select).toHaveBeenCalledWith('id,icon');
+  });
+
   it('treats a missing optional Likes table as an empty list for legacy databases', async () => {
     const likesQuery: any = {
       select: vi.fn(() => likesQuery),

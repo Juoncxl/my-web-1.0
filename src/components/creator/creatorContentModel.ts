@@ -13,6 +13,13 @@ export type CreatorContentEditorId =
   | 'bot-extra'
   | `bot-custom:${string}`;
 
+export type CreatorContentSectionId =
+  | 'character'
+  | 'story'
+  | 'image-prompt'
+  | 'ui-code'
+  | `bot-custom:${string}`;
+
 export interface CreatorBotCustomField {
   id: string;
   title: string;
@@ -28,6 +35,8 @@ interface CreatorLegacyBotPromptFields {
 }
 
 export interface CreatorContentCanvasDraft {
+  /** Explicit visual order; hidden sections remain here so reselecting them restores their place. */
+  sectionOrder: CreatorContentSectionId[];
   character: string;
   story: string;
   imagePrompt: {
@@ -61,6 +70,7 @@ const VALID_CONTENT_TYPES = new Set<CreatorContentType>(CREATOR_CONTENT_TYPE_MET
 
 export function createBlankContentCanvasDraft(): CreatorContentCanvasDraft {
   return {
+    sectionOrder: [],
     character: '',
     story: '',
     imagePrompt: { prompt: '', toolModel: '', exampleImages: [] },
@@ -90,7 +100,9 @@ function migrateLegacyBotFields(botPrompt: CreatorContentCanvasDraft['botPrompt'
 }
 
 export function cloneContentCanvasDraft(draft: CreatorContentCanvasDraft): CreatorContentCanvasDraft {
+  const customFields = migrateLegacyBotFields(draft.botPrompt);
   return {
+    sectionOrder: Array.isArray(draft.sectionOrder) ? [...draft.sectionOrder] : [],
     character: draft.character,
     story: draft.story,
     imagePrompt: {
@@ -100,9 +112,101 @@ export function cloneContentCanvasDraft(draft: CreatorContentCanvasDraft): Creat
     },
     uiCode: draft.uiCode,
     botPrompt: {
-      customFields: migrateLegacyBotFields(draft.botPrompt)
+      customFields
     }
   };
+}
+
+const BASE_SECTION_IDS: CreatorContentSectionId[] = ['character', 'story', 'image-prompt', 'ui-code'];
+
+function contentTypeToSectionId(type: CreatorContentType): CreatorContentSectionId | null {
+  if (type === 'character') return 'character';
+  if (type === 'lore') return 'story';
+  if (type === 'image_prompt') return 'image-prompt';
+  if (type === 'ui_code') return 'ui-code';
+  return null;
+}
+
+function isSectionId(value: unknown): value is CreatorContentSectionId {
+  return value === 'character' || value === 'story' || value === 'image-prompt' || value === 'ui-code' || (typeof value === 'string' && value.startsWith('bot-custom:'));
+}
+
+/** Return a stable order containing existing sections and newly selected fields. */
+export function normalizeCreatorContentSectionOrder(
+  sectionOrder: readonly CreatorContentSectionId[] | undefined,
+  selectedContentTypes: readonly CreatorContentType[],
+  customFields: readonly CreatorBotCustomField[]
+): CreatorContentSectionId[] {
+  const selectedIds = new Set<CreatorContentSectionId>(selectedContentTypes
+    .map(contentTypeToSectionId)
+    .filter((value): value is CreatorContentSectionId => Boolean(value)));
+  if (selectedContentTypes.includes('bot_prompt')) customFields.forEach(field => selectedIds.add(`bot-custom:${field.id}`));
+  const knownIds = new Set<CreatorContentSectionId>([
+    ...BASE_SECTION_IDS,
+    ...customFields.map(field => `bot-custom:${field.id}` as CreatorContentSectionId)
+  ]);
+  const normalized: CreatorContentSectionId[] = [];
+  const append = (id: CreatorContentSectionId) => {
+    if (!normalized.includes(id) && knownIds.has(id)) normalized.push(id);
+  };
+
+  (sectionOrder || []).forEach(id => { if (isSectionId(id)) append(id); });
+  // A brand-new blank draft starts with an empty order, so only materialize
+  // sections the user selected. Existing orders retain hidden IDs above.
+  const canonical = [
+    ...BASE_SECTION_IDS,
+    ...customFields.map(field => `bot-custom:${field.id}` as CreatorContentSectionId)
+  ];
+  canonical.filter(id => selectedIds.has(id)).forEach(append);
+  return normalized;
+}
+
+export function getVisibleCreatorContentSectionIds(
+  draft: Pick<CreatorContentCanvasDraft, 'sectionOrder' | 'botPrompt'>,
+  selectedContentTypes: readonly CreatorContentType[]
+): CreatorContentSectionId[] {
+  const order = normalizeCreatorContentSectionOrder(draft.sectionOrder, selectedContentTypes, draft.botPrompt.customFields);
+  const visible = new Set<CreatorContentSectionId>();
+  selectedContentTypes.forEach(type => {
+    const id = contentTypeToSectionId(type);
+    if (id) visible.add(id);
+  });
+  if (selectedContentTypes.includes('bot_prompt')) draft.botPrompt.customFields.forEach(field => visible.add(`bot-custom:${field.id}`));
+  return order.filter(id => visible.has(id));
+}
+
+export function reorderCreatorContentSections(
+  draft: CreatorContentCanvasDraft,
+  sectionId: CreatorContentSectionId,
+  targetId: CreatorContentSectionId,
+  before = true
+): CreatorContentCanvasDraft {
+  const next = cloneContentCanvasDraft(draft);
+  // Reordering must not materialize hidden canonical sections. The Canvas has
+  // already normalized newly selected sections before this handler runs.
+  const order = normalizeCreatorContentSectionOrder(next.sectionOrder, [], next.botPrompt.customFields);
+  const fromIndex = order.indexOf(sectionId);
+  const targetIndex = order.indexOf(targetId);
+  if (fromIndex < 0 || targetIndex < 0 || sectionId === targetId) return next;
+  order.splice(fromIndex, 1);
+  let insertAt = order.indexOf(targetId);
+  if (insertAt < 0) return next;
+  if (!before) insertAt += 1;
+  order.splice(insertAt, 0, sectionId);
+  next.sectionOrder = order;
+  return next;
+}
+
+export function moveCreatorContentSectionByOffset(
+  draft: CreatorContentCanvasDraft,
+  sectionId: CreatorContentSectionId,
+  visibleOrder: readonly CreatorContentSectionId[],
+  offset: -1 | 1
+): CreatorContentCanvasDraft {
+  const index = visibleOrder.indexOf(sectionId);
+  const target = visibleOrder[index + offset];
+  if (index < 0 || !target) return cloneContentCanvasDraft(draft);
+  return reorderCreatorContentSections(draft, sectionId, target, offset < 0);
 }
 
 /** Keep legacy categories useful for old drafts while allowing an explicit [] selection. */
@@ -132,24 +236,36 @@ export function createContentCanvasDraftFromLegacy(input: {
   const draft = createBlankContentCanvasDraft();
   const blocks = input.contentBlocks || [];
   const customFields: CreatorBotCustomField[] = [];
+  const derivedOrder: CreatorContentSectionId[] = [];
+  const appendDerived = (id: CreatorContentSectionId) => { if (!derivedOrder.includes(id)) derivedOrder.push(id); };
   const knownTitles: Record<string, keyof CreatorContentCanvasDraft> = {
     'ข้อมูลตัวละคร': 'character',
     'โปรไฟล์ / ประวัติตัวละคร': 'character',
     'เนื้อเรื่องและโลกทัศน์': 'story',
     'เนื้อเรื่อง / โลกทัศน์': 'story'
   };
-  blocks.filter(block => block.type !== 'UI Code').forEach((block, index) => {
+  blocks.forEach((block, index) => {
     const title = (block.title || '').trim();
     const body = block.body || '';
+    if (block.type === 'UI Code') {
+      if (body.trim()) appendDerived('ui-code');
+      return;
+    }
     if (!body.trim()) return;
-    if (block.id === 'creator-character' || knownTitles[title] === 'character') draft.character = body;
-    else if (block.id === 'creator-story' || knownTitles[title] === 'story') draft.story = body;
-    else if (block.id === 'creator-image-prompt' || title === 'คำสั่งเจนรูป') draft.imagePrompt.prompt = body;
-    else if (block.id === 'creator-image-tool-model' || title === 'เครื่องมือ / โมเดลที่ใช้') draft.imagePrompt.toolModel = body;
-    else if (block.type === 'Image' || block.id?.startsWith('creator-image-example-')) draft.imagePrompt.exampleImages.push(body);
+    if (block.id === 'creator-character' || knownTitles[title] === 'character') { draft.character = body; appendDerived('character'); }
+    else if (block.id === 'creator-story' || knownTitles[title] === 'story') { draft.story = body; appendDerived('story'); }
+    else if (block.id === 'creator-image-prompt' || title === 'คำสั่งเจนรูป') { draft.imagePrompt.prompt = body; appendDerived('image-prompt'); }
+    else if (block.id === 'creator-image-tool-model' || title === 'เครื่องมือ / โมเดลที่ใช้') { draft.imagePrompt.toolModel = body; appendDerived('image-prompt'); }
+    else if (block.type === 'Image' || block.id?.startsWith('creator-image-example-')) { draft.imagePrompt.exampleImages.push(body); appendDerived('image-prompt'); }
     else if (block.id?.startsWith('creator-bot-')) {
-      if (!customFields.some(field => field.title === (title || 'ช่องข้อมูล') && field.value === body)) customFields.push({ id: block.id.slice('creator-bot-'.length) || `legacy-custom-${index}`, title: title || 'ช่องข้อมูล', value: body });
-    } else if (!customFields.some(field => field.title === (title || 'ข้อมูลเดิม') && field.value === body)) customFields.push({ id: block.id || `legacy-custom-${index}`, title: title || 'ข้อมูลเดิม', value: body });
+      const field = { id: block.id.slice('creator-bot-'.length) || `legacy-custom-${index}`, title: title || 'ช่องข้อมูล', value: body };
+      if (!customFields.some(item => item.title === field.title && item.value === body)) customFields.push(field);
+      appendDerived(`bot-custom:${field.id}`);
+    } else {
+      const field = { id: block.id || `legacy-custom-${index}`, title: title || 'ข้อมูลเดิม', value: body };
+      if (!customFields.some(item => item.title === field.title && item.value === body)) customFields.push(field);
+      appendDerived(`bot-custom:${field.id}`);
+    }
   });
 
   const headingSections = parseLegacyHeadingSections(input.content || '');
@@ -157,22 +273,34 @@ export function createContentCanvasDraftFromLegacy(input: {
     const title = section.title.trim();
     const body = section.body.trim();
     if (!body) return;
-    if (title === 'ข้อมูลตัวละคร' || title === 'โปรไฟล์ / ประวัติตัวละคร') draft.character ||= body;
-    else if (title === 'เนื้อเรื่องและโลกทัศน์' || title === 'เนื้อเรื่อง / โลกทัศน์') draft.story ||= body;
-    else if (title === 'คำสั่งเจนรูป') draft.imagePrompt.prompt ||= body;
-    else if (title === 'เครื่องมือ / โมเดลที่ใช้') draft.imagePrompt.toolModel ||= body;
-    else if (title !== 'โค้ดหน้า UI' && !/^รูปตัวอย่าง\s*\d+$/u.test(title) && !customFields.some(field => field.title === title && field.value === body)) customFields.push({ id: `legacy-section-${customFields.length}`, title, value: body });
+    if (title === 'ข้อมูลตัวละคร' || title === 'โปรไฟล์ / ประวัติตัวละคร') { draft.character ||= body; appendDerived('character'); }
+    else if (title === 'เนื้อเรื่องและโลกทัศน์' || title === 'เนื้อเรื่อง / โลกทัศน์') { draft.story ||= body; appendDerived('story'); }
+    else if (title === 'คำสั่งเจนรูป') { draft.imagePrompt.prompt ||= body; appendDerived('image-prompt'); }
+    else if (title === 'เครื่องมือ / โมเดลที่ใช้') { draft.imagePrompt.toolModel ||= body; appendDerived('image-prompt'); }
+    else if (title !== 'โค้ดหน้า UI' && !/^รูปตัวอย่าง\s*\d+$/u.test(title) && !customFields.some(field => field.title === title && field.value === body)) {
+      const field = { id: `legacy-section-${customFields.length}`, title, value: body };
+      customFields.push(field);
+      appendDerived(`bot-custom:${field.id}`);
+    }
   });
 
   const hasStructuredContent = Boolean(draft.character || draft.story || draft.imagePrompt.prompt || draft.imagePrompt.toolModel || draft.imagePrompt.exampleImages.length || customFields.length);
   if (!hasStructuredContent) {
     const legacyText = (input.content || '').trim() || blocks.filter(block => block.type !== 'UI Code').map(block => block.body).join('\n\n').trim();
-    if (input.category === 'character') draft.character = legacyText;
-    else if (input.category === 'lore') draft.story = legacyText;
-    else if (legacyText) customFields.push({ id: 'legacy-content', title: 'ข้อมูลเดิม', value: legacyText });
+    if (input.category === 'character') { draft.character = legacyText; appendDerived('character'); }
+    else if (input.category === 'lore') { draft.story = legacyText; appendDerived('story'); }
+    else if (legacyText) { customFields.push({ id: 'legacy-content', title: 'ข้อมูลเดิม', value: legacyText }); appendDerived('bot-custom:legacy-content'); }
   }
   draft.botPrompt.customFields = customFields.length ? customFields : draft.botPrompt.customFields;
   draft.uiCode = (input.uiCodeSnippet || '').trim() || blocks.find(block => block.type === 'UI Code')?.body || '';
+  if (draft.uiCode.trim()) appendDerived('ui-code');
+  draft.sectionOrder = normalizeCreatorContentSectionOrder(derivedOrder, [
+    ...(draft.character.trim() ? ['character' as CreatorContentType] : []),
+    ...(draft.story.trim() ? ['lore' as CreatorContentType] : []),
+    ...((draft.imagePrompt.prompt.trim() || draft.imagePrompt.toolModel.trim() || draft.imagePrompt.exampleImages.length) ? ['image_prompt' as CreatorContentType] : []),
+    ...(draft.uiCode.trim() ? ['ui_code' as CreatorContentType] : []),
+    ...(draft.botPrompt.customFields.length ? ['bot_prompt' as CreatorContentType] : [])
+  ], draft.botPrompt.customFields);
   return draft;
 }
 
@@ -231,7 +359,10 @@ export function addBotCustomField(
   field: CreatorBotCustomField = createBlankBotCustomField()
 ): CreatorContentCanvasDraft {
   const next = cloneContentCanvasDraft(draft);
-  if (!next.botPrompt.customFields.some(item => item.id === field.id)) next.botPrompt.customFields.push({ ...field });
+  if (!next.botPrompt.customFields.some(item => item.id === field.id)) {
+    next.botPrompt.customFields.push({ ...field });
+    next.sectionOrder = normalizeCreatorContentSectionOrder(next.sectionOrder, ['bot_prompt'], next.botPrompt.customFields);
+  }
   return next;
 }
 
@@ -245,6 +376,7 @@ export function updateBotCustomFieldTitle(draft: CreatorContentCanvasDraft, fiel
 export function removeBotCustomField(draft: CreatorContentCanvasDraft, fieldId: string): CreatorContentCanvasDraft {
   const next = cloneContentCanvasDraft(draft);
   next.botPrompt.customFields = next.botPrompt.customFields.filter(item => item.id !== fieldId);
+  next.sectionOrder = next.sectionOrder.filter(id => id !== `bot-custom:${fieldId}`);
   return next;
 }
 

@@ -8,7 +8,7 @@ const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 const redesignStyles = styles.slice(styles.indexOf('Phase 1.5N Item 12E.2'));
-const mobileCardStyles = styles.slice(styles.indexOf('/* Mobile Work Cards'));
+const mobileCardStyles = styles.slice(styles.indexOf('/* Collaboration cards use'));
 
 describe('12E.2 final Work Card + Work Detail visual redesign', () => {
   it('keeps real covers square, non-destructive, and free from fallback decoration', () => {
@@ -39,8 +39,11 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(redesignStyles).toContain('bottom: -1.15rem;');
   });
 
-  it('keeps Card summary metadata canonical and readable', () => {
-    expect(cardSource).toContain('cv-card-meta-actions');
+  it('keeps Card metadata readable as cover chips and retains the content body', () => {
+    expect(cardSource).toContain('className="cv-cover-topline"');
+    expect(cardSource).toContain('className="cv-cover-category"');
+    expect(cardSource).toContain('className="cv-cover-status"');
+    expect(cardSource).toContain('className="cv-cover-visibility"');
     expect(cardSource).toContain('isPublicFeedVisibility(asset)');
     expect(cardSource).toContain('statusMeta.name');
     expect(cardSource).toContain('<h3>{cardTitle}</h3>');
@@ -50,21 +53,21 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(redesignStyles).toContain('.cv-card-snippet { min-height: 3.1rem;');
   });
 
-  it('compacts mobile card metadata without removing workflow status', () => {
-    expect(mobileCardStyles).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?\.cv-card-meta-row \{[\s\S]*?flex-direction: row;/);
-    expect(mobileCardStyles).toContain('.cv-card-visibility { display: none; }');
-    expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-card-meta-row {');
-    expect(mobileCardStyles).toContain('flex-wrap: nowrap;');
+  it('compacts mobile cover metadata without removing workflow status', () => {
+    expect(mobileCardStyles).toContain('.cv-cover-topline { top: .52rem; right: .52rem; left: .52rem; gap: .28rem; }');
+    expect(mobileCardStyles).toContain('.cv-cover-category { max-width: none; min-height: 1.68rem;');
+    expect(mobileCardStyles).toContain('.cv-cover-status { max-width: 5.15rem; min-height: 1.68rem;');
+    expect(mobileCardStyles).toContain('.cv-cover-visibility { display: none; }');
     expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-summary {');
     expect(mobileCardStyles).toContain('border-top: 0;');
-    expect(mobileCardStyles).toContain('.cv-collab-card-stats-mobile { display: none; }');
+    expect(styles).toContain('.cv-collab-card-stats-mobile { display: none; }');
     expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats-desktop { display: none; }');
     expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats-mobile { display: inline; }');
     expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats time { display: none; }');
-    expect(mobileCardStyles).toContain('.cv-card-status {');
+    expect(mobileCardStyles).toContain('.cv-cover-status-label { max-width: 3.45rem; }');
     expect(mobileCardStyles).toContain('white-space: nowrap;');
-    expect(cardSource).toContain('className="cv-card-visibility"');
-    expect(cardSource).toContain('className="cv-card-status"');
+    expect(cardSource).toContain('className="cv-cover-visibility"');
+    expect(cardSource).toContain('className="cv-cover-status"');
   });
 
   it('keeps Detail natural media, real content, and removes reference-only decoration', () => {

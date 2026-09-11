@@ -29,8 +29,10 @@ describe('public Creator identity on Work cards', () => {
   });
 
   it('limits a participant copy action to the house tag and note body', () => {
-    expect(detailSource).toContain('getParticipantPromotionCopy(participant.houseTag, participant.notes)');
-    expect(detailSource).toContain('{participantCopyText && <CopyButton');
+    expect(detailSource).toContain('getParticipantTagCopy(participant.houseTag)');
+    expect(detailSource).toContain('getParticipantContentCopy(participant.notes)');
+    expect(detailSource).toContain('participant-tag-${participant.id}');
+    expect(detailSource).toContain('participant-content-${participant.id}');
     expect(detailSource).not.toContain('participant.platforms.join');
     expect(detailSource).not.toContain('`สถานะข้อมูล: ${getCollabStatusLabel(participant.dataStatus)}`');
   });
