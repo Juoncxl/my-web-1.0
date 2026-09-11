@@ -38,6 +38,8 @@ describe('12E.2.1 Work presentation parity and action cleanup', () => {
   it('renders separate standard and Collaboration cards and includes every created Collaboration group', () => {
     expect(cardSource).toContain("display.isCollaborationFocused ? 'is-collaboration-card' : 'is-standard-card'");
     expect(cardSource).toContain('สรุปข้อมูลคอลแลป');
+    expect(cardSource).toContain('ผู้เข้าร่วม {collaboration.participants.length} คน');
+    expect(cardSource).toContain('ข้อมูลกลาง {collaboration.sharedInformation.length} รายการ');
     expect(cardSource).toContain('ผู้ร่วม {collaboration.participants.length} · กลาง {collaboration.sharedInformation.length}');
     expect(cardSource).toContain('collaboration.sharedTag.trim()');
     expect(cardSource).toContain('collaboration.platforms.slice(0, 2)');

@@ -57,6 +57,9 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(mobileCardStyles).toContain('flex-wrap: nowrap;');
     expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-summary {');
     expect(mobileCardStyles).toContain('border-top: 0;');
+    expect(mobileCardStyles).toContain('.cv-collab-card-stats-mobile { display: none; }');
+    expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats-desktop { display: none; }');
+    expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats-mobile { display: inline; }');
     expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats time { display: none; }');
     expect(mobileCardStyles).toContain('.cv-card-status {');
     expect(mobileCardStyles).toContain('white-space: nowrap;');

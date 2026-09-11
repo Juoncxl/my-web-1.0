@@ -8731,6 +8731,7 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   padding-top: .75rem;
 }
 .cv-collab-card-stats { display: grid; gap: .2rem; color: #5a6f89; font-size: .7rem; line-height: 1.4; }
+.cv-collab-card-stats-mobile { display: none; }
 .cv-collab-card-stats time { color: #724972; font-weight: 750; }
 .cv-card-collab-link { display: flex; align-items: center; gap: .4rem; min-width: 0; border: 1px solid rgba(177, 153, 219, .24); border-radius: .6rem; padding: .42rem .52rem; background: rgba(177, 153, 219, .08); color: #5a6f89; font-size: .68rem; }
 .cv-card-collab-link > span { flex: 0 0 auto; color: #724972; font-weight: 800; }
@@ -8987,6 +8988,8 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
     white-space: nowrap;
   }
 
+  .cv-asset-card.is-collaboration-card .cv-collab-card-stats-desktop { display: none; }
+  .cv-asset-card.is-collaboration-card .cv-collab-card-stats-mobile { display: inline; }
   .cv-asset-card.is-collaboration-card .cv-collab-card-stats time { display: none; }
 
   .cv-asset-card.is-collaboration-card .cv-card-footer {
