@@ -8317,13 +8317,8 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 
 /* Phase 1.5N Item 12E.1 — Work Card and Work Detail presentation cleanup. */
 .cv-card-cover { aspect-ratio: 1 / 1; }
-.cv-card-cover-overlay,
-.cv-cover-topline { display: none; }
-.cv-card-meta-row { align-items: center; justify-content: space-between; gap: .65rem; }
-.cv-card-meta-actions { display: inline-flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .45rem; min-width: 0; }
-.cv-card-visibility,
-.cv-card-status { margin-left: 0; font-size: .78rem; line-height: 1.35; }
-.cv-card-category { min-height: 1.9rem; padding: .3rem .48rem; font-size: .78rem; line-height: 1.3; }
+.cv-card-cover-overlay { display: none; }
+.cv-card-title-row { margin-top: 0; }
 .cv-card-title-row h3 { font-size: 1.06rem; font-weight: 750; line-height: 1.32; }
 .cv-card-snippet { min-height: 3.1rem; font-size: .86rem; line-height: 1.55; }
 .cv-card-tags button,
@@ -8373,11 +8368,6 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 
 @media (max-width: 767px) {
   .cv-card-cover { aspect-ratio: 1 / 1; }
-  .cv-card-meta-row { align-items: flex-start; flex-direction: column; }
-  .cv-card-meta-actions { justify-content: flex-start; }
-  .cv-card-category,
-  .cv-card-visibility,
-  .cv-card-status { font-size: .76rem; }
   .cv-card-title-row h3 { font-size: .98rem; }
   .cv-card-snippet { min-height: 2.7rem; font-size: .8rem; }
   .cv-card-author p { font-size: .8rem; }
@@ -8628,39 +8618,6 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
    .work-detail-share-status { right: auto; left: 0; }
 }
 
-/* Mobile Work Cards — keep the useful workflow status, remove secondary
-   visibility metadata, and keep category/status on one compact row. */
-@media (max-width: 767px) {
-  .cv-card-meta-row {
-    align-items: center;
-    flex-direction: row;
-    gap: .35rem;
-    min-width: 0;
-  }
-
-  .cv-card-visibility { display: none; }
-
-  .cv-card-category {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .cv-card-meta-actions {
-    flex: 0 0 auto;
-    gap: .3rem;
-    min-width: 0;
-  }
-
-  .cv-card-status {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-}
-
 /* Phase 1.5N Item 12E.2.1 — Preview is the Card/Detail surface source of truth.
    Keep the page/modal backdrops frosted, but prevent their colors from muddying
    the readable presentation sheets themselves. */
@@ -8906,19 +8863,6 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 
 /* Profile Portfolio uses the same canonical AssetCard with a compact
    presentation variant.  The full card remains unchanged everywhere else. */
-.csp-portfolio-showcase-grid .cv-asset-card.is-profile-compact .cv-card-meta-actions {
-  display: none;
-}
-.csp-portfolio-showcase-grid .cv-asset-card.is-profile-compact .cv-card-meta-row {
-  min-height: 1.9rem;
-}
-.csp-portfolio-showcase-grid .cv-asset-card.is-profile-compact .cv-card-category {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .csp-portfolio-showcase-grid .cv-asset-card.is-profile-compact .cv-card-title-row h3,
 .csp-portfolio-showcase-grid .cv-asset-card.is-profile-compact .cv-card-snippet {
   display: -webkit-box;
@@ -8960,15 +8904,6 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 /* Collaboration cards use their own dense mobile body. The cover remains
    unchanged; only repeated metadata and non-essential spacing are condensed. */
 @media (max-width: 767px) {
-  .cv-asset-card.is-collaboration-card .cv-card-meta-row {
-    flex-wrap: nowrap;
-  }
-
-  .cv-asset-card.is-collaboration-card .cv-card-category {
-    flex: 1 1 0;
-    max-width: none;
-  }
-
   .cv-asset-card.is-collaboration-card .cv-collab-card-summary {
     gap: .28rem;
     margin-top: .5rem;
@@ -8996,6 +8931,96 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
     margin-top: .55rem;
     padding-top: .5rem;
   }
+}
+
+/* Card category and workflow status sit on the cover so card bodies can focus
+   on the title and actual work data.  The glass chips stay legible over every
+   user-supplied cover, including bright imagery and generated fallbacks. */
+.cv-cover-topline {
+  position: absolute;
+  z-index: 3;
+  top: .72rem;
+  right: .72rem;
+  left: .72rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4rem;
+  min-width: 0;
+}
+.cv-cover-category,
+.cv-cover-status,
+.cv-cover-visibility {
+  border: 1px solid rgba(255, 255, 255, .38);
+  background: rgba(1, 22, 43, .66);
+  box-shadow: 0 .3rem .9rem rgba(1, 8, 25, .2), inset 0 1px 0 rgba(255, 255, 255, .16);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(1, 8, 25, .42);
+  backdrop-filter: blur(12px) saturate(118%);
+  -webkit-backdrop-filter: blur(12px) saturate(118%);
+}
+.cv-cover-category {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: min(65%, 15rem);
+  gap: .25rem;
+  min-height: 1.9rem;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: .27rem .46rem;
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.cv-cover-category:hover { background: rgba(1, 22, 43, .82); }
+.cv-cover-category:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.cv-cover-category-label,
+.cv-cover-status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv-cover-meta {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .3rem;
+  min-width: 0;
+}
+.cv-cover-status {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 8.5rem;
+  gap: .22rem;
+  min-height: 1.9rem;
+  border-radius: 999px;
+  padding: .27rem .46rem;
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.cv-cover-status-label { min-width: 0; }
+.cv-cover-visibility {
+  display: inline-grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+}
+.cv-cover-visibility svg { width: .82rem; height: .82rem; }
+@media (max-width: 767px) {
+  .cv-cover-topline { top: .52rem; right: .52rem; left: .52rem; gap: .28rem; }
+  .cv-cover-category { max-width: none; min-height: 1.68rem; gap: .18rem; padding: .22rem .36rem; font-size: .58rem; }
+  .cv-cover-meta { flex: 0 0 auto; }
+  .cv-cover-status { max-width: 5.15rem; min-height: 1.68rem; gap: .16rem; padding: .22rem .34rem; font-size: .58rem; }
+  .cv-cover-status-label { max-width: 3.45rem; }
+  .cv-cover-visibility { display: none; }
 }
 
 /* Prompt bodies are user-authored instructions, so keep the PROMPT overline

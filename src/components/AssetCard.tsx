@@ -257,6 +257,32 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           </div>
         )}
 
+        <div className="cv-cover-topline">
+          <button
+            type="button"
+            onClick={handleCategoryClick}
+            className="cv-cover-category"
+            aria-label={`กรองหมวด ${categoryLabel}`}
+          >
+            <span aria-hidden="true">{categoryMeta.emoji}</span>
+            <span className="cv-cover-category-label">{categoryLabel}</span>
+          </button>
+          <div className="cv-cover-meta">
+            <span className="cv-cover-status" title={`สถานะผลงาน: ${statusMeta.name}`}>
+              <span aria-hidden="true">{statusMeta.emoji}</span>
+              <span className="cv-cover-status-label">{statusMeta.name}</span>
+            </span>
+            <span
+              className="cv-cover-visibility"
+              role="img"
+              aria-label={isPublicFeedVisibility(asset) ? 'สาธารณะ' : 'ส่วนตัว'}
+              title={isPublicFeedVisibility(asset) ? 'สาธารณะ' : 'ส่วนตัว'}
+            >
+              {isPublicFeedVisibility(asset) ? <Globe className="w-3 h-3" aria-hidden="true" /> : <Lock className="w-3 h-3" aria-hidden="true" />}
+            </span>
+          </div>
+        </div>
+
         <div className="cv-cover-actions">
           {galleryCount > 1 && <span className="cv-gallery-count"><Images className="w-3 h-3" />{galleryCount}</span>}
         </div>
@@ -273,16 +299,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       </div>
 
       <div className="cv-card-body">
-        <div className="cv-card-meta-row">
-          <button type="button" onClick={handleCategoryClick} className="cv-card-category"><span>{categoryMeta.emoji}</span>{categoryLabel}</button>
-          <div className="cv-card-meta-actions">
-            <span className="cv-card-visibility">
-              {isPublicFeedVisibility(asset) ? <><Globe className="w-3 h-3" />สาธารณะ</> : <><Lock className="w-3 h-3" />ส่วนตัว</>}
-            </span>
-            <span className="cv-card-status" title={`สถานะผลงาน: ${statusMeta.name}`}>{statusMeta.emoji} {statusMeta.name}</span>
-          </div>
-        </div>
-
         <div className="cv-card-title-row">
           <div className="cv-card-icon" aria-hidden="true">{isValidWorkIcon(asset.icon)
             ? asset.icon.type === 'emoji' || asset.icon.type === 'kaomoji'

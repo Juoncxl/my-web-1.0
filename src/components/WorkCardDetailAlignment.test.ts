@@ -17,14 +17,18 @@ describe('12E.1 Work Card and Work Detail presentation cleanup', () => {
     expect(cssSource).toContain('.cv-card-cover-image { width: 100%; height: 100%; display: block; object-fit: cover;');
   });
 
-  it('uses one canonical Card metadata row and keeps the cover free of repeated metadata', () => {
+  it('puts scan-first Card metadata on the cover while keeping the body for work content', () => {
     expect(cardSource).toContain('<h3>{cardTitle}</h3>');
     expect(cardSource).toContain('display.summary || asset.content');
     expect(cardSource).toContain('isPublicFeedVisibility(asset)');
     expect(cardSource).toContain('statusMeta.name');
     expect(cardSource).toContain('categoryLabelOverride');
-    expect(cardSource).toContain('cv-card-meta-actions');
-    expect(cardSource).not.toContain('cv-cover-topline');
+    expect(cardSource).toContain('className="cv-cover-topline"');
+    expect(cardSource).toContain('className="cv-cover-category"');
+    expect(cardSource).toContain('className="cv-cover-status"');
+    expect(cardSource).toContain('className="cv-cover-visibility"');
+    expect(cardSource).not.toContain('cv-card-meta-row');
+    expect(cardSource).toContain('event.stopPropagation();\n    onSelectCategory?.(asset.category);');
     expect(cardSource).not.toContain('cv-card-cover-overlay');
     expect(cardSource).not.toContain('cv-card-tags');
     expect(cardSource).not.toContain('handleTagClick');
