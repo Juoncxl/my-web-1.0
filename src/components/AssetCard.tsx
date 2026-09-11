@@ -99,8 +99,7 @@ const CollabCardSummary: React.FC<{ collaboration: PublicAssetCollaboration }> =
       {collaboration.platforms.length > 2 && <span>+{collaboration.platforms.length - 2}</span>}
     </div>
     <div className="cv-collab-card-stats">
-      <span>ผู้เข้าร่วม {collaboration.participants.length} คน</span>
-      <span>ข้อมูลกลาง {collaboration.sharedInformation.length} รายการ</span>
+      <span>ผู้ร่วม {collaboration.participants.length} · กลาง {collaboration.sharedInformation.length}</span>
       {nextDeadline && <time dateTime={nextDeadline.date}>{nextDeadline.label.trim() || 'กำหนดส่ง'} · {nextDeadline.date}</time>}
     </div>
   </div>;

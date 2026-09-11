@@ -53,6 +53,11 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
   it('compacts mobile card metadata without removing workflow status', () => {
     expect(mobileCardStyles).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?\.cv-card-meta-row \{[\s\S]*?flex-direction: row;/);
     expect(mobileCardStyles).toContain('.cv-card-visibility { display: none; }');
+    expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-card-meta-row {');
+    expect(mobileCardStyles).toContain('flex-wrap: nowrap;');
+    expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-summary {');
+    expect(mobileCardStyles).toContain('border-top: 0;');
+    expect(mobileCardStyles).toContain('.cv-asset-card.is-collaboration-card .cv-collab-card-stats time { display: none; }');
     expect(mobileCardStyles).toContain('.cv-card-status {');
     expect(mobileCardStyles).toContain('white-space: nowrap;');
     expect(cardSource).toContain('className="cv-card-visibility"');

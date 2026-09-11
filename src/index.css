@@ -8956,6 +8956,45 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   margin-left: .35rem;
 }
 
+/* Collaboration cards use their own dense mobile body. The cover remains
+   unchanged; only repeated metadata and non-essential spacing are condensed. */
+@media (max-width: 767px) {
+  .cv-asset-card.is-collaboration-card .cv-card-meta-row {
+    flex-wrap: nowrap;
+  }
+
+  .cv-asset-card.is-collaboration-card .cv-card-category {
+    flex: 1 1 0;
+    max-width: none;
+  }
+
+  .cv-asset-card.is-collaboration-card .cv-collab-card-summary {
+    gap: .28rem;
+    margin-top: .5rem;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .cv-asset-card.is-collaboration-card .cv-collab-card-chips { gap: .25rem; }
+
+  .cv-asset-card.is-collaboration-card .cv-collab-card-stats {
+    display: block;
+    overflow: hidden;
+    color: #5a6f89;
+    font-size: .68rem;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cv-asset-card.is-collaboration-card .cv-collab-card-stats time { display: none; }
+
+  .cv-asset-card.is-collaboration-card .cv-card-footer {
+    margin-top: .55rem;
+    padding-top: .5rem;
+  }
+}
+
 /* Prompt bodies are user-authored instructions, so keep the PROMPT overline
    label compact while making the actual text comfortable to read. */
 .work-detail-block.is-prompt > pre {
