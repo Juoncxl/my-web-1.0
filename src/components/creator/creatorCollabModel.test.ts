@@ -10,6 +10,7 @@ import {
   createBlankCollaborationDraft,
   createCollabDraftFromPublicContentBlocks,
   createPublicCollabContentBlocks,
+  getCollabStatusLabel,
   getCollaborationSummary,
   removeCollabDeadline,
   removeCollabParticipantReferenceImage,
@@ -19,6 +20,14 @@ import {
 } from './creatorCollabModel';
 
 describe('Creator Composer D.6.1 collaboration draft model', () => {
+  it('uses a high-visibility red marker for participants who have not submitted', () => {
+    expect(getCollabStatusLabel('not_submitted')).toBe('🔴 ยังไม่ส่ง');
+    expect(getCollabStatusLabel('unknown' as Parameters<typeof getCollabStatusLabel>[0])).toBe('🔴 ยังไม่ส่ง');
+    expect(getCollabStatusLabel('reviewing')).toBe('🟡 รอตรวจ');
+    expect(getCollabStatusLabel('needs_fix')).toBe('🟣 ต้องแก้');
+    expect(getCollabStatusLabel('approved')).toBe('🟢 ผ่านแล้ว');
+  });
+
   it('starts empty without predefined shared information or deadlines', () => {
     expect(createBlankCollaborationDraft()).toEqual({
       name: '', sharedTag: '', platforms: [], sharedInformation: [], deadlines: [], participants: [],

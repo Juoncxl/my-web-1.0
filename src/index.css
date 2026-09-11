@@ -8628,6 +8628,39 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
    .work-detail-share-status { right: auto; left: 0; }
 }
 
+/* Mobile Work Cards — keep the useful workflow status, remove secondary
+   visibility metadata, and keep category/status on one compact row. */
+@media (max-width: 767px) {
+  .cv-card-meta-row {
+    align-items: center;
+    flex-direction: row;
+    gap: .35rem;
+    min-width: 0;
+  }
+
+  .cv-card-visibility { display: none; }
+
+  .cv-card-category {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cv-card-meta-actions {
+    flex: 0 0 auto;
+    gap: .3rem;
+    min-width: 0;
+  }
+
+  .cv-card-status {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
 /* Phase 1.5N Item 12E.2.1 — Preview is the Card/Detail surface source of truth.
    Keep the page/modal backdrops frosted, but prevent their colors from muddying
    the readable presentation sheets themselves. */

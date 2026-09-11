@@ -62,7 +62,7 @@ let collabIdSequence = 0;
 function createCollabId(prefix: string): string { collabIdSequence += 1; return `${prefix}-${Date.now()}-${collabIdSequence}`; }
 
 export const CREATOR_COLLAB_STATUS_OPTIONS: Array<{ value: CreatorCollabSubmissionStatus; label: string }> = [
-  { value: 'not_submitted', label: '⚪ ยังไม่ส่ง' },
+  { value: 'not_submitted', label: '🔴 ยังไม่ส่ง' },
   { value: 'reviewing', label: '🟡 รอตรวจ' },
   { value: 'needs_fix', label: '🟣 ต้องแก้' },
   { value: 'approved', label: '🟢 ผ่านแล้ว' }
@@ -229,7 +229,7 @@ export function getCollaborationSummary(draft: CreatorCollaborationDraft): Creat
 }
 
 export function getCollabStatusLabel(status: CreatorCollabSubmissionStatus): string {
-  return CREATOR_COLLAB_STATUS_OPTIONS.find(option => option.value === status)?.label || '⚪ ยังไม่ส่ง';
+  return CREATOR_COLLAB_STATUS_OPTIONS.find(option => option.value === status)?.label || '🔴 ยังไม่ส่ง';
 }
 
 /**

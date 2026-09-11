@@ -8,6 +8,7 @@ const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 const redesignStyles = styles.slice(styles.indexOf('Phase 1.5N Item 12E.2'));
+const mobileCardStyles = styles.slice(styles.indexOf('/* Mobile Work Cards'));
 
 describe('12E.2 final Work Card + Work Detail visual redesign', () => {
   it('keeps real covers square, non-destructive, and free from fallback decoration', () => {
@@ -47,6 +48,15 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(cardSource).toContain('className="cv-card-date"');
     expect(redesignStyles).toContain('.cv-card-title-row h3 { color: #01162b; font-size: 1.1rem;');
     expect(redesignStyles).toContain('.cv-card-snippet { min-height: 3.1rem;');
+  });
+
+  it('compacts mobile card metadata without removing workflow status', () => {
+    expect(mobileCardStyles).toMatch(/@media \(max-width: 767px\) \{[\s\S]*?\.cv-card-meta-row \{[\s\S]*?flex-direction: row;/);
+    expect(mobileCardStyles).toContain('.cv-card-visibility { display: none; }');
+    expect(mobileCardStyles).toContain('.cv-card-status {');
+    expect(mobileCardStyles).toContain('white-space: nowrap;');
+    expect(cardSource).toContain('className="cv-card-visibility"');
+    expect(cardSource).toContain('className="cv-card-status"');
   });
 
   it('keeps Detail natural media, real content, and removes reference-only decoration', () => {
