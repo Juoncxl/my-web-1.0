@@ -212,14 +212,23 @@ function MainApp() {
   }, [loadAssetDetail, openAssetView, trackRecentlyViewed]);
 
   const handleViewChange = useCallback((view: 'feed' | 'vault') => {
+    if (view === 'feed') {
+      if (workRoute?.[1]) {
+        closeAssetView();
+        navigate('/');
+      }
+      setActiveView('feed');
+      setSelectedTag(null);
+      return;
+    }
     if (authLoading) return;
-    if (view === 'vault' && !currentUser) {
+    if (!currentUser) {
       openAuthModal('login');
       return;
     }
     setActiveView(view);
     setSelectedTag(null);
-  }, [authLoading, currentUser, openAuthModal]);
+  }, [authLoading, closeAssetView, currentUser, navigate, openAuthModal, workRoute?.[1]]);
 
   const handleVaultTabChange = useCallback((tab: VaultTabType) => {
     setActiveVaultTab(tab);

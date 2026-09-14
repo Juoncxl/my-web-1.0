@@ -68,6 +68,17 @@ describe('canonical Work Detail routing', () => {
     expect(appSource).toContain('onClose={handleCloseEditor}');
   });
 
+  it('leaves a shared Work route through both Header Feed entry points', () => {
+    const viewChangeSource = appSource.match(/const handleViewChange = useCallback[\s\S]*?\}, \[[^\]]*\]\);/)?.[0] || '';
+    expect(viewChangeSource).toContain("if (view === 'feed') {");
+    expect(viewChangeSource).toContain('if (workRoute?.[1]) {');
+    expect(viewChangeSource).toContain('closeAssetView();');
+    expect(viewChangeSource).toContain("navigate('/');");
+    expect(viewChangeSource.indexOf("if (view === 'feed') {")).toBeLessThan(viewChangeSource.indexOf('if (authLoading) return;'));
+    expect(appSource).toContain('onViewChange={handleViewChange}');
+    expect(appSource).toContain('onClose={closeAssetView}');
+  });
+
   it('keeps long Work content bounded without changing sandbox semantics', () => {
     expect(detailCss).toMatch(/\.work-detail-modal\s*\{[^}]*max-width:\s*calc\(100vw - 2rem\)/s);
     expect(detailCss).toMatch(/\.work-detail-summary p\s*\{[^}]*overflow-wrap:\s*anywhere[^}]*word-break:\s*break-word/s);
