@@ -10,10 +10,13 @@ import {
   createBlankCollaborationDraft,
   createCollabDraftFromPublicContentBlocks,
   createPublicCollabContentBlocks,
+  createPublicCollaborationSnapshot,
   getCollabStatusLabel,
   getCollaborationSummary,
   removeCollabDeadline,
   removeCollabParticipantReferenceImage,
+  removeCollabSharedInformation,
+  reorderCollabSharedInformation,
   updateCollabParticipant,
   updateCollabSharedInformation,
   upsertCollabDeadline
@@ -52,6 +55,35 @@ describe('Creator Composer D.6.1 collaboration draft model', () => {
     const original = addCollabSharedInformation(createBlankCollaborationDraft(), createBlankCollabSharedInformation({ id: 'shared-1', content: '<section>shared</section>' }));
     const next = updateCollabSharedInformation(original, 'shared-1', { type: 'code' });
     expect(next.sharedInformation[0]).toMatchObject({ type: 'code', content: '<section>shared</section>' });
+  });
+
+  it('reorders complete Shared Information cards immutably by id', () => {
+    let original = createBlankCollaborationDraft();
+    original = addCollabSharedInformation(original, createBlankCollabSharedInformation({ id: 'one', title: 'หนึ่ง', type: 'code', content: 'CODE_ONE', appScope: 'specific_apps', platforms: ['Doki Chat'] }));
+    original = addCollabSharedInformation(original, createBlankCollabSharedInformation({ id: 'two', title: 'สอง', content: 'TEXT_TWO' }));
+    original = addCollabSharedInformation(original, createBlankCollabSharedInformation({ id: 'three', title: 'สาม', content: 'TEXT_THREE' }));
+
+    const movedToEnd = reorderCollabSharedInformation(original, 'one', 'three', 'after');
+    expect(movedToEnd.sharedInformation.map(item => item.id)).toEqual(['two', 'three', 'one']);
+    expect(movedToEnd.sharedInformation[2]).toMatchObject({ title: 'หนึ่ง', type: 'code', content: 'CODE_ONE', appScope: 'specific_apps', platforms: ['Doki Chat'] });
+    expect(original.sharedInformation.map(item => item.id)).toEqual(['one', 'two', 'three']);
+
+    const movedToStart = reorderCollabSharedInformation(movedToEnd, 'one', 'two', 'before');
+    expect(movedToStart.sharedInformation.map(item => item.id)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('keeps reordered Shared Information order through add, remove, public snapshot, and content blocks', () => {
+    let draft = createBlankCollaborationDraft();
+    draft = addCollabSharedInformation(draft, createBlankCollabSharedInformation({ id: 'one', title: 'หนึ่ง', content: 'A' }));
+    draft = addCollabSharedInformation(draft, createBlankCollabSharedInformation({ id: 'two', title: 'สอง', content: 'B' }));
+    draft = addCollabSharedInformation(draft, createBlankCollabSharedInformation({ id: 'three', title: 'สาม', content: 'C' }));
+    draft = reorderCollabSharedInformation(draft, 'three', 'one', 'before');
+    draft = addCollabSharedInformation(draft, createBlankCollabSharedInformation({ id: 'four', title: 'สี่', content: 'D' }));
+    draft = removeCollabSharedInformation(draft, 'two');
+
+    expect(draft.sharedInformation.map(item => item.id)).toEqual(['three', 'one', 'four']);
+    expect(createPublicCollaborationSnapshot(draft).sharedInformation.map(item => item.id)).toEqual(['three', 'one', 'four']);
+    expect(createPublicCollabContentBlocks(draft).map(block => block.title)).toEqual(['สาม', 'หนึ่ง', 'สี่']);
   });
 
   it('keeps app scope optional and exposes platforms only for specific-app scope', () => {

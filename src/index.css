@@ -8235,9 +8235,27 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 .csp-work-modal .csp-collab-empty-state strong { color: var(--cv-ink-soft); font-size: .9rem; }
 .csp-work-modal .csp-collab-empty-state p { margin: 0; color: var(--cv-muted); font-size: .8rem; line-height: 1.55; }
 .csp-work-modal .csp-collab-shared-list { display: grid; gap: .55rem; }
-.csp-work-modal .csp-collab-shared-item { overflow: hidden; border: 1px solid var(--cv-line); border-radius: .75rem; background: color-mix(in srgb, var(--cv-surface-soft) 48%, var(--cv-control-surface)); }
+.csp-work-modal .csp-collab-shared-item { position: relative; overflow: hidden; border: 1px solid var(--cv-line); border-radius: .75rem; background: color-mix(in srgb, var(--cv-surface-soft) 48%, var(--cv-control-surface)); transition: border-color .16s ease, box-shadow .16s ease, opacity .16s ease; }
 .csp-work-modal .csp-collab-shared-item.is-expanded { border-color: var(--cv-iridescent-border); }
+.csp-work-modal .csp-collab-shared-item.is-dragging { opacity: .56; }
+.csp-work-modal .csp-collab-shared-item.is-drop-before::before,
+.csp-work-modal .csp-collab-shared-item.is-drop-after::after { position: absolute; right: .35rem; left: .35rem; z-index: 3; height: .22rem; border-radius: 999px; background: var(--cv-purple); box-shadow: 0 0 0 .16rem color-mix(in srgb, var(--cv-purple) 18%, transparent); content: ''; pointer-events: none; }
+.csp-work-modal .csp-collab-shared-item.is-drop-before::before { top: 0; }
+.csp-work-modal .csp-collab-shared-item.is-drop-after::after { bottom: 0; }
 .csp-work-modal .csp-collab-shared-summary { display: flex; align-items: center; gap: .65rem; padding: .6rem .7rem; }
+.csp-work-modal .csp-collab-shared-reorder-controls { display: flex; flex: 0 0 auto; align-items: center; gap: .2rem; }
+.csp-work-modal .csp-collab-shared-drag-handle,
+.csp-work-modal .csp-collab-shared-move-buttons button { display: inline-grid; width: 1.85rem; height: 1.85rem; place-items: center; border: 1px solid var(--cv-line); border-radius: .48rem; padding: 0; background: var(--cv-control-surface); color: var(--cv-muted); }
+.csp-work-modal .csp-collab-shared-drag-handle { cursor: grab; touch-action: none; }
+.csp-work-modal .csp-collab-shared-drag-handle:active { cursor: grabbing; }
+.csp-work-modal .csp-collab-shared-drag-handle:hover,
+.csp-work-modal .csp-collab-shared-move-buttons button:hover:not(:disabled) { border-color: var(--cv-iridescent-border); color: var(--cv-purple-dark); }
+.csp-work-modal .csp-collab-shared-drag-handle svg,
+.csp-work-modal .csp-collab-shared-move-buttons svg { width: .95rem; height: .95rem; }
+.csp-work-modal .csp-collab-shared-move-buttons { display: grid; gap: .14rem; }
+.csp-work-modal .csp-collab-shared-move-buttons button { width: 1.5rem; height: 1.35rem; border-radius: .32rem; cursor: pointer; }
+.csp-work-modal .csp-collab-shared-move-buttons button:disabled { opacity: .3; cursor: not-allowed; }
+.csp-work-modal .csp-collab-shared-reorder-status { min-height: 1px; overflow: hidden; color: var(--cv-muted); font-size: .72rem; }
 .csp-work-modal .csp-collab-shared-toggle { display: flex; align-items: center; flex: 1 1 auto; justify-content: space-between; gap: .7rem; min-width: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .csp-work-modal .csp-collab-shared-toggle > span { display: grid; gap: .15rem; min-width: 0; }
 .csp-work-modal .csp-collab-shared-toggle strong { overflow: hidden; color: var(--cv-ink); font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }

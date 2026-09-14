@@ -41,6 +41,19 @@ describe('Creator Composer D.6.1 Collaboration usability contracts', () => {
     expect(panelSource).toContain("copied ? 'คัดลอกแล้ว' : 'คัดลอก'");
   });
 
+  it('reorders Shared Information with pointer and accessible fallback controls', () => {
+    expect(modelSource).toContain('export function reorderCollabSharedInformation(');
+    expect(panelSource).toContain('csp-collab-shared-drag-handle');
+    expect(panelSource).toContain('onPointerCancel={event => onDragEnd(event, true)}');
+    expect(panelSource).toContain("position: 'before' | 'after'");
+    expect(panelSource).toContain('เลื่อน ${title} ขึ้น');
+    expect(panelSource).toContain('เลื่อน ${title} ลง');
+    expect(panelSource).toContain('aria-live="polite"');
+    expect(styles).toContain('touch-action: none;');
+    expect(styles).toContain('.csp-collab-shared-item.is-drop-before::before');
+    expect(styles).toContain('.csp-collab-shared-item.is-drop-after::after');
+  });
+
   it('starts deadlines empty and adds editable preset or custom rows', () => {
     expect(modelSource).toContain('deadlines: []');
     expect(panelSource).toContain('ยังไม่มีกำหนดส่ง');

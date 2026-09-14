@@ -152,6 +152,24 @@ export function removeCollabSharedInformation(draft: CreatorCollaborationDraft, 
   return next;
 }
 
+export function reorderCollabSharedInformation(
+  draft: CreatorCollaborationDraft,
+  itemId: string,
+  targetId: string,
+  position: 'before' | 'after'
+): CreatorCollaborationDraft {
+  const next = cloneCreatorCollaborationDraft(draft);
+  if (itemId === targetId) return next;
+  const itemIndex = next.sharedInformation.findIndex(item => item.id === itemId);
+  const targetIndex = next.sharedInformation.findIndex(item => item.id === targetId);
+  if (itemIndex < 0 || targetIndex < 0) return next;
+  const [item] = next.sharedInformation.splice(itemIndex, 1);
+  const updatedTargetIndex = next.sharedInformation.findIndex(candidate => candidate.id === targetId);
+  const insertionIndex = position === 'after' ? updatedTargetIndex + 1 : updatedTargetIndex;
+  next.sharedInformation.splice(insertionIndex, 0, item);
+  return next;
+}
+
 export function addCollabDeadline(draft: CreatorCollaborationDraft, kind: CreatorCollabDeadlineKind = 'custom'): CreatorCollaborationDraft {
   const next = cloneCreatorCollaborationDraft(draft);
   const preset = CREATOR_COLLAB_DEADLINE_PRESETS.find(item => item.kind === kind);
