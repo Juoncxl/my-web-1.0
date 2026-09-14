@@ -149,6 +149,8 @@ export interface WorkDetailModalProps {
   coverImageSelected?: boolean;
   /** Preview keeps the exact public layout while disabling state-changing actions. */
   interactionMode?: 'live' | 'preview';
+  /** Keep the app header outside the backdrop so direct Work routes can navigate away. */
+  preserveHeaderNavigation?: boolean;
 }
 
 /** The one canonical Work presentation for both legacy and newly-created data. */
@@ -176,7 +178,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   embedded = false,
   coverImage = '',
   coverImageSelected = true,
-  interactionMode = 'live'
+  interactionMode = 'live',
+  preserveHeaderNavigation = false
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codeView, setCodeView] = useState<CodeView>('split');
@@ -409,7 +412,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   return <>
     <div
-    className={`work-detail-backdrop ${embedded ? 'is-embedded' : ''}`}
+    className={`work-detail-backdrop ${embedded ? 'is-embedded' : ''} ${preserveHeaderNavigation ? 'has-header-navigation' : ''}`}
     data-work-detail-presentation="canonical"
     data-work-detail-source="recovered-final"
     aria-label="Canonical Work Detail"

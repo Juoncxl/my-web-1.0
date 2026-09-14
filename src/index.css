@@ -2504,6 +2504,14 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   -webkit-backdrop-filter: blur(9px);
 }
 
+.work-detail-backdrop.has-header-navigation {
+  top: 4rem;
+}
+
+.work-detail-backdrop.has-header-navigation .work-detail-modal {
+  max-height: min(54rem, calc(100dvh - 6rem));
+}
+
 .work-detail-modal {
   width: min(51.25rem, 100%);
   min-width: 0;

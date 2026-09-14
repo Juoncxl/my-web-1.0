@@ -579,6 +579,7 @@ function MainApp() {
         asset={viewingAsset}
         isOpen={!!viewingAsset}
         onClose={closeAssetView}
+        preserveHeaderNavigation={Boolean(workRoute?.[1])}
         onEdit={asset => { closeAssetView(); openEditEditor(asset.id); }}
         onDelete={handleSoftDeleteAsset}
         onPermanentDelete={handlePermanentDeleteAsset}

@@ -77,6 +77,9 @@ describe('canonical Work Detail routing', () => {
     expect(viewChangeSource.indexOf("if (view === 'feed') {")).toBeLessThan(viewChangeSource.indexOf('if (authLoading) return;'));
     expect(appSource).toContain('onViewChange={handleViewChange}');
     expect(appSource).toContain('onClose={closeAssetView}');
+    expect(appSource).toContain('preserveHeaderNavigation={Boolean(workRoute?.[1])}');
+    expect(detailSource).toContain("preserveHeaderNavigation ? 'has-header-navigation' : ''");
+    expect(detailCss).toMatch(/\.work-detail-backdrop\.has-header-navigation\s*\{[^}]*top:\s*4rem/s);
   });
 
   it('keeps long Work content bounded without changing sandbox semantics', () => {
