@@ -1,5 +1,5 @@
 import type { Asset } from '../types';
-import { mediaIdFromReference } from './workMedia';
+import { cxlDataService } from '../data/cxlDataService';
 
 const IMAGE_EXTENSION_BY_MIME: Record<string, string> = {
   'image/gif': 'gif',
@@ -28,7 +28,7 @@ export function resolveWorkDetailGalleryImages(asset: Asset, requestedCover = ''
   return sources
     .filter((src, index) => Boolean(src) && sources.indexOf(src) === index)
     .map(src => {
-      const referencedId = mediaIdFromReference(src);
+      const referencedId = cxlDataService.media.mediaIdFromReference(src);
       const record = galleryRecords.find(item => item.id === referencedId || item.signedUrl === src)
         || (src === requestedCover && requestedCover === asset.previewImage ? galleryRecords.find(item => item.isCover) : undefined);
       return { src, mediaId: record?.id, mimeType: record?.mimeType };

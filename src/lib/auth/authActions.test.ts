@@ -1,29 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
+import type { User } from '../../types';
 
 const authMocks = vi.hoisted(() => ({
   signInWithPassword: vi.fn(),
   signOut: vi.fn(),
-  getProfileSnapshot: vi.fn()
+  getProfileSnapshot: vi.fn(),
+  isAvailable: vi.fn(() => true),
+  mapUser: vi.fn((user: SupabaseAuthUser) => ({ id: user.id, email: user.email, displayName: 'creator' } as User)),
+  logFailure: vi.fn(),
+  logUnavailable: vi.fn()
 }));
 
-vi.mock('../supabaseClient', () => ({
-  getSupabaseClient: () => ({
-    auth: {
-      signInWithPassword: authMocks.signInWithPassword,
-      signOut: authMocks.signOut
-    }
-  }),
-  isLocalRuntime: () => false,
-  supabaseConfigStatus: {
-    urlConfigured: true,
-    anonKeyConfigured: true
-  }
-}));
-
-vi.mock('../supabaseService', () => ({
-  supabaseService: {
-    getProfileSnapshot: authMocks.getProfileSnapshot
+vi.mock('../../data/cxlAuthService', () => ({
+  cxlAuthService: {
+    isAvailable: authMocks.isAvailable,
+    logFailure: authMocks.logFailure,
+    logUnavailable: authMocks.logUnavailable,
+    mapUser: authMocks.mapUser,
+    signInWithPassword: authMocks.signInWithPassword,
+    signOutLocal: authMocks.signOut
   }
 }));
 
@@ -64,6 +60,8 @@ describe('email login session stability', () => {
     authMocks.signOut.mockReset();
     authMocks.getProfileSnapshot.mockReset();
     authMocks.getProfileSnapshot.mockReturnValue(null);
+    authMocks.isAvailable.mockReturnValue(true);
+    authMocks.mapUser.mockImplementation((user: SupabaseAuthUser) => ({ id: user.id, email: user.email, displayName: 'creator' } as User));
   });
 
   it('returns the authenticated user without requiring Profile or username data', async () => {
@@ -73,10 +71,7 @@ describe('email login session stability', () => {
 
     const result = await loginWithEmail(' CREATOR@EXAMPLE.COM ', 'password');
 
-    expect(authMocks.signInWithPassword).toHaveBeenCalledWith({
-      email: 'creator@example.com',
-      password: 'password'
-    });
+    expect(authMocks.signInWithPassword).toHaveBeenCalledWith('creator@example.com', 'password');
     expect(result).toMatchObject({
       success: true,
       isNewUser: false,
@@ -92,12 +87,15 @@ describe('email login session stability', () => {
 
   it('returns the same-user canonical Profile snapshot instead of an Auth fallback', async () => {
     const user = makeAuthUser();
-    authMocks.getProfileSnapshot.mockReturnValue({
+    authMocks.mapUser.mockReturnValue({
       id: 'user-1',
+      email: 'creator@example.com',
       displayName: 'Juon',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      provider: 'email',
       username: 'juoncxl',
       avatarUrl: 'data:image/png;base64,real-avatar'
-    });
+    } as User);
     authMocks.signInWithPassword.mockResolvedValue({ data: { user, session: makeSession(user) }, error: null });
 
     const result = await loginWithEmail('creator@example.com', 'password');
@@ -152,6 +150,6 @@ describe('email login session stability', () => {
     await logout();
 
     expect(authMocks.signOut).toHaveBeenCalledTimes(1);
-    expect(authMocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(authMocks.signOut).toHaveBeenCalledWith();
   });
 });

@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const styles = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
-const headerSource = readFileSync(new URL('./Header.tsx', import.meta.url), 'utf8');
-const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
+const normalizeNewlines = (source: string) => source.replace(/\r\n/g, '\n');
+const styles = normalizeNewlines(readFileSync(new URL('../index.css', import.meta.url), 'utf8'));
+const headerSource = normalizeNewlines(readFileSync(new URL('./Header.tsx', import.meta.url), 'utf8'));
+const creatorSource = normalizeNewlines(readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8'));
 
 describe('responsive layout safety contracts', () => {
   it('keeps the global header controls reachable at very narrow widths', () => {

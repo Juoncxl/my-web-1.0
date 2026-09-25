@@ -1,5 +1,5 @@
 import type { CreatorWorkDraft } from '../components/creator/CreatorWorkWorkspace';
-import { dataUrlToBlob, isInlineMediaUrl } from './workMedia';
+import { cxlDataService } from '../data/cxlDataService';
 
 const DATABASE_NAME = 'cxl-composer-drafts';
 const DATABASE_VERSION = 1;
@@ -37,7 +37,7 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 async function inlineUrlToBlob(value: string): Promise<Blob> {
-  if (value.startsWith('data:')) return dataUrlToBlob(value);
+  if (value.startsWith('data:')) return cxlDataService.media.dataUrlToBlob(value);
   const response = await fetch(value);
   if (!response.ok) throw new Error('อ่านรูปในฉบับร่างไม่สำเร็จ');
   return response.blob();
@@ -50,7 +50,7 @@ export async function saveComposerDraft(key: string, draft: CreatorWorkDraft, se
   let sequence = 0;
 
   const extract = async (value: unknown): Promise<unknown> => {
-    if (isInlineMediaUrl(value)) {
+    if (cxlDataService.media.isInlineMediaUrl(value)) {
       const blobKey = `${key}:${Date.now()}:${sequence++}`;
       blobs.set(blobKey, await inlineUrlToBlob(value));
       return `${LOCAL_BLOB_PREFIX}${blobKey}`;

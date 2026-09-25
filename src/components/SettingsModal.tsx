@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Settings2, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../context/AuthContext';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { deleteQaProfileImage, getQaProfileImage, getQaProfileImageUrl, restoreQaProfileImage, isQaObjectUrl, validateQaProfileImage } from '../lib/qaProfileImageStore';
 import { SettingsBackupSection } from './settings/SettingsBackupSection';
 import { SettingsProfileSection } from './settings/SettingsProfileSection';
@@ -40,7 +40,7 @@ export const SettingsModal: React.FC = () => {
   };
 
   useEffect(() => {
-    if (isSettingsOpen && currentUser?.id) setLegacySummary(supabaseService.getLegacyGuestDataSummary(currentUser.id));
+    if (isSettingsOpen && currentUser?.id) setLegacySummary(cxlDataService.works.getLegacyGuestDataSummary(currentUser.id));
   }, [currentUser?.id, isSettingsOpen]);
 
   useEffect(() => {
@@ -89,7 +89,7 @@ export const SettingsModal: React.FC = () => {
       let nextAvatarUrl = avatarUrl;
       let nextAvatarImageKey = avatarImageKey;
       if (avatarFile) {
-        const upload = await supabaseService.uploadProfileImage(currentUser.id, avatarFile, 'avatar');
+        const upload = await cxlDataService.profiles.uploadImage(currentUser.id, avatarFile, 'avatar');
         if (!upload.data) { setProfileMsg({ type: 'error', text: upload.error || 'อัปโหลดรูปโปรไฟล์ไม่สำเร็จ' }); return; }
         nextAvatarUrl = upload.data;
         nextAvatarImageKey = upload.imageKey || null;
@@ -124,7 +124,7 @@ export const SettingsModal: React.FC = () => {
     if (!currentUser?.id) { setBackupMsg({ type: 'error', text: 'กรุณาเข้าสู่ระบบเพื่อสำรองข้อมูลผลงานส่วนตัว' }); return; }
     setIsExporting(true); setBackupMsg(null);
     try {
-      const [assetsRes, foldersRes] = await Promise.all([supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true }), supabaseService.fetchFolders(currentUser.id)]);
+      const [assetsRes, foldersRes] = await Promise.all([cxlDataService.works.fetch({ userId: currentUser.id, includeDeleted: true }), cxlDataService.folders.fetch(currentUser.id)]);
       if (assetsRes.error || foldersRes.error) throw new Error(assetsRes.error || foldersRes.error || 'โหลดข้อมูลสำหรับสำรองไม่สำเร็จ');
       const userAssets = (assetsRes.data || []).filter((asset) => asset.userId === currentUser.id);
       const userFolders = (foldersRes.data || []).filter((folder) => folder.userId === currentUser.id);
@@ -143,7 +143,7 @@ export const SettingsModal: React.FC = () => {
     if (!currentUser) return;
     setIsImportingLegacy(true); setBackupMsg(null);
     try {
-      const result = await supabaseService.importLegacyGuestData(currentUser);
+      const result = await cxlDataService.works.importLegacyGuestData(currentUser);
       setLegacySummary({ assets: result.remainingAssets, folders: result.remainingFolders });
       if (result.importedAssets > 0 || result.importedFolders > 0) window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
       setBackupMsg(result.success ? { type: 'success', text: `นำเข้าข้อมูลเก่าสำเร็จ: ${result.importedAssets} ผลงาน และ ${result.importedFolders} โฟลเดอร์ (ผลงานถูกตั้งเป็นฉบับร่างส่วนตัว)` } : { type: 'error', text: result.error || `นำเข้าได้บางส่วน ยังเหลือ ${result.remainingAssets} ผลงาน และ ${result.remainingFolders} โฟลเดอร์` });

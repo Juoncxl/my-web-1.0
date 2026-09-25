@@ -36,7 +36,7 @@ import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
 import { getParticipantContentCopy, getParticipantTagCopy } from '../lib/collaborationPresentation';
 import { copyPlainText, createGalleryImageFile, createGalleryImageFilename, createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, resolveWorkDetailGalleryImages, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
-import { getFreshMediaDownload } from '../lib/workMedia';
+import { cxlDataService } from '../data/cxlDataService';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
@@ -335,7 +335,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   }): Promise<boolean> => {
     try {
       const useNativeSaveSheet = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints);
-      const freshSource = input.mediaId ? await getFreshMediaDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename) : null;
+      const freshSource = input.mediaId ? await cxlDataService.media.getFreshDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename) : null;
 
       if (!useNativeSaveSheet && freshSource && triggerBrowserUrlDownload(freshSource, input.filename)) return true;
 

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Image as ImageIcon, Link2, Trash2, User, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import type { ProfileSocialLink, User as ProfileUser } from '../types';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { ProfileAvatarPicker } from './profile/ProfileAvatarPicker';
 import { ProfileFields } from './profile/ProfileFields';
 import { getProfileUsernameValidationError, normalizeProfileUsername } from '../lib/profileIdentity';
@@ -188,7 +188,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
       if (coverRemovalRequested) nextCoverImageKey = null;
 
       if (avatarFile) {
-        const upload = await supabaseService.uploadProfileImage(currentUser.id, avatarFile, 'avatar');
+        const upload = await cxlDataService.profiles.uploadImage(currentUser.id, avatarFile, 'avatar');
         if (!upload.data) {
           setErrorMsg(upload.error || 'อัปโหลดรูปโปรไฟล์ไม่สำเร็จ');
           return;
@@ -198,7 +198,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
         if (upload.imageKey) imageWrites.push({ kind: 'avatar', previousBlob: upload.previousBlob || null });
       }
       if (coverFile) {
-        const upload = await supabaseService.uploadProfileImage(currentUser.id, coverFile, 'cover');
+        const upload = await cxlDataService.profiles.uploadImage(currentUser.id, coverFile, 'cover');
         if (!upload.data) {
           await rollbackImages();
           setErrorMsg(upload.error || 'อัปโหลดภาพปกไม่สำเร็จ');

@@ -50,8 +50,8 @@ describe('Creator Widget UI visual contracts', () => {
     expect(customizeSource).toContain('Free Layout');
     expect(creatorSource).toContain('gridColumn: `${placement.x + 1} / span ${placement.w}`');
     expect(creatorSource).toContain('gridRow: `${placement.y + 1} / span ${placement.h}`');
-    expect(creatorSource).toContain('writePersistedCreatorSpaceSettings');
-    expect(creatorSource).toContain('readPersistedCreatorSpaceSettings');
+    expect(creatorSource).toContain('cxlDataService.settings.writeCreatorSpace');
+    expect(creatorSource).toContain('cxlDataService.settings.readCreatorSpace');
     expect(creatorSource).toContain('canAddFreePlacement');
     for (const category of ['Portfolio', 'Widget', 'Work', 'Folder']) expect(creatorSource).toContain(`>${category}</button>`);
     expect(styles).toMatch(/\.csp-add-item-dialog\s*\{/);

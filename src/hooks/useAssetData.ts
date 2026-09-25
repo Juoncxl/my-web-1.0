@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Asset, User } from '../types';
-import { supabaseService, type FetchAssetsOptions } from '../lib/supabaseService';
-import { removeAssetFromCreatorSpaceSettings } from '../lib/creatorPersistence';
+import { cxlDataService, type FetchAssetsOptions } from '../data/cxlDataService';
 
 type ReportError = (message: string | null) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
@@ -47,7 +46,7 @@ export function useAssetData(
     if (isInitialLoad) setIsLoadingAssets(true);
 
     try {
-      const res = await supabaseService.fetchAssets({
+      const res = await cxlDataService.works.fetch({
         ...loadOptions,
         currentUserId: loadIdentityUserId,
       });
@@ -104,7 +103,7 @@ export function useAssetData(
 
   const createAsset = useCallback(async (assetData: NewAssetData) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
-    const result = await supabaseService.createAsset({
+    const result = await cxlDataService.works.create({
       ...assetData,
       userId: currentUser.id,
       authorName: currentUser.displayName,
@@ -115,7 +114,7 @@ export function useAssetData(
   }, [currentUser]);
 
   const loadAssetDetail = useCallback(async (assetId: string): Promise<Asset | null> => {
-    const result = await supabaseService.fetchAssets({
+    const result = await cxlDataService.works.fetch({
       assetId,
       currentUserId: currentUser?.id,
       detail: 'full',
@@ -135,14 +134,14 @@ export function useAssetData(
 
   const updateAsset = useCallback(async (id: string, updates: Partial<Asset>) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
-    const result = await supabaseService.updateAsset(id, updates);
+    const result = await cxlDataService.works.update(id, updates);
     if (result.data) setAssets(previous => previous.map(asset => asset.id === id ? result.data! : asset));
     return result;
   }, [currentUser]);
 
   const softDeleteAsset = useCallback(async (id: string) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
-    const result = await supabaseService.softDeleteAsset(id);
+    const result = await cxlDataService.works.softDelete(id);
     if (result.success) {
       const deletedAt = new Date().toISOString();
       setAssets(previous => previous.map(asset => asset.id === id ? { ...asset, deletedAt } : asset));
@@ -152,16 +151,16 @@ export function useAssetData(
 
   const restoreAsset = useCallback(async (id: string) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
-    const result = await supabaseService.restoreAsset(id);
+    const result = await cxlDataService.works.restore(id);
     if (result.success) setAssets(previous => previous.map(asset => asset.id === id ? { ...asset, deletedAt: null } : asset));
     return result;
   }, [currentUser]);
 
   const permanentDeleteAsset = useCallback(async (id: string) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
-    const result = await supabaseService.permanentDeleteAsset(id);
+    const result = await cxlDataService.works.permanentDelete(id);
     if (result.success) {
-      removeAssetFromCreatorSpaceSettings(currentUser.id, id);
+      cxlDataService.settings.removeWorkFromCreatorSpace(currentUser.id, id);
       setAssets(previous => previous.filter(asset => asset.id !== id));
     }
     return result;
@@ -169,7 +168,7 @@ export function useAssetData(
 
   const forkAsset = useCallback(async (sourceAsset: Asset) => {
     if (!currentUser) return { data: null, sourceForkCount: null, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
-    const result = await supabaseService.forkAsset(
+    const result = await cxlDataService.works.fork(
       sourceAsset,
       currentUser.id,
       currentUser.displayName,

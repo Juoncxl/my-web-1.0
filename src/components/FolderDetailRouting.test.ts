@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8');
+const creatorSource = readFileSync(new URL('../pages/CreatorSpacePage.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const detailSource = readFileSync(new URL('./FolderDetailModal.tsx', import.meta.url), 'utf8');
 const moveToFolderSource = readFileSync(new URL('./MoveToFolderModal.tsx', import.meta.url), 'utf8');

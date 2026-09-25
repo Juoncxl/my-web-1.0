@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Asset, Folder, User } from '../types';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { isPublicFeedAsset } from '../lib/accessPolicy';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
 import { isGenuineProfileNotFound } from '../lib/profileIdentity';
@@ -54,7 +54,7 @@ export function useCreatorSpaceData(
   ownerFallback: User | null | undefined,
   sources: CreatorSpaceSources
 ): CreatorSpaceData {
-  const [profile, setProfile] = useState<User | null>(() => supabaseService.getCreatorProfileSnapshot(slug));
+  const [profile, setProfile] = useState<User | null>(() => cxlDataService.profiles.getCreatorSnapshot(slug));
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isNotFound, setIsNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export function useCreatorSpaceData(
       setError(null);
     }
     if (ownerProfileFallback) {
-      setProfile(current => current || supabaseService.getCreatorProfileSnapshot(slug) || ownerProfileFallback);
+      setProfile(current => current || cxlDataService.profiles.getCreatorSnapshot(slug) || ownerProfileFallback);
       // Auth already contains the canonical owner identity and presentation.
       // Render it immediately while the cloud profile refresh continues in
       // the background instead of blocking the whole page on another lookup.
@@ -99,7 +99,7 @@ export function useCreatorSpaceData(
     }
 
     try {
-      const profileResult = await supabaseService.getCreatorProfile(slug);
+      const profileResult = await cxlDataService.profiles.getCreator(slug);
       if (requestId !== requestSequence.current) return;
 
       // The restored owner session is a safe fallback while the profile row
@@ -149,7 +149,7 @@ export function useCreatorSpaceData(
           decodedSlug === current.id ||
           current.username?.trim().toLowerCase() === decodedSlug.toLowerCase()
         )) return current;
-        return supabaseService.getCreatorProfileSnapshot(slug) || ownerProfileFallback;
+        return cxlDataService.profiles.getCreatorSnapshot(slug) || ownerProfileFallback;
       });
     }
     void refresh();

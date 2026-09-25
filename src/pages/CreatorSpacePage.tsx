@@ -13,11 +13,10 @@ import { CreatorWidgetRenderer } from '../components/creator/CreatorWidgetRender
 import { getPublicFolderPresentation, getTodoPresentation, getWidgetRenderSize, DEFAULT_FOLDER_STYLE, DEFAULT_FOLDER_SUBTITLE, DEFAULT_FOLDER_TITLE } from '../components/creator/creatorWidgetModel';
 import { CreatorCompactItemControls } from '../components/creator/CreatorCompactItemControls';
 import { getCreatorVisibleAssets, selectCreatorSavedAssets, useCreatorSpaceData } from '../hooks/useCreatorSpaceData';
-import { readPersistedCreatorSpaceSettings, writePersistedCreatorSpaceSettings } from '../lib/creatorPersistence';
+import { cxlDataService } from '../data/cxlDataService';
 import { anchorFreeGridCell, canAddFreePlacement, compactFreeLayout, constrainFreePlacementWidth, createFreeWidgetInstance, estimatePortfolioHeightRows, estimateWorkHeightRows, getFreePlacementId, getFreePlacementWidthOptions, getPortfolioShowcaseItems, getWorkCardSize, hydrateFreeWidgetInstances, hydrateSavedFreeLayout, materializeDerivedHeights, migrateFreeOrder, moveFreePlacement, normalizeFreePlacement, pixelsToFreeGridRows, pointerToFreeGridCell, removeFreePlacement, resolveFreePlacementPosition, resizeFreePlacement, shouldShowFreePlacementControls, updateFreeWidgetInstance, type FreeLayoutPlacement, type FreePlacementKind, type FreeWidgetInstance, type PortfolioDisplayLimit } from '../lib/creatorLayout';
 import { parseCanonicalProfileLocation, resolveProfileView, shouldNormalizeOwnerProfileContext, type ProfileTab } from '../lib/profileRouting';
 import { getCanonicalProfilePath, getCanonicalProfileSlug } from '../lib/profileIdentity';
-import { supabaseService } from '../lib/supabaseService';
 
 const WorkDetailModal = React.lazy(() => import('../components/WorkDetailModal').then(module => ({ default: module.WorkDetailModal })));
 const FolderDetailModal = React.lazy(() => import('../components/FolderDetailModal').then(module => ({ default: module.FolderDetailModal })));
@@ -190,7 +189,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [selectedAssetOriginFolderId, setSelectedAssetOriginFolderId] = useState<string | null>(null);
   const openAssetDetail = React.useCallback(async (asset: Asset, originFolderId?: string | null) => {
-    const result = await supabaseService.fetchAssets({
+    const result = await cxlDataService.works.fetch({
       assetId: asset.id,
       currentUserId: currentUser?.id,
       detail: 'full',
@@ -299,7 +298,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     if (!profile) return;
     let cancelled = false;
     setSettingsHydrated(false);
-    void readPersistedCreatorSpaceSettings(profile.id).then(({ data: saved, error }) => {
+    void cxlDataService.settings.readCreatorSpace(profile.id).then(({ data: saved, error }) => {
       if (cancelled) return;
       if (error && (import.meta as any).env?.DEV) console.warn('[CreatorSpace] settings read failed; using available fallback', error);
       if (saved) {
@@ -336,7 +335,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   useEffect(() => {
     if (!isOwner || !profile || !settingsHydrated) return;
     const timeoutId = window.setTimeout(() => {
-      void writePersistedCreatorSpaceSettings(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, freePlacements, portfolioDisplayLimit, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>>, widgetInstances }).then(result => {
+      void cxlDataService.settings.writeCreatorSpace(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, freePlacements, portfolioDisplayLimit, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>>, widgetInstances }).then(result => {
         if (!result.success && (import.meta as any).env?.DEV) console.warn('[CreatorSpace] settings save failed', result.error);
       });
     }, 500);

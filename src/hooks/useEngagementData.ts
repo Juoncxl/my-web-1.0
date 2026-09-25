@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { uniqueAssetIds } from '../lib/assetSelectors';
 
 type ReportError = (message: string) => void;
@@ -18,7 +18,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
     const requestId = ++bookmarkRequestSequence.current;
     const requestScope = scopeSequence.current;
     try {
-      const res = await supabaseService.fetchBookmarks(currentUserId);
+      const res = await cxlDataService.engagement.fetchBookmarks(currentUserId);
       if (requestId !== bookmarkRequestSequence.current || requestScope !== scopeSequence.current) return;
       if (res.error) {
         reportError(res.error);
@@ -38,7 +38,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
     const requestId = ++likeRequestSequence.current;
     const requestScope = scopeSequence.current;
     try {
-      const res = await supabaseService.fetchLikedAssetIds(currentUserId);
+      const res = await cxlDataService.engagement.fetchLikedWorkIds(currentUserId);
       if (requestId !== likeRequestSequence.current || requestScope !== scopeSequence.current) return;
       if (res.error) {
         reportError(res.error);
@@ -70,7 +70,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
       return { success: false, isBookmarked: false, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
     }
     const shouldBookmark = !bookmarkedAssetIds.includes(assetId);
-    const result = await supabaseService.setBookmark(currentUserId, assetId, shouldBookmark);
+    const result = await cxlDataService.engagement.setBookmark(currentUserId, assetId, shouldBookmark);
     if (result.success) {
       setBookmarkedAssetIds(previous => result.isBookmarked
         ? uniqueAssetIds([...previous, assetId])
@@ -85,7 +85,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
       return { success: false, isLiked: false, likesCount: null, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
     }
     const shouldLike = !likedAssetIds.includes(assetId);
-    const result = await supabaseService.setAssetLike(currentUserId, assetId, shouldLike);
+    const result = await cxlDataService.engagement.setWorkLike(currentUserId, assetId, shouldLike);
     if (result.success) {
       setLikedAssetIds(previous => result.isLiked
         ? uniqueAssetIds([...previous, assetId])

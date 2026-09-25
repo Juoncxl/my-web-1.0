@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Asset, User } from '../types';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 
 /** Keeps list-card identity current without restoring legacy avatar blobs to Work queries. */
 export function usePublicCreatorProfiles(assets: readonly Asset[], currentUser: User | null): Map<string, User> {
@@ -26,7 +26,7 @@ export function usePublicCreatorProfiles(assets: readonly Asset[], currentUser: 
       return () => { cancelled = true; };
     }
 
-    void supabaseService.getPublicProfiles(creatorIds).then(result => applyProfiles(result.data));
+    void cxlDataService.profiles.getPublic(creatorIds).then(result => applyProfiles(result.data));
     return () => { cancelled = true; };
   }, [creatorIds, creatorIdsKey, currentUser]);
 
