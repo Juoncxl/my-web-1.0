@@ -54,4 +54,41 @@ describe('Google Works fetch semantics', () => {
     expect(summary.contentBlocks).toEqual([]);
     expect(summary.versions).toEqual([]);
   });
+  it('preserves legacy content-type values used by AssetCard, retaining its existing label precedence', () => {
+    const legacy = work('legacy-types', { visibility: 'public', isPublic: true,
+      contentTypeLabels: ['🎨 Image prompt'], contentTypes: ['image_prompt'], contentBlocks: [] });
+    const summary = filterGoogleWorks([legacy], { publicOnly: true, detail: 'summary' })[0];
+    expect(summary.contentTypeLabels).toEqual(['🎨 Image prompt']);
+    expect(summary.contentTypes).toEqual(['image_prompt']);
+    // AssetCard renders contentTypeLabels first, then uses contentTypes and its
+    // established default mapping only when labels are absent.
+    expect(summary.contentTypeLabels?.join(' · ') || summary.contentTypes?.join(' · ')).toBe('🎨 Image prompt');
+  });
+  it('preserves the icon rendered by AssetCard when it is text or a resolvable media reference', () => {
+    const emoji = work('emoji', { visibility: 'public', isPublic: true, icon: { type: 'emoji', value: '🌙' } });
+    const resolvedImage = work('resolved-image', { visibility: 'public', isPublic: true,
+      icon: { type: 'image', value: 'media:icon-1', mediaId: 'icon-1' },
+      media: [{ id: 'icon-1', assetId: 'resolved-image', storagePath: 'icon-1', purpose: 'icon', mimeType: 'image/png', fileSize: 12,
+        isCover: false, sortOrder: 0, signedUrl: 'https://media.example/icon-1' }] });
+    const unresolvedStableRef = work('stable-ref', { visibility: 'public', isPublic: true,
+      icon: { type: 'image', value: 'media:icon-2', mediaId: 'icon-2' },
+      media: [{ id: 'icon-2', assetId: 'stable-ref', storagePath: 'icon-2', purpose: 'icon', mimeType: 'image/png', fileSize: 12,
+        isCover: false, sortOrder: 0 }] });
+    const inlineImage = work('inline-image', { visibility: 'public', isPublic: true,
+      icon: { type: 'image', value: 'data:image/png;base64,AA==' } });
+
+    const summaries = filterGoogleWorks([emoji, resolvedImage, unresolvedStableRef, inlineImage], { publicOnly: true, detail: 'summary' });
+    expect(summaries.find(item => item.id === 'emoji')?.icon).toEqual({ type: 'emoji', value: '🌙' });
+    // AssetCard uses icon.value directly for its <img src>; preserve the resolved URL.
+    expect(summaries.find(item => item.id === 'resolved-image')?.icon.value).toBe('https://media.example/icon-1');
+    expect(summaries.find(item => item.id === 'resolved-image')?.icon.mediaId).toBe('icon-1');
+    const stableRefIcon = summaries.find(item => item.id === 'stable-ref')?.icon;
+    expect(stableRefIcon?.value).toBe('/api/cxl/media?workId=stable-ref&ref=media%3Aicon-2');
+    expect(stableRefIcon?.mediaId).toBe('icon-2');
+    const hashIcon = filterGoogleWorks([work('hash-ref', { visibility: 'public', isPublic: true,
+      icon: { type: 'image', value: `cxl-media:${'a'.repeat(64)}` } })], { publicOnly: true, detail: 'summary' })[0].icon;
+    expect(hashIcon.value).toBe(`/api/cxl/media?workId=hash-ref&ref=cxl-media%3A${'a'.repeat(64)}`);
+    expect(summaries.find(item => item.id === 'inline-image')?.icon).toEqual({ type: 'emoji', value: '✨' });
+    expect(JSON.stringify(summaries)).not.toContain('base64,AA==');
+  });
 });

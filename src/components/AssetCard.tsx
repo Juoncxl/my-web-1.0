@@ -138,7 +138,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const { currentUser } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
+  const [iconFailed, setIconFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setIconFailed(false), [asset.id, asset.icon?.type, asset.icon?.value]);
 
   useEffect(() => {
     const closeWhenAnotherMenuOpens = (event: Event) => {
@@ -300,10 +303,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
 
       <div className="cv-card-body">
         <div className="cv-card-title-row">
-          <div className="cv-card-icon" aria-hidden="true">{isValidWorkIcon(asset.icon)
+          <div className="cv-card-icon" aria-hidden="true">{!iconFailed && isValidWorkIcon(asset.icon)
             ? asset.icon.type === 'emoji' || asset.icon.type === 'kaomoji'
               ? asset.icon.value
-              : <img src={asset.icon.value} alt="" referrerPolicy="no-referrer" />
+              : <img src={asset.icon.value} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
             : categoryMeta.emoji}</div>
           <div className="min-w-0 flex-1">
             <h3>{cardTitle}</h3>

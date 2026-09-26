@@ -53,7 +53,30 @@ export function filterGoogleWorks(works: Asset[], options: FetchAssetsOptions = 
 function toSummaryAsset(asset: Asset): Asset {
   const coverId = asset.previewImage?.startsWith('media:') ? asset.previewImage.slice(6) : null;
   const media = (asset.media || []).filter(item => item.purpose === 'icon' || item.isCover || item.id === coverId);
-  return { ...asset, authorAvatar: undefined, icon: { type: 'emoji', value: '✨' }, collaboration: null,
+  const iconMedia = asset.icon?.mediaId
+    ? media.find(item => item.id === asset.icon?.mediaId && item.purpose === 'icon')
+    : undefined;
+  const iconValue = asset.icon?.value || '';
+  const iconRef = asset.icon?.mediaId
+    ? `media:${asset.icon.mediaId}`
+    : /^media:[A-Za-z0-9_-]{1,128}$/.test(iconValue) || /^cxl-media:[a-f0-9]{64}$/.test(iconValue)
+      ? iconValue
+      : '';
+  const iconUrl = iconRef
+    ? `/api/cxl/media?${new URLSearchParams({ workId: asset.id, ref: iconRef, ...(asset.updatedAt ? { v: asset.updatedAt } : {}) }).toString()}`
+    : '';
+  const safeIcon = asset.icon?.type === 'image' && iconMedia?.signedUrl
+    ? { ...asset.icon, value: iconMedia.signedUrl }
+    : asset.icon?.type === 'image' && /^data:/i.test(iconValue)
+      ? { type: 'emoji' as const, value: '✨' }
+      : asset.icon && (asset.icon.type === 'emoji' || asset.icon.type === 'kaomoji') && iconValue.length <= 96
+        ? asset.icon
+        : asset.icon?.type === 'image' && iconUrl
+          ? { ...asset.icon, value: iconUrl }
+          : asset.icon?.type === 'image' && /^https:\/\//i.test(iconValue)
+            ? asset.icon
+          : { type: 'emoji' as const, value: '✨' };
+  return { ...asset, authorAvatar: undefined, icon: safeIcon, collaboration: null,
     content: '', contentBlocks: [], uiCodeSnippet: '', previewImages: asset.previewImage ? [asset.previewImage] : [],
     media, versions: [] };
 }
