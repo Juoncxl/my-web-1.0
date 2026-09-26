@@ -8,7 +8,7 @@ type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
 const ALLOWED_OPTIONS = new Set(['userId','currentUserId','creatorSlug','assetId','category','folderId','search','includeDeleted','onlyDeleted','publicOnly','limit','detail']);
 const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','settings.readCreatorSpace']);
-const GAS_TIMEOUT_MS = 12_000;
+const GAS_TIMEOUT_MS = 30_000;
 
 function send(res: Response, status: number, body: unknown) {
   res.statusCode = status;

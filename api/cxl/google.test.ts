@@ -168,4 +168,33 @@ describe('Vercel Google Works read proxy', () => {
     const timeout = await invoke({ action: 'works.fetch', args: [{}] });
     expect(timeout.statusCode).toBe(504);
   });
+
+  it.each([
+    ['works.fetch', [{ publicOnly: true }]],
+    ['profiles.getCreator', ['@Creator-One']],
+    ['settings.readCreatorSpace', ['cxlc_0123456789abcdef0123456789abcdef']]
+  ] as const)('%s uses the configured timeout and maps an aborted GAS request to 504', async (action, args) => {
+    const controller = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+      }, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const pending = invoke({ action, args: [...args] });
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+      expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
+
+      controller.abort();
+      const result = await pending;
+
+      expect(result.statusCode).toBe(504);
+      expect(result.json.error).toMatch(/timeout/i);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
 });
