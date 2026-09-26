@@ -6,6 +6,7 @@ import { AuthFeedback } from './auth/AuthFeedback';
 import { AuthMode, AuthModeTabs } from './auth/AuthModeTabs';
 import { LoginForm } from './auth/LoginForm';
 import { SignupForm } from './auth/SignupForm';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 
 const brandMarkUrl = new URL('../assets/brand/brand-mark.svg', import.meta.url).href;
 const brandMarkLightUrl = new URL('../assets/brand/brand-mark-light.svg', import.meta.url).href;
@@ -16,7 +17,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { loginWithEmail, signUpWithEmail, authDefaultTab } = useAuth();
+  const { loginWithEmail, loginWithGoogle, signUpWithEmail, authDefaultTab } = useAuth();
 
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
@@ -30,7 +31,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   // Sync mode with authDefaultTab when modal opens
   useEffect(() => {
     if (isOpen) {
-      setMode(authDefaultTab || 'login');
+      setMode(isVercelOwnerAuth ? 'login' : authDefaultTab || 'login');
       setError('');
       setSuccessMsg('');
     }
@@ -106,6 +107,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const result = await loginWithGoogle();
+      if (!result.success) setError(formatFriendlyErrorMessage(result.error || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ'));
+    } catch (error: unknown) { setError(formatFriendlyErrorMessage(error)); }
+    finally { setIsLoading(false); }
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-purple-100 dark:border-slate-800 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 transition-colors">
@@ -134,14 +145,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        <AuthModeTabs mode={mode} onModeChange={handleModeChange} />
+        {!isVercelOwnerAuth && <AuthModeTabs mode={mode} onModeChange={handleModeChange} />}
 
         {/* Form Body */}
         <div className="p-6 pt-4">
           <AuthFeedback type="error" message={error} />
           <AuthFeedback type="success" message={successMsg} />
 
-          {mode === 'login' && (
+          {isVercelOwnerAuth && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600 dark:text-slate-300">เข้าสู่ระบบสำหรับ Owner ด้วยบัญชี Google ที่ได้รับอนุญาต</p>
+              <button type="button" disabled={isLoading} onClick={() => void handleGoogleLogin()} className="cv-auth-primary-button w-full py-2.5 rounded-xl text-xs font-bold disabled:opacity-50">
+                {isLoading ? 'กำลังเชื่อมต่อ Google…' : 'เข้าสู่ระบบด้วย Google'}
+              </button>
+            </div>
+          )}
+
+          {!isVercelOwnerAuth && mode === 'login' && (
             <LoginForm
               email={email}
               password={password}
@@ -153,7 +173,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             />
           )}
 
-          {mode === 'signup' && (
+          {!isVercelOwnerAuth && mode === 'signup' && (
             <SignupForm
               email={email}
               password={password}

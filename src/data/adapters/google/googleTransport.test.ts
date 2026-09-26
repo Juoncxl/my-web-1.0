@@ -50,6 +50,18 @@ describe('Google server transport boundary', () => {
     expect(fetchMock.mock.calls.every(call => !call[1].body.includes('server-only-secret') && !call[1].body.includes('authorization'))).toBe(true);
   });
 
+  it('uses same-origin Owner cookies in Vercel auth mode without reading a Supabase token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, data: { data: [] } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('document', { cookie: '__Host-cxl_csrf=csrf-token' });
+    await callGoogleBackend('works.fetch', [{ userId: 'client-supplied-id' }], true);
+    await callGoogleBackend('works.create', [{ title: 'Work' }, { requestId: 'id' }], true);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1].credentials).toBe('same-origin');
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined();
+    expect(fetchMock.mock.calls[1][1].headers['X-CXL-CSRF']).toBe('csrf-token');
+  });
+
   it('fails closed when browser fetch is unavailable', async () => {
     vi.stubGlobal('fetch', undefined);
     await expect(callGoogleBackend('works.fetch', [])).rejects.toBeInstanceOf(GoogleBackendUnavailableError);

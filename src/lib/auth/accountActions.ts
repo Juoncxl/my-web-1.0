@@ -3,6 +3,7 @@ import { formatFriendlyErrorMessage } from '../apiHelper';
 import { normalizeProfileUsername } from '../profileIdentity';
 import { cxlDataService } from '../../data/cxlDataService';
 import { cxlAuthService } from '../../data/cxlAuthService';
+import { isVercelOwnerAuth } from './ownerAuthBackend';
 
 export interface ProfileUpdateResult {
   success: boolean;
@@ -14,6 +15,9 @@ export async function updateProfile(
   currentUser: User | null,
   data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; avatarImageKey?: string | null; coverImageKey?: string | null; socialLinks?: ProfileSocialLink[] }
 ): Promise<ProfileUpdateResult> {
+  if (isVercelOwnerAuth) {
+    return { success: false, error: 'แก้ไขโปรไฟล์ยังไม่รองรับใน Owner-only mode' };
+  }
   if (!currentUser) {
     return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนแก้ไขโปรไฟล์' };
   }
@@ -46,6 +50,7 @@ export async function changePassword(
   currentPass: string,
   newPass: string
 ): Promise<{ success: boolean; error?: string }> {
+  if (isVercelOwnerAuth) return { success: false, error: 'เปลี่ยนรหัสผ่านยังไม่รองรับใน Owner-only mode' };
   if (!currentUser) {
     return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนเปลี่ยนรหัสผ่าน' };
   }

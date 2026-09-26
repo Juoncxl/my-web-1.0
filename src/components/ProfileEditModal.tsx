@@ -7,6 +7,7 @@ import { ProfileAvatarPicker } from './profile/ProfileAvatarPicker';
 import { ProfileFields } from './profile/ProfileFields';
 import { getProfileUsernameValidationError, normalizeProfileUsername } from '../lib/profileIdentity';
 import { deleteQaProfileImage, getQaProfileImage, getQaProfileImageUrl, restoreQaProfileImage, isQaObjectUrl, validateQaProfileImage } from '../lib/qaProfileImageStore';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 
 interface ProfileEditModalProps {
   isOpen: boolean;
@@ -111,6 +112,13 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   }, [currentUser, isOpen]);
 
   if (!isOpen) return null;
+  if (isVercelOwnerAuth) return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+    <div className="w-full max-w-md rounded-2xl bg-white p-6 text-slate-800 shadow-2xl dark:bg-slate-900 dark:text-slate-100" role="dialog" aria-modal="true">
+      <h2 className="text-base font-bold">แก้ไขโปรไฟล์ยังไม่พร้อม</h2>
+      <p className="mt-2 text-sm text-slate-500">การแก้ไขโปรไฟล์และรูปภาพจะเปิดหลังย้าย profile writes ในขั้นถัดไป</p>
+      <button type="button" onClick={onClose} className="mt-5 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white">ปิด</button>
+    </div>
+  </div>;
 
   const handleCoverUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

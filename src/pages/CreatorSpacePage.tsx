@@ -17,6 +17,7 @@ import { cxlDataService } from '../data/cxlDataService';
 import { anchorFreeGridCell, canAddFreePlacement, compactFreeLayout, constrainFreePlacementWidth, createFreeWidgetInstance, estimatePortfolioHeightRows, estimateWorkHeightRows, getFreePlacementId, getFreePlacementWidthOptions, getPortfolioShowcaseItems, getWorkCardSize, hydrateFreeWidgetInstances, hydrateSavedFreeLayout, materializeDerivedHeights, migrateFreeOrder, moveFreePlacement, normalizeFreePlacement, pixelsToFreeGridRows, pointerToFreeGridCell, removeFreePlacement, resolveFreePlacementPosition, resizeFreePlacement, shouldShowFreePlacementControls, updateFreeWidgetInstance, type FreeLayoutPlacement, type FreePlacementKind, type FreeWidgetInstance, type PortfolioDisplayLimit } from '../lib/creatorLayout';
 import { parseCanonicalProfileLocation, resolveProfileView, shouldNormalizeOwnerProfileContext, type ProfileTab } from '../lib/profileRouting';
 import { getCanonicalProfilePath, getCanonicalProfileSlug } from '../lib/profileIdentity';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 
 const WorkDetailModal = React.lazy(() => import('../components/WorkDetailModal').then(module => ({ default: module.WorkDetailModal })));
 const FolderDetailModal = React.lazy(() => import('../components/FolderDetailModal').then(module => ({ default: module.FolderDetailModal })));
@@ -263,11 +264,13 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     return () => window.removeEventListener('popstate', syncFromLocation);
   }, []);
 
-  const isOwner = Boolean(profile && currentUser?.id === profile.id);
+  const isOwner = Boolean(profile && (currentUser?.id === profile.id ||
+    (currentUser?.publicCreatorId && currentUser.publicCreatorId === (profile.publicCreatorId || profile.id))));
+  const creatorServiceId = profile?.publicCreatorId || profile?.id;
   const resolvedView = resolveProfileView({ requestedTab, previewPublic: previewViewer === 'public' }, isOwner);
   const activeTab = resolvedView.activeTab;
   const isEditing = isOwner && !resolvedView.isPublicView;
-  const canManageFreeLayout = shouldShowFreePlacementControls(isOwner, resolvedView.isPublicView, isCustomizeOpen);
+  const canManageFreeLayout = !isVercelOwnerAuth && shouldShowFreePlacementControls(isOwner, resolvedView.isPublicView, isCustomizeOpen);
   const presentationProfile = isOwner && currentUser ? currentUser : profile;
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
@@ -298,7 +301,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     if (!profile) return;
     let cancelled = false;
     setSettingsHydrated(false);
-    void cxlDataService.settings.readCreatorSpace(profile.id).then(({ data: saved, error }) => {
+    void cxlDataService.settings.readCreatorSpace(creatorServiceId || profile.id).then(({ data: saved, error }) => {
       if (cancelled) return;
       if (error && (import.meta as any).env?.DEV) console.warn('[CreatorSpace] settings read failed; using available fallback', error);
       if (saved) {
@@ -330,10 +333,10 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       setSettingsHydrated(true);
     });
     return () => { cancelled = true; };
-  }, [profile?.id]);
+  }, [creatorServiceId, profile?.id]);
 
   useEffect(() => {
-    if (!isOwner || !profile || !settingsHydrated) return;
+    if (!isOwner || isVercelOwnerAuth || !profile || !settingsHydrated) return;
     const timeoutId = window.setTimeout(() => {
       void cxlDataService.settings.writeCreatorSpace(profile.id, { layout, lockedPreset, widgets, widgetRail, spans, freeOrder, freePlacements, portfolioDisplayLimit, widgetTitles, widgetConfigs: widgetConfigs as Record<string, Record<string, unknown>>, widgetInstances }).then(result => {
         if (!result.success && (import.meta as any).env?.DEV) console.warn('[CreatorSpace] settings save failed', result.error);
@@ -492,6 +495,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     if (nextLayout !== 'free') setAddItemOpen(false);
   };
   const toggleCustomize = () => {
+    if (isVercelOwnerAuth) return;
     if (isCustomizeOpen) {
       setIsCustomizeOpen(false);
       setAddItemOpen(false);
@@ -907,6 +911,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   return <div className="csp-route min-h-screen">
     <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} activeView="feed" onViewChange={() => { window.history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }} onOpenCreateModal={handleCreateAsset} onOpenAuthModal={onOpenAuth} onOpenSignUpModal={() => openAuthModal('signup')} onOpenSettingsModal={onOpenSettingsModal} creatorMode />
     <main className="csp-main mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+       {isVercelOwnerAuth && isOwner && <p role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">โหมด Owner-only: การแก้โปรไฟล์/เลย์เอาต์ โฟลเดอร์ มีเดีย คอลแลบ และ engagement ยังพักไว้; บันทึก Work จะใช้ได้เมื่อเปิด GO 6A Preview write flag แยกต่างหาก</p>}
        {isProfileLoading && !profile && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
       {!isProfileLoading && !profile && <section className="csp-empty csp-route-state" role="alert"><div className="csp-empty-icon"><UserRound className="h-6 w-6" /></div><h1>{isNotFound ? 'ไม่พบโปรไฟล์ครีเอเตอร์' : 'โหลดโปรไฟล์ไม่สำเร็จ'}</h1><p>{error || (isNotFound ? 'โปรไฟล์นี้อาจยังไม่มีอยู่ หรือ URL ไม่ถูกต้อง' : 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง')}</p><div className="csp-state-actions"><button type="button" onClick={() => void refresh()} className="csp-secondary-button"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</button><a href="/" className="csp-primary-button">กลับหน้าแรก</a></div></section>}
       {profile && <>

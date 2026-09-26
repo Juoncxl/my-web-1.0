@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
+import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -81,8 +82,8 @@ function validPublicActionArgs(action: string, args: unknown[]): boolean {
 function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 }
-function validOwnerActionArgs(action: string, args: unknown[], ownerId: string): boolean {
-  if (action === 'folders.fetch') return args.length === 1 && (args[0] === undefined || args[0] === ownerId);
+function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, authMode: 'supabase' | 'vercel'): boolean {
+  if (action === 'folders.fetch') return args.length === 1 && (args[0] === undefined || args[0] === ownerId || (authMode === 'vercel' && typeof args[0] === 'string'));
   if (action === 'works.create') return args.length === 2 && record(args[0]) && record(args[1]) && validRequestId(args[1].requestId);
   if (action === 'works.update') return args.length === 3 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0])
     && record(args[1]) && record(args[2]) && validRequestId(args[2].requestId)
@@ -136,23 +137,39 @@ export default async function handler(req: Request, res: Response) {
     }
   }
   if (OWNER_ACTIONS.has(action)) {
+    const authMode = selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND);
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     const ownerUserId = process.env.CXL_OWNER_USER_ID?.trim() || '';
-    if (!ownerUserId || !process.env.SUPABASE_URL?.trim() || !process.env.SUPABASE_ANON_KEY?.trim())
-      return send(res, 503, { ok: false, error: 'Owner authentication is not configured on the server' });
-    if (!bearer) return send(res, 401, { ok: false, error: 'Owner authentication required' });
-    const authenticatedOwnerId = await verifyOwner(bearer);
+    const configured = authMode === 'vercel'
+      ? Boolean(ownerUserId && process.env.CXL_OWNER_GOOGLE_SUB?.trim() && (process.env.CXL_OWNER_SESSION_SECRET || '').length >= 32)
+      : Boolean(ownerUserId && process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_ANON_KEY?.trim());
+    if (!configured) return send(res, 503, { ok: false, error: 'Owner authentication is not configured on the server' });
+    if (authMode === 'vercel' && bearer) return send(res, 401, { ok: false, error: 'Bearer authentication is not accepted in Vercel Owner mode' });
+    if (authMode === 'supabase' && !bearer) return send(res, 401, { ok: false, error: 'Owner authentication required' });
+    const authenticatedOwnerId = authMode === 'vercel'
+      ? (verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE)) ? ownerUserId : null)
+      : await verifyOwner(bearer);
     if (!authenticatedOwnerId) return send(res, 401, { ok: false, error: 'Valid owner authentication required' });
-    if (authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
-    if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId))
+    if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
+    if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
+    if ((action === 'works.create' || action === 'works.update') && authMode === 'vercel'
+      && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
+      return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
+    }
     const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
     const secret = process.env.CXL_API_SHARED_SECRET;
     if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
     try {
+      const ownerArgs = action === 'folders.fetch' ? [authenticatedOwnerId]
+        : action === 'works.create' && authMode === 'vercel'
+          ? [{ ...(body.args[0] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[1]]
+          : action === 'works.update' && authMode === 'vercel'
+            ? [body.args[0], { ...(body.args[1] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[2]]
+            : body.args;
       const raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: body.args }) });
+        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs }) });
       if (!record(raw) || raw.ok !== true) {
         const code = record(raw) ? raw.code : undefined;
         const message = record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed';
@@ -172,13 +189,23 @@ export default async function handler(req: Request, res: Response) {
   const options = optionsValue as FetchAssetsOptions;
   const auth = req.headers.authorization || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const authMode = selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND);
   const ownerUserId = process.env.CXL_OWNER_USER_ID?.trim() || '';
-  const hasOwnerAuthConfig = Boolean(ownerUserId && process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_ANON_KEY?.trim());
+  const hasOwnerAuthConfig = authMode === 'vercel'
+    ? Boolean(ownerUserId && process.env.CXL_OWNER_GOOGLE_SUB?.trim() && (process.env.CXL_OWNER_SESSION_SECRET || '').length >= 32)
+    : Boolean(ownerUserId && process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_ANON_KEY?.trim());
   if (bearer && !hasOwnerAuthConfig) {
     return send(res, 503, { ok: false, error: 'Owner authentication is not configured on the server' });
   }
-  const ownerId = bearer ? await verifyOwner(bearer) : null;
+  if (authMode === 'vercel' && bearer) return send(res, 401, { ok: false, error: 'Bearer authentication is not accepted in Vercel Owner mode' });
+  const ownerId = authMode === 'vercel'
+    ? (verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE)) ? ownerUserId : null)
+    : bearer ? await verifyOwner(bearer) : null;
   if (bearer && !ownerId) return send(res, 401, { ok: false, error: 'Valid owner authentication required' });
+  if (authMode === 'vercel' && ownerId) {
+    if (options.userId) options.userId = ownerId;
+    if (options.currentUserId) options.currentUserId = ownerId;
+  }
   const requestsOwnerScope = Boolean(options.onlyDeleted || options.includeDeleted
     || options.currentUserId?.trim()
     || (options.userId?.trim() && (!ownerUserId || options.userId === ownerUserId)));
@@ -187,7 +214,7 @@ export default async function handler(req: Request, res: Response) {
       ? 'Owner authentication required for private/trash reads'
       : 'Owner authentication required for private Works' });
   }
-  if (ownerId && options.currentUserId && options.currentUserId !== ownerId) return send(res, 403, { ok: false, error: 'Current user does not match the authenticated owner' });
+  if (authMode === 'supabase' && ownerId && options.currentUserId && options.currentUserId !== ownerId) return send(res, 403, { ok: false, error: 'Current user does not match the authenticated owner' });
   let publicCreatorSlug: string | null = null;
   if (options.creatorSlug) {
     let decoded = '';
@@ -207,7 +234,7 @@ export default async function handler(req: Request, res: Response) {
   if (options.userId && options.userId !== ownerUserId) {
     return send(res, 501, { ok: false, error: 'Public creator filtering requires the Profiles read capability' });
   }
-  const ownerScope = Boolean(!publicCreatorSlug && ownerId && (!options.userId || options.userId === ownerId) && !options.publicOnly);
+  const ownerScope = Boolean(!publicCreatorSlug && ownerId && (authMode === 'vercel' || !options.userId || options.userId === ownerId) && !options.publicOnly);
 
   try {
     let raw: unknown;
@@ -216,7 +243,8 @@ export default async function handler(req: Request, res: Response) {
       const secret = process.env.CXL_API_SHARED_SECRET;
       if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
       raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authorization: secret, action: 'works.fetch', args: [{ ...options, currentUserId: ownerId }] }) });
+        body: JSON.stringify({ authorization: secret, ownerUserId: ownerId, action: 'works.fetch', args: [{ ...options,
+          ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId }] }) });
       if (!record(raw) || raw.ok !== true || !record(raw.data) || !Array.isArray(raw.data.data)) {
         throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed');
       }

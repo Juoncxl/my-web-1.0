@@ -162,14 +162,17 @@ export function useCreatorSpaceData(
     void refresh();
   }, [decodedSlug, ownerProfileFallback, refresh, slug]);
 
-  const isOwner = Boolean(profile && profile.id === currentUserId);
+  const isOwner = Boolean(profile && (
+    profile.id === currentUserId ||
+    (ownerFallback?.publicCreatorId && profile.publicCreatorId === ownerFallback.publicCreatorId)
+  ));
   const assets = useMemo(
-    () => selectCreatorAssets(sources.assets, profile?.id, isOwner),
-    [isOwner, profile?.id, sources.assets]
+    () => selectCreatorAssets(sources.assets, isOwner ? currentUserId : profile?.publicCreatorId || profile?.id, isOwner),
+    [currentUserId, isOwner, profile?.id, profile?.publicCreatorId, sources.assets]
   );
   const folders = useMemo(
-    () => selectCreatorFolders(sources.folders, profile?.id, isOwner),
-    [isOwner, profile?.id, sources.folders]
+    () => selectCreatorFolders(sources.folders, isOwner ? currentUserId : profile?.id, isOwner),
+    [currentUserId, isOwner, profile?.id, sources.folders]
   );
 
   return {

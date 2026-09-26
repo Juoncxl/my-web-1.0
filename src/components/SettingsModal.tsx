@@ -9,12 +9,13 @@ import { SettingsProfileSection } from './settings/SettingsProfileSection';
 import { SettingsSecuritySection } from './settings/SettingsSecuritySection';
 import { SettingsTabs } from './settings/SettingsTabs';
 import type { LegacySummary, SettingsMessage, SettingsTab } from './settings/SettingsTypes';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 
 const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
 
 export const SettingsModal: React.FC = () => {
   const { currentUser, isSettingsOpen, setIsSettingsOpen, updateProfile, changePassword } = useAuth();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(isVercelOwnerAuth ? 'backup' : 'profile');
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [bio, setBio] = useState(currentUser?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
@@ -140,6 +141,7 @@ export const SettingsModal: React.FC = () => {
   };
 
   const handleImportLegacyGuestData = async () => {
+    if (isVercelOwnerAuth) { setBackupMsg({ type: 'error', text: 'นำเข้าข้อมูลเก่ายังไม่รองรับใน Owner-only mode' }); return; }
     if (!currentUser) return;
     setIsImportingLegacy(true); setBackupMsg(null);
     try {
@@ -156,11 +158,13 @@ export const SettingsModal: React.FC = () => {
     <div className="cv-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" data-settings-tab={activeTab}>
       <header className="cv-settings-chrome">
         <div className="cv-settings-heading"><div className="cv-settings-heading-copy"><div className="cv-settings-heading-icon"><Settings2 className="w-5 h-5" /></div><div><h2 id="settings-modal-title">ตั้งค่าบัญชี & การสำรองข้อมูล</h2><p>จัดการโปรไฟล์ ความปลอดภัย และการสำรองข้อมูล</p></div></div><button type="button" onClick={() => setIsSettingsOpen(false)} className="cv-settings-close" aria-label="ปิดหน้าตั้งค่า"><X className="w-4 h-4" /></button></div>
-        <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        {isVercelOwnerAuth
+          ? <p className="px-6 py-3 text-xs text-slate-500">โหมด Owner-only: การแก้ไขโปรไฟล์และรหัสผ่านถูกพักไว้ชั่วคราว</p>
+          : <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />}
       </header>
       <div className="cv-settings-content">
-        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
-        {activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
+        {!isVercelOwnerAuth && activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
+        {!isVercelOwnerAuth && activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
       </div>
     </div>

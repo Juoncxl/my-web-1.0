@@ -1,6 +1,7 @@
 import type { AuthResponse } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
 import { cxlAuthService } from '../../data/cxlAuthService';
+import { isVercelOwnerAuth } from './ownerAuthBackend';
 
 let logoutInFlight: Promise<void> | null = null;
 
@@ -23,6 +24,7 @@ async function waitForLogoutCompletion(): Promise<void> {
 }
 
 export async function signUpWithEmail(email: string, pass: string): Promise<AuthResponse> {
+  if (isVercelOwnerAuth) return { success: false, error: 'สมัครสมาชิกทั่วไปไม่เปิดใน Owner-only mode' };
   try {
     await waitForLogoutCompletion();
     const cleanEmail = email.toLowerCase().trim();
@@ -57,7 +59,7 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
 
     return {
       success: true,
-      user: cxlAuthService.mapUser(data.user),
+      user: await cxlAuthService.mapUser(data.user),
       isNewUser: true
     };
   } catch (error) {
@@ -67,6 +69,7 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
 }
 
 export async function loginWithEmail(email: string, pass: string): Promise<AuthResponse> {
+  if (isVercelOwnerAuth) return { success: false, error: 'Owner mode ใช้การเข้าสู่ระบบด้วย Google เท่านั้น' };
   try {
     await waitForLogoutCompletion();
     const cleanEmail = email.toLowerCase().trim();
@@ -95,7 +98,7 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
 
     return {
       success: true,
-      user: cxlAuthService.mapUser(data.user),
+      user: await cxlAuthService.mapUser(data.user),
       isNewUser: false
     };
   } catch (error) {
@@ -139,10 +142,10 @@ export async function logout(): Promise<void> {
         // the server-side cleanup before a fresh login.
         const result = await cxlAuthService.signOutLocal();
         const error = result?.error;
-        if (error) console.warn('Supabase signout failed:', error);
+        if (error) console.warn('Auth signout failed:', error);
       }
     } catch (error) {
-      console.warn('Supabase signout exception:', error);
+      console.warn('Auth signout exception:', error);
     }
   })();
 

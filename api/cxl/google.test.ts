@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import handler from './google';
+import { createOwnerSessionToken } from '../../src/server/cxlOwnerAuth';
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ auth: { getUser: async (token: string) => token === 'owner-session'
@@ -14,10 +15,10 @@ const makeAsset = (id: string, overrides: Record<string, unknown> = {}) => ({
   folderId: null, tags: [], content: '', contentBlocks: [], previewImage: '', previewImages: [], media: [],
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '', deletedAt: null, ...overrides
 });
-function invoke(body: unknown, authorization?: string, method = 'POST') {
+function invoke(body: unknown, authorization?: string, method = 'POST', extraHeaders: Record<string, string> = {}) {
   const response = { statusCode: 200, headers: {} as Record<string, string>, body: '',
     setHeader(name: string, value: string) { this.headers[name] = value; }, end(value: string) { this.body = value; } };
-  const req = { method, headers: authorization ? { authorization } : {}, body } as any;
+  const req = { method, headers: { ...(authorization ? { authorization } : {}), ...extraHeaders }, body } as any;
   return handler(req, response as any).then(() => ({ ...response, json: JSON.parse(response.body) }));
 }
 
@@ -153,6 +154,45 @@ describe('Vercel Google Works read proxy', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('slug=creator-one');
     expect(fetchMock.mock.calls[0][1].method).toBe('GET');
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  it('accepts Owner session cookies, maps browser identity to the server Owner key, and protects writes with Origin/CSRF', async () => {
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const ownerCookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: [makeAsset('private')] } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const missing = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1' }] });
+    const privateRead = await invoke({ action: 'works.fetch', args: [{ userId: 'browser-controlled-id', currentUserId: 'attacker-id' }] }, undefined, 'POST', { cookie: ownerCookie });
+    expect(missing.statusCode).toBe(401);
+    expect(privateRead.statusCode).toBe(200);
+    const readPayload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(readPayload.ownerUserId).toBe('owner-1');
+    expect(readPayload.args[0]).toMatchObject({ userId: 'owner-1', currentUserId: 'owner-1' });
+
+    const asset = { title: 'New Work', category: 'character', userId: 'client-spoofed-owner' };
+    const writeArgs = { action: 'works.create', args: [asset, { requestId: '123e4567-e89b-42d3-a456-426614174000' }] };
+    const noCsrf = await invoke(writeArgs, undefined, 'POST', { cookie: ownerCookie });
+    const badOrigin = await invoke(writeArgs, undefined, 'POST', { cookie: ownerCookie, origin: 'https://evil.example', 'x-cxl-csrf': 'csrf-token' });
+    const accepted = await invoke(writeArgs, undefined, 'POST', { cookie: ownerCookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' });
+    expect([noCsrf.statusCode, badOrigin.statusCode, accepted.statusCode]).toEqual([403, 403, 200]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).ownerUserId).toBe('owner-1');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).args[0].userId).toBe('owner-1');
+  });
+
+  it('keeps anonymous public Works reads unchanged in Vercel auth mode without Owner config', async () => {
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_USER_ID', '');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [makeAsset('public')] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true }] });
+    expect(result.statusCode).toBe(200);
+    expect(result.json.data.data).toHaveLength(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('/public/exec');
   });
 
   it('proxies only the supported public profile/settings read contracts', async () => {

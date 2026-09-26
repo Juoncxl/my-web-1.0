@@ -14,11 +14,12 @@ export function usePublicCreatorProfiles(assets: readonly Asset[], currentUser: 
 
   useEffect(() => {
     let cancelled = false;
-    const ownProfile = currentUser && creatorIds.includes(currentUser.id) ? currentUser : null;
+    const ownKey = currentUser?.publicCreatorId || currentUser?.id;
+    const ownProfile = currentUser && ownKey && creatorIds.includes(ownKey) ? currentUser : null;
     const applyProfiles = (profiles: readonly User[]) => {
       if (cancelled) return;
-      const next = new Map(profiles.map(profile => [profile.id, profile]));
-      if (ownProfile) next.set(ownProfile.id, ownProfile);
+      const next = new Map(profiles.map(profile => [profile.publicCreatorId || profile.id, profile]));
+      if (ownProfile && ownKey) next.set(ownKey, ownProfile);
       setProfilesById(next);
     };
 

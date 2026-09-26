@@ -265,6 +265,8 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface User {
   id: string;
+  /** Opaque public creator identity; distinct from the private legacy owner key in id. */
+  publicCreatorId?: string;
   email?: string;
   displayName: string;
   username?: string;
