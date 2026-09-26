@@ -7,6 +7,7 @@ import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
 const ALLOWED_OPTIONS = new Set(['userId','currentUserId','creatorSlug','assetId','category','folderId','search','includeDeleted','onlyDeleted','publicOnly','limit','detail']);
+const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','settings.readCreatorSpace']);
 const GAS_TIMEOUT_MS = 12_000;
 
 function send(res: Response, status: number, body: unknown) {
@@ -55,6 +56,27 @@ async function gasJson(url: string, init: RequestInit) {
   try { parsed = JSON.parse(text); } catch { throw new Error('Google Apps Script returned malformed JSON'); }
   return parsed;
 }
+function publicGasUrl(action: string, params: Record<string, string>): URL | null {
+  const endpoint = gasEndpoint(process.env.CXL_GAS_PUBLIC_URL);
+  if (!endpoint) return null;
+  const url = new URL(endpoint);
+  url.searchParams.set('cxlApi', action);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  return url;
+}
+async function publicGasData(url: URL): Promise<unknown> {
+  const raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
+  if (!record(raw) || raw.ok !== true) throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed');
+  return raw.data;
+}
+function validPublicActionArgs(action: string, args: unknown[]): boolean {
+  if (action === 'profiles.getCreator') return args.length === 1 && typeof args[0] === 'string' && args[0].length <= 128;
+  if (action === 'profiles.getPublic') return args.length === 1 && Array.isArray(args[0]) && args[0].length <= 100
+    && args[0].every(id => typeof id === 'string' && /^cxlc_[a-f0-9]{32}$/i.test(id));
+  if (action === 'settings.readCreatorSpace') return args.length === 1 && typeof args[0] === 'string'
+    && /^cxlc_[a-f0-9]{32}$/i.test(args[0]);
+  return false;
+}
 function validateAssetList(value: unknown): Asset[] {
   if (!Array.isArray(value) || value.some(item => !record(item)
     || typeof item.id !== 'string' || typeof item.title !== 'string' || typeof item.category !== 'string'
@@ -70,9 +92,28 @@ export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
   let body: unknown;
   try { body = parseBody(req); } catch { return send(res, 400, { ok: false, error: 'Malformed JSON request' }); }
-  if (!record(body) || body.action !== 'works.fetch' || !Array.isArray(body.args) || body.args.length > 1) {
-    return send(res, 400, { ok: false, error: 'Only works.fetch is available through this endpoint' });
+  if (!record(body) || typeof body.action !== 'string' || !Array.isArray(body.args))
+    return send(res, 400, { ok: false, error: 'Invalid public read request' });
+  const action = body.action;
+  if (!PUBLIC_ACTIONS.has(action) && action !== 'works.fetch')
+    return send(res, 400, { ok: false, error: 'Only supported public reads are available through this endpoint' });
+  if (PUBLIC_ACTIONS.has(action)) {
+    if (!validPublicActionArgs(action, body.args)) return send(res, 400, { ok: false, error: `Invalid ${action} request` });
+    try {
+      const params: Record<string, string> = {};
+      if (action === 'profiles.getCreator') params.slug = String(body.args[0]).trim().replace(/^@+/, '').toLowerCase();
+      if (action === 'profiles.getPublic') params.ids = JSON.stringify([...new Set(body.args[0] as string[])]);
+      if (action === 'settings.readCreatorSpace') params.publicCreatorId = String(body.args[0]);
+      const url = publicGasUrl(action, params);
+      if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
+      return send(res, 200, { ok: true, data: await publicGasData(url) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google public read failed';
+      const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
+      return send(res, status, { ok: false, error: message.slice(0, 300) });
+    }
   }
+  if (body.args.length > 1) return send(res, 400, { ok: false, error: 'Invalid works.fetch request' });
   const optionsValue = body.args[0] === undefined ? {} : body.args[0];
   if (!validOptions(optionsValue)) return send(res, 400, { ok: false, error: 'Invalid works.fetch options' });
   const options = optionsValue as FetchAssetsOptions;
@@ -94,19 +135,26 @@ export default async function handler(req: Request, res: Response) {
       : 'Owner authentication required for private Works' });
   }
   if (ownerId && options.currentUserId && options.currentUserId !== ownerId) return send(res, 403, { ok: false, error: 'Current user does not match the authenticated owner' });
+  let publicCreatorSlug: string | null = null;
   if (options.creatorSlug) {
     let decoded = '';
     try { decoded = decodeURIComponent(options.creatorSlug).trim(); } catch { return send(res, 400, { ok: false, error: 'Invalid creator slug' }); }
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(decoded)) {
-      return send(res, 501, { ok: false, error: 'Creator slug lookup requires the Profiles read capability' });
+      const slug = decoded.replace(/^@+/, '').toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(slug) || options.userId || options.currentUserId
+        || options.includeDeleted || options.onlyDeleted || options.folderId !== undefined) {
+        return send(res, 400, { ok: false, error: 'Invalid public creator Works request' });
+      }
+      publicCreatorSlug = slug;
+    } else {
+      if (decoded !== ownerUserId) return send(res, 501, { ok: false, error: 'Public creator lookup requires the Profiles read capability' });
+      if (!ownerId) return send(res, 401, { ok: false, error: 'Owner authentication required for owner profile Works' });
     }
-    if (decoded !== ownerUserId) return send(res, 501, { ok: false, error: 'Public creator lookup requires the Profiles read capability' });
-    if (!ownerId) return send(res, 401, { ok: false, error: 'Owner authentication required for owner profile Works' });
   }
   if (options.userId && options.userId !== ownerUserId) {
     return send(res, 501, { ok: false, error: 'Public creator filtering requires the Profiles read capability' });
   }
-  const ownerScope = Boolean(ownerId && (!options.userId || options.userId === ownerId) && !options.publicOnly);
+  const ownerScope = Boolean(!publicCreatorSlug && ownerId && (!options.userId || options.userId === ownerId) && !options.publicOnly);
 
   try {
     let raw: unknown;
@@ -121,17 +169,20 @@ export default async function handler(req: Request, res: Response) {
       }
       raw = raw.data.data;
     } else {
-      const endpoint = gasEndpoint(process.env.CXL_GAS_PUBLIC_URL);
-      if (!endpoint) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
-      const url = new URL(endpoint);
-      url.searchParams.set('cxlApi', options.assetId ? 'works.detail' : 'works.list');
-      if (options.assetId) url.searchParams.set('id', options.assetId);
-      raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
-      if (!record(raw) || raw.ok !== true) throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed');
-      raw = options.assetId ? [raw.data] : raw.data;
+      if (publicCreatorSlug) {
+        const url = publicGasUrl('works.creator', { slug: publicCreatorSlug });
+        if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
+        raw = await publicGasData(url);
+      } else {
+        const url = publicGasUrl(options.assetId ? 'works.detail' : 'works.list', options.assetId ? { id: options.assetId } : {});
+        if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
+        raw = await publicGasData(url);
+        raw = options.assetId ? [raw] : raw;
+      }
     }
     const works = validateAssetList(raw);
-    const scopedOptions = { ...options, currentUserId: ownerScope ? ownerId || undefined : undefined };
+    const scopedOptions = { ...options, publicOnly: publicCreatorSlug ? true : options.publicOnly,
+      currentUserId: ownerScope ? ownerId || undefined : undefined };
     const filtered = filterGoogleWorks(works, scopedOptions, { currentUserId: ownerScope ? ownerId || undefined : undefined });
     return send(res, 200, { ok: true, data: { data: filtered, error: null } });
   } catch (error) {

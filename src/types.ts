@@ -187,6 +187,8 @@ export interface PublicAssetCollaboration {
 export interface Asset {
   id: string;
   userId: string;
+  /** Public-safe opaque creator join key returned by the Google public reader. */
+  publicCreatorId?: string;
   authorName: string;
   authorAvatar?: string;
   title: string;

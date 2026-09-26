@@ -109,10 +109,43 @@ describe('Vercel Google Works read proxy', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not silently fake Profile-based public creator filtering', async () => {
-    const result = await invoke({ action: 'works.fetch', args: [{ creatorSlug: 'creator-name' }] });
-    expect(result.statusCode).toBe(501);
-    expect(result.json.error).toContain('Profiles');
+  it('uses the public creator index for supported slug-based Works reads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [makeAsset('creator-work', { publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef' })] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await invoke({ action: 'works.fetch', args: [{ creatorSlug: '@Creator-One', search: 'work' }] });
+    expect(result.statusCode).toBe(200);
+    expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['creator-work']);
+    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.creator');
+    expect(fetchMock.mock.calls[0][0]).toContain('slug=creator-one');
+    expect(fetchMock.mock.calls[0][1].method).toBe('GET');
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  it('proxies only the supported public profile/settings read contracts', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: { id: 'cxlc_0123456789abcdef0123456789abcdef', publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef' }, error: null, reason: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: [], error: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: null, error: null, source: 'none' } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await invoke({ action: 'profiles.getCreator', args: ['@Creator-One'] })).statusCode).toBe(200);
+    expect((await invoke({ action: 'profiles.getPublic', args: [['cxlc_0123456789abcdef0123456789abcdef', 'cxlc_0123456789abcdef0123456789abcdef']] })).statusCode).toBe(200);
+    expect((await invoke({ action: 'settings.readCreatorSpace', args: ['cxlc_0123456789abcdef0123456789abcdef'] })).statusCode).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=profiles.getCreator');
+    expect(fetchMock.mock.calls[0][0]).toContain('slug=creator-one');
+    const ids = new URL(fetchMock.mock.calls[1][0]).searchParams.get('ids');
+    expect(JSON.parse(ids || '[]')).toEqual(['cxlc_0123456789abcdef0123456789abcdef']);
+    expect(fetchMock.mock.calls[2][0]).toContain('cxlApi=settings.readCreatorSpace');
+    expect(fetchMock.mock.calls.every(call => call[1].headers.Authorization === undefined)).toBe(true);
+  });
+
+  it('rejects unsupported actions and invalid public creator arguments before proxying', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await invoke({ action: 'settings.writeCreatorSpace', args: ['cxlc_0123456789abcdef0123456789abcdef', {}] })).statusCode).toBe(400);
+    expect((await invoke({ action: 'profiles.getPublic', args: [['internal-profile-id']] })).statusCode).toBe(400);
+    expect((await invoke({ action: 'settings.readCreatorSpace', args: ['internal-profile-id'] })).statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('normalizes unavailable configuration and malformed GAS responses', async () => {
