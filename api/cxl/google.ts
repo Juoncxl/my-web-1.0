@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
-import { filterGoogleWorks } from '../../src/data/googleWorksRead';
+import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
