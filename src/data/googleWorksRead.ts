@@ -5,6 +5,16 @@ export type GoogleReadScope = { currentUserId?: string; ownerUserId?: string };
 
 const isPublic = (asset: Asset) => asset.visibility === 'public' && asset.isPublic === true && !asset.deletedAt;
 
+/** Public summary search intentionally excludes full Work content, blocks, and UI code. */
+function matchesPublicSummarySearch(asset: Asset, needle: string): boolean {
+  const collaboration = asset.publicCollaboration;
+  const values = [asset.title, asset.shortDescription, asset.authorName, asset.category,
+    ...(asset.tags || []), ...(asset.contentTypeLabels || []), ...(asset.contentTypes || []),
+    ...(asset.presentationMetadata?.appPlatforms || []), collaboration?.name, collaboration?.sharedTag,
+    ...(collaboration?.platforms || []), ...(collaboration?.deadlines || []).flatMap(item => [item.label, item.date])];
+  return values.filter((value): value is string => typeof value === 'string').join('\n').toLocaleLowerCase().includes(needle);
+}
+
 /** Mirrors the filtering performed by supabaseService.fetchAssets after its database query. */
 export function filterGoogleWorks(works: Asset[], options: FetchAssetsOptions = {}, scope: GoogleReadScope = {}): Asset[] {
   const currentUserId = scope.currentUserId;
@@ -30,9 +40,11 @@ export function filterGoogleWorks(works: Asset[], options: FetchAssetsOptions = 
   if (limit) result = result.slice(0, limit);
   if (options.search?.trim()) {
     const needle = options.search.trim().toLocaleLowerCase();
-    result = result.filter(asset => asset.title.toLocaleLowerCase().includes(needle)
-      || asset.content.toLocaleLowerCase().includes(needle)
-      || (asset.tags || []).some(tag => tag.toLocaleLowerCase().includes(needle)));
+    result = result.filter(asset => options.publicOnly || !currentUserId
+      ? matchesPublicSummarySearch(asset, needle)
+      : asset.title.toLocaleLowerCase().includes(needle)
+        || asset.content.toLocaleLowerCase().includes(needle)
+        || (asset.tags || []).some(tag => tag.toLocaleLowerCase().includes(needle)));
   }
   if (options.detail === 'summary') result = result.map(toSummaryAsset);
   return result;
