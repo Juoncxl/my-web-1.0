@@ -1,24 +1,52 @@
-import { describe, expect, it } from 'vitest';
-import { cxlDataService } from './cxlDataService';
+import { describe, expect, it, vi } from 'vitest';
+import { createCxlDataService, cxlDataService } from './cxlDataService';
 import { supabaseDataAdapter } from './adapters/supabase/supabaseDataAdapter';
 import { googleDataAdapter } from './adapters/google/googleDataAdapter';
 
 describe('CXL data service boundary', () => {
-  it('delegates application operations to the currently selected Supabase adapter', () => {
-    expect(cxlDataService).toBe(supabaseDataAdapter);
-    expect(cxlDataService.works.fetch).toBe(supabaseDataAdapter.works.fetch);
-    expect(cxlDataService.folders.delete).toBe(supabaseDataAdapter.folders.delete);
-    expect(cxlDataService.collaborations.fetchDrafts).toBe(supabaseDataAdapter.collaborations.fetchDrafts);
-    expect(cxlDataService.collaborations.createPublicSnapshot).toBe(supabaseDataAdapter.collaborations.createPublicSnapshot);
-    expect(cxlDataService.profiles.getCreator).toBe(supabaseDataAdapter.profiles.getCreator);
-    expect(cxlDataService.settings.readCreatorSpace).toBe(supabaseDataAdapter.settings.readCreatorSpace);
-    expect(cxlDataService.engagement.setWorkLike).toBe(supabaseDataAdapter.engagement.setWorkLike);
-    expect(cxlDataService.reports.submit).toBe(supabaseDataAdapter.reports.submit);
-    expect(cxlDataService.media.getFreshDownload).toBe(supabaseDataAdapter.media.getFreshDownload);
+  it.each([undefined, '', 'supabase', 'invalid'])('defaults to Supabase Works Read for flag %s', flag => {
+    const service = createCxlDataService(flag);
+    expect(service.works.fetch).toBe(supabaseDataAdapter.works.fetch);
   });
 
-  it('keeps Google available as a separate contract-compatible, inactive adapter', () => {
-    expect(googleDataAdapter).not.toBe(cxlDataService);
+  it('selects Google for works.fetch only when explicitly configured', () => {
+    const service = createCxlDataService('google');
+    expect(service.works.fetch).toBe(googleDataAdapter.works.fetch);
+    expect(service.works.create).toBe(supabaseDataAdapter.works.create);
+    expect(service.works.update).toBe(supabaseDataAdapter.works.update);
+    expect(service.works.softDelete).toBe(supabaseDataAdapter.works.softDelete);
+    expect(service.works.restore).toBe(supabaseDataAdapter.works.restore);
+    expect(service.works.permanentDelete).toBe(supabaseDataAdapter.works.permanentDelete);
+    expect(service.works.emptyTrash).toBe(supabaseDataAdapter.works.emptyTrash);
+    expect(service.works.fork).toBe(supabaseDataAdapter.works.fork);
+  });
+
+  it('keeps all non-Works-read paths on Supabase when Google is selected', () => {
+    const service = createCxlDataService('google');
+    expect(service.folders).toBe(supabaseDataAdapter.folders);
+    expect(service.collaborations).toBe(supabaseDataAdapter.collaborations);
+    expect(service.profiles).toBe(supabaseDataAdapter.profiles);
+    expect(service.settings).toBe(supabaseDataAdapter.settings);
+    expect(service.engagement).toBe(supabaseDataAdapter.engagement);
+    expect(service.reports).toBe(supabaseDataAdapter.reports);
+    expect(service.media).toBe(supabaseDataAdapter.media);
+  });
+
+  it('keeps the application default on Supabase', () => {
+    expect(cxlDataService.works.fetch).toBe(supabaseDataAdapter.works.fetch);
+    expect(cxlDataService.works.create).toBe(supabaseDataAdapter.works.create);
+  });
+
+  it('preserves adapter errors without changing their result', async () => {
+    const error = new Error('Google Works Read unavailable');
+    const fetchSpy = vi.spyOn(googleDataAdapter.works, 'fetch').mockRejectedValueOnce(error);
+    const service = createCxlDataService('google');
+    await expect(service.works.fetch({})).rejects.toBe(error);
+    fetchSpy.mockRestore();
+  });
+
+  it('keeps Google available as a separate contract-compatible adapter', () => {
+    expect(googleDataAdapter).not.toBe(supabaseDataAdapter);
     expect(googleDataAdapter.works.fetch).not.toBe(supabaseDataAdapter.works.fetch);
     expect(googleDataAdapter.media.mediaReference('m1')).toBe('media:m1');
     expect(googleDataAdapter.media.mediaIdFromReference('media:m1')).toBe('m1');
