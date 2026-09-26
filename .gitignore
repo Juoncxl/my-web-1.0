@@ -7,3 +7,4 @@ supabase/.temp/
 *.log
 .env*
 !.env.example
+.tmp-edge-simple-*/
