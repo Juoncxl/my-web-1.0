@@ -78,26 +78,32 @@ export default async function handler(req: Request, res: Response) {
   const options = optionsValue as FetchAssetsOptions;
   const auth = req.headers.authorization || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const ownerUserId = process.env.CXL_OWNER_USER_ID?.trim() || '';
+  const hasOwnerAuthConfig = Boolean(ownerUserId && process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_ANON_KEY?.trim());
+  if (bearer && !hasOwnerAuthConfig) {
+    return send(res, 503, { ok: false, error: 'Owner authentication is not configured on the server' });
+  }
   const ownerId = bearer ? await verifyOwner(bearer) : null;
-  if ((options.onlyDeleted || (options.includeDeleted && options.userId === process.env.CXL_OWNER_USER_ID)) && !ownerId) {
-    return send(res, 401, { ok: false, error: 'Owner authentication required for private/trash reads' });
+  if (bearer && !ownerId) return send(res, 401, { ok: false, error: 'Valid owner authentication required' });
+  const requestsOwnerScope = Boolean(options.onlyDeleted || options.includeDeleted
+    || options.currentUserId?.trim()
+    || (options.userId?.trim() && (!ownerUserId || options.userId === ownerUserId)));
+  if (requestsOwnerScope && !ownerId) {
+    return send(res, 401, { ok: false, error: options.onlyDeleted || options.includeDeleted
+      ? 'Owner authentication required for private/trash reads'
+      : 'Owner authentication required for private Works' });
   }
-  if (options.userId && options.userId === process.env.CXL_OWNER_USER_ID && !ownerId) {
-    return send(res, 401, { ok: false, error: 'Owner authentication required for private Works' });
-  }
-  if (options.currentUserId === process.env.CXL_OWNER_USER_ID && !ownerId) return send(res, 401, { ok: false, error: 'Owner authentication required for private Works' });
   if (ownerId && options.currentUserId && options.currentUserId !== ownerId) return send(res, 403, { ok: false, error: 'Current user does not match the authenticated owner' });
-  if (options.onlyDeleted && !ownerId) return send(res, 401, { ok: false, error: 'Owner authentication required for trash reads' });
   if (options.creatorSlug) {
     let decoded = '';
     try { decoded = decodeURIComponent(options.creatorSlug).trim(); } catch { return send(res, 400, { ok: false, error: 'Invalid creator slug' }); }
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(decoded)) {
       return send(res, 501, { ok: false, error: 'Creator slug lookup requires the Profiles read capability' });
     }
-    if (decoded !== process.env.CXL_OWNER_USER_ID) return send(res, 501, { ok: false, error: 'Public creator lookup requires the Profiles read capability' });
+    if (decoded !== ownerUserId) return send(res, 501, { ok: false, error: 'Public creator lookup requires the Profiles read capability' });
     if (!ownerId) return send(res, 401, { ok: false, error: 'Owner authentication required for owner profile Works' });
   }
-  if (options.userId && options.userId !== process.env.CXL_OWNER_USER_ID) {
+  if (options.userId && options.userId !== ownerUserId) {
     return send(res, 501, { ok: false, error: 'Public creator filtering requires the Profiles read capability' });
   }
   const ownerScope = Boolean(ownerId && (!options.userId || options.userId === ownerId) && !options.publicOnly);

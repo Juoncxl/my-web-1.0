@@ -4,7 +4,9 @@ import handler from './google';
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ auth: { getUser: async (token: string) => token === 'owner-session'
     ? { data: { user: { id: 'owner-1' } }, error: null }
-    : { data: { user: null }, error: new Error('invalid token') } } })
+    : token === 'non-owner-session'
+      ? { data: { user: { id: 'creator-2' } }, error: null }
+      : { data: { user: null }, error: new Error('invalid token') } } })
 }));
 
 const makeAsset = (id: string, overrides: Record<string, unknown> = {}) => ({
@@ -48,6 +50,19 @@ describe('Vercel Google Works read proxy', () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
 
+  it('keeps anonymous public reads working when owner identity is not configured', async () => {
+    vi.stubEnv('CXL_OWNER_USER_ID', '');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [makeAsset('public')] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true }] });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['public']);
+    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.list');
+    expect(fetchMock.mock.calls[0][0]).toContain('/public/exec');
+  });
+
   it('uses the public detail endpoint for an explicit Asset ID', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: makeAsset('one') }) });
     vi.stubGlobal('fetch', fetchMock);
@@ -69,6 +84,29 @@ describe('Vercel Google Works read proxy', () => {
   it('refuses owner scope without a verified user token', async () => {
     const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1' }] });
     expect(result.statusCode).toBe(401);
+  });
+
+  it('rejects owner requests clearly when owner identity configuration is missing', async () => {
+    vi.stubEnv('CXL_OWNER_USER_ID', '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1' }] }, 'Bearer owner-session');
+
+    expect(result.statusCode).toBe(503);
+    expect(result.json.error).toContain('not configured');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['invalid-session', 'non-owner-session'])('rejects invalid or non-owner token %s', async token => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true }] }, `Bearer ${token}`);
+
+    expect(result.statusCode).toBe(401);
+    expect(result.json.error).toContain('Valid owner authentication');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not silently fake Profile-based public creator filtering', async () => {
