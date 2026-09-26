@@ -91,4 +91,15 @@ describe('Google Works fetch semantics', () => {
     expect(summaries.find(item => item.id === 'inline-image')?.icon).toEqual({ type: 'emoji', value: '✨' });
     expect(JSON.stringify(summaries)).not.toContain('base64,AA==');
   });
+  it('uses Unix milliseconds for valid updatedAt cache versions and omits invalid dates', () => {
+    const valid = work('valid-date', { visibility: 'public', isPublic: true,
+      updatedAt: '2026-01-01T00:00:00.000Z', icon: { type: 'image', value: 'media:icon-1' } });
+    const invalid = work('invalid-date', { visibility: 'public', isPublic: true,
+      updatedAt: 'not-a-date', icon: { type: 'image', value: 'media:icon-2' } });
+    const summaries = filterGoogleWorks([valid, invalid], { publicOnly: true, detail: 'summary' });
+    expect(summaries.find(item => item.id === 'valid-date')?.icon.value)
+      .toBe('/api/cxl/media?workId=valid-date&ref=media%3Aicon-1&v=1767225600000');
+    expect(summaries.find(item => item.id === 'invalid-date')?.icon.value)
+      .toBe('/api/cxl/media?workId=invalid-date&ref=media%3Aicon-2');
+  });
 });

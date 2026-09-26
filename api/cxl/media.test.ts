@@ -16,7 +16,7 @@ describe('Public Google icon media proxy', () => {
   it('returns an image through the Public GAS media.icon action without exposing upstream identifiers', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, data: { mimeType: 'image/png', base64: Buffer.from('icon-bytes').toString('base64') } }) });
     vi.stubGlobal('fetch', fetchMock);
-    const response = await invoke('/api/cxl/media?workId=asset_public-1&ref=media%3Aicon-1');
+    const response = await invoke('/api/cxl/media?workId=asset_public-1&ref=media%3Aicon-1&v=1767225600000');
     expect(response.statusCode).toBe(200);
     expect(response.headers['Content-Type']).toBe('image/png');
     expect(response.headers['X-Content-Type-Options']).toBe('nosniff');
@@ -25,6 +25,15 @@ describe('Public Google icon media proxy', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=media.icon');
     expect(fetchMock.mock.calls[0][0]).toContain('ref=media%3Aicon-1');
     expect(response.body.toString()).not.toContain('drive-file-id');
+  });
+
+  it('rejects non-numeric, overlong, or arbitrary media versions before calling GAS', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await invoke('/api/cxl/media?workId=asset_ok&ref=media%3Ax&v=2026-09-26T10%3A30%3A00.000Z')).statusCode).toBe(400);
+    expect((await invoke(`/api/cxl/media?workId=asset_ok&ref=media%3Ax&v=${'1'.repeat(17)}`)).statusCode).toBe(400);
+    expect((await invoke('/api/cxl/media?workId=asset_ok&ref=media%3Ax&v=not-a-version')).statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('accepts the stable cxl-media hash reference', async () => {

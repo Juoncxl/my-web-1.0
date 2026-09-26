@@ -47,7 +47,7 @@ export default async function handler(req: Request, res: Response) {
   if (!(/^media:[A-Za-z0-9_-]{1,128}$/.test(ref) || /^cxl-media:[a-f0-9]{64}$/.test(ref))) {
     return sendError(res, 400, 'Invalid icon reference');
   }
-  if (version && (version.length > 48 || !/^[A-Za-z0-9:._+-]+$/.test(version))) return sendError(res, 400, 'Invalid media version');
+  if (version && (version.length > 17 || !/^-?(?:0|[1-9]\d{0,15})$/.test(version))) return sendError(res, 400, 'Invalid media version');
 
   const endpoint = publicGasEndpoint(process.env.CXL_GAS_PUBLIC_URL);
   if (!endpoint) return sendError(res, 503, 'Public media is unavailable');

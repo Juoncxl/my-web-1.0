@@ -62,8 +62,11 @@ function toSummaryAsset(asset: Asset): Asset {
     : /^media:[A-Za-z0-9_-]{1,128}$/.test(iconValue) || /^cxl-media:[a-f0-9]{64}$/.test(iconValue)
       ? iconValue
       : '';
+  const parsedUpdatedAt = asset.updatedAt ? Date.parse(asset.updatedAt) : Number.NaN;
+  const cacheVersion = Number.isFinite(parsedUpdatedAt) ? String(parsedUpdatedAt) : undefined;
   const iconUrl = iconRef
-    ? `/api/cxl/media?${new URLSearchParams({ workId: asset.id, ref: iconRef, ...(asset.updatedAt ? { v: asset.updatedAt } : {}) }).toString()}`
+    ? `/api/cxl/media?${new URLSearchParams({ workId: asset.id, ref: iconRef,
+      ...(cacheVersion !== undefined ? { v: cacheVersion } : {}) }).toString()}`
     : '';
   const safeIcon = asset.icon?.type === 'image' && iconMedia?.signedUrl
     ? { ...asset.icon, value: iconMedia.signedUrl }
