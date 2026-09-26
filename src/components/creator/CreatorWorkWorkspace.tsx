@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { normalizeAssetVisibility } from '../../lib/assetVisibility';
-import { composerDraftKey, deleteComposerDraft, loadComposerDraft, saveComposerDraft } from '../../lib/composerDraftStore';
+import { clearWorkMutationRequestId, composerDraftKey, deleteComposerDraft, getOrCreateWorkMutationRequestId, loadComposerDraft, saveComposerDraft } from '../../lib/composerDraftStore';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
 import { CreatorContentCanvas, CreatorFocusEditor, type CreatorUiCodeView } from './CreatorContentCanvas';
 import { CreatorMediaCollection } from './CreatorMediaCollection';
@@ -196,7 +196,7 @@ export function areCreatorWorkDraftsEquivalent(left: CreatorWorkDraft, right: Cr
 interface CreatorWorkWorkspaceProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (draft: CreatorWorkDraft) => Promise<{ success: boolean; error?: string }>;
+  onSave: (draft: CreatorWorkDraft, context?: { requestId: string; expectedRevision?: number }) => Promise<{ success: boolean; error?: string }>;
   initialData?: Asset | null;
   creatorProfile?: User | null;
   folders?: Folder[];
@@ -555,8 +555,11 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
       return;
     }
     setIsSaving(true); setError('');
-    const result = await onSave(draftPreview);
+    const operation = initialData ? 'update' : 'create';
+    const requestId = draftStoreKey ? getOrCreateWorkMutationRequestId(draftStoreKey, operation, initialData?.revision) : crypto.randomUUID();
+    const result = await onSave(draftPreview, { requestId, expectedRevision: initialData?.revision });
     setIsSaving(false); if (!result.success) { setError(result.error || (initialData ? 'แก้ไขผลงานไม่สำเร็จ' : 'สร้างผลงานไม่สำเร็จ')); return; }
+    if (draftStoreKey) clearWorkMutationRequestId(draftStoreKey, operation, initialData?.revision);
     if (draftStoreKey) await deleteComposerDraft(draftStoreKey).catch(() => undefined);
     onClose();
   };
@@ -564,12 +567,16 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     if (!draftPersistenceReady || !draftStoreKey) { onClose(); return; }
     if (areCreatorWorkDraftsEquivalent(draftPreview, initialDraftRef.current)) {
       void deleteComposerDraft(draftStoreKey).catch(() => undefined);
+      clearWorkMutationRequestId(draftStoreKey, initialData ? 'update' : 'create', initialData?.revision);
       onClose();
       return;
     }
     const keep = window.confirm('ต้องการเก็บฉบับร่างนี้ไว้เพื่อกลับมาทำต่อหรือไม่?\n\nกด “ตกลง” เพื่อเก็บ หรือ “ยกเลิก” เพื่อทิ้ง');
     if (keep) void saveComposerDraft(draftStoreKey, draftPreview, initialData?.updatedAt).catch(() => undefined);
-    else void deleteComposerDraft(draftStoreKey);
+    else {
+      void deleteComposerDraft(draftStoreKey);
+      clearWorkMutationRequestId(draftStoreKey, initialData ? 'update' : 'create', initialData?.revision);
+    }
     onClose();
   };
 

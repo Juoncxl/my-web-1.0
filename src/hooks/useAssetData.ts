@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Asset, User } from '../types';
-import { cxlDataService, type FetchAssetsOptions } from '../data/cxlDataService';
+import { cxlDataService, type FetchAssetsOptions, type WorkCreateOptions, type WorkUpdateOptions } from '../data/cxlDataService';
 
 type ReportError = (message: string | null) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
@@ -101,14 +101,14 @@ export function useAssetData(
     void refreshAssets();
   }, [enabled, loadIdentityUserId, loadScopeKey, refreshAssets]);
 
-  const createAsset = useCallback(async (assetData: NewAssetData) => {
+  const createAsset = useCallback(async (assetData: NewAssetData, options?: WorkCreateOptions) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
     const result = await cxlDataService.works.create({
       ...assetData,
       userId: currentUser.id,
       authorName: currentUser.displayName,
       authorAvatar: currentUser.avatarUrl
-    });
+    }, options);
     if (result.data) setAssets(previous => [result.data!, ...previous]);
     return result;
   }, [currentUser]);
@@ -132,9 +132,9 @@ export function useAssetData(
     return detailedAsset;
   }, [currentUser?.id, reportError]);
 
-  const updateAsset = useCallback(async (id: string, updates: Partial<Asset>) => {
+  const updateAsset = useCallback(async (id: string, updates: Partial<Asset>, options?: WorkUpdateOptions) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
-    const result = await cxlDataService.works.update(id, updates);
+    const result = await cxlDataService.works.update(id, updates, options);
     if (result.data) setAssets(previous => previous.map(asset => asset.id === id ? result.data! : asset));
     return result;
   }, [currentUser]);

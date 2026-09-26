@@ -6,6 +6,29 @@ const DATABASE_VERSION = 1;
 const DRAFT_STORE = 'drafts';
 const BLOB_STORE = 'blobs';
 const LOCAL_BLOB_PREFIX = 'local-media:';
+const MUTATION_REQUEST_PREFIX = 'cxl-work-write-request:';
+
+function mutationRequestStorageKey(key: string, operation: 'create' | 'update', revision?: number): string {
+  return `${MUTATION_REQUEST_PREFIX}${operation}:${key}:${operation === 'update' ? revision ?? 'unknown' : 'new'}`;
+}
+
+/** Keep an ambiguous network retry tied to the same server idempotency key. */
+export function getOrCreateWorkMutationRequestId(key: string, operation: 'create' | 'update', revision?: number): string {
+  const storageKey = mutationRequestStorageKey(key, operation, revision);
+  try {
+    const existing = localStorage.getItem(storageKey);
+    if (existing) return existing;
+    const requestId = crypto.randomUUID();
+    localStorage.setItem(storageKey, requestId);
+    return requestId;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+export function clearWorkMutationRequestId(key: string, operation: 'create' | 'update', revision?: number): void {
+  try { localStorage.removeItem(mutationRequestStorageKey(key, operation, revision)); } catch { /* storage may be unavailable */ }
+}
 
 export interface StoredComposerDraft {
   key: string;

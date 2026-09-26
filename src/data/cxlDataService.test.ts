@@ -81,9 +81,41 @@ describe('CXL data service boundary', () => {
     expect(googleWorksOnly.settings.readCreatorSpace).toBe(supabaseDataAdapter.settings.readCreatorSpace);
   });
 
+  it('selects only metadata create/edit and Owner folder reads when the write flag is Google', async () => {
+    const createSpy = vi.spyOn(googleDataAdapter.works, 'create').mockResolvedValue({ data: null, error: 'google create' });
+    const supabaseCreateSpy = vi.spyOn(supabaseDataAdapter.works, 'create').mockResolvedValue({ data: null, error: 'supabase create' });
+    const updateSpy = vi.spyOn(googleDataAdapter.works, 'update').mockResolvedValue({ data: null, error: 'google update' });
+    const supabaseUpdateSpy = vi.spyOn(supabaseDataAdapter.works, 'update').mockResolvedValue({ data: null, error: 'supabase update' });
+    const folderSpy = vi.spyOn(googleDataAdapter.folders, 'fetch').mockResolvedValue({ data: [], error: null });
+    const service = createCxlDataService(undefined, undefined, 'google');
+    const payload = { userId: 'owner', authorName: 'Owner', title: 'Test', category: 'character', icon: { type: 'emoji' as const, value: '✨' }, content: '', isPublic: false, visibility: 'private' as const, status: 'draft' as const };
+    const requestId = '123e4567-e89b-42d3-a456-426614174000';
+
+    await service.works.create(payload, { requestId });
+    await service.works.create(payload);
+    await service.works.update('asset_test', { title: 'Updated' }, { requestId, expectedRevision: 1 });
+    await service.works.update('asset_test', { folderId: 'folder-1' });
+    await service.folders.fetch('owner');
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(supabaseCreateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(supabaseUpdateSpy).toHaveBeenCalledTimes(1);
+    expect(service.folders.fetch).toBe(googleDataAdapter.folders.fetch);
+    expect(service.folders.create).toBe(supabaseDataAdapter.folders.create);
+    expect(service.folders.update).toBe(supabaseDataAdapter.folders.update);
+    expect(service.folders.delete).toBe(supabaseDataAdapter.folders.delete);
+    expect(service.works.fetch).toBe(supabaseDataAdapter.works.fetch);
+    expect(service.media).toBe(supabaseDataAdapter.media);
+    createSpy.mockRestore(); supabaseCreateSpy.mockRestore(); updateSpy.mockRestore(); supabaseUpdateSpy.mockRestore(); folderSpy.mockRestore();
+  });
+
   it('keeps the application default on Supabase', () => {
-    expect(cxlDataService.works.fetch).toBe(supabaseDataAdapter.works.fetch);
-    expect(cxlDataService.works.create).toBe(supabaseDataAdapter.works.create);
+    const defaults = createCxlDataService(undefined, undefined, undefined);
+    expect(defaults.works.fetch).toBe(supabaseDataAdapter.works.fetch);
+    expect(defaults.works.create).toBe(supabaseDataAdapter.works.create);
+    expect(defaults.works.update).toBe(supabaseDataAdapter.works.update);
+    expect(defaults.folders.fetch).toBe(supabaseDataAdapter.folders.fetch);
   });
 
   it('preserves adapter errors without changing their result', async () => {

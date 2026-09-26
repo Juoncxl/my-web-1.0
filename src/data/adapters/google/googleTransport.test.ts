@@ -39,6 +39,17 @@ describe('Google server transport boundary', () => {
     });
   });
 
+  it('sends Owner write and folder requests with the current session token but no server secret', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, data: { data: null, error: null } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    await callGoogleBackend('works.create', [{ title: 'New' }, { requestId: '123e4567-e89b-42d3-a456-426614174000' }]);
+    await callGoogleBackend('works.update', ['asset_test', { title: 'Changed' }, { requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1 }]);
+    await callGoogleBackend('folders.fetch', ['owner-1']);
+    expect(fetchMock.mock.calls.map(call => JSON.parse(call[1].body).action)).toEqual(['works.create', 'works.update', 'folders.fetch']);
+    expect(fetchMock.mock.calls.every(call => call[1].headers.Authorization === 'Bearer user-session-token')).toBe(true);
+    expect(fetchMock.mock.calls.every(call => !call[1].body.includes('server-only-secret') && !call[1].body.includes('authorization'))).toBe(true);
+  });
+
   it('fails closed when browser fetch is unavailable', async () => {
     vi.stubGlobal('fetch', undefined);
     await expect(callGoogleBackend('works.fetch', [])).rejects.toBeInstanceOf(GoogleBackendUnavailableError);

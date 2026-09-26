@@ -15,6 +15,11 @@ type Operation = (...args: any[]) => any;
 const remote = <T extends Operation>(action: string): T =>
   ((...args: Parameters<T>) => callGoogleBackend<Awaited<ReturnType<T>>>(action, args)) as T;
 
+async function googleWriteResult<T>(action: string, args: unknown[]): Promise<{ data: T | null; error: string | null }> {
+  try { return await callGoogleBackend<{ data: T | null; error: string | null }>(action, args); }
+  catch (error) { return { data: null, error: error instanceof Error ? error.message : `Google ${action} failed` }; }
+}
+
 async function uploadGooglePrepared(prepared: Parameters<CxlDataService['media']['uploadPrepared']>[0]): Promise<Awaited<ReturnType<CxlDataService['media']['uploadPrepared']>>> {
   const pending = await Promise.all(prepared.pending.map(async item => {
     const bytes = new Uint8Array(await item.blob.arrayBuffer());
@@ -31,8 +36,8 @@ async function uploadGooglePrepared(prepared: Parameters<CxlDataService['media']
 export const googleDataAdapter = {
   works: {
     fetch: remote<CxlDataService['works']['fetch']>('works.fetch'),
-    create: remote<CxlDataService['works']['create']>('works.create'),
-    update: remote<CxlDataService['works']['update']>('works.update'),
+    create: ((asset, options) => googleWriteResult('works.create', [asset, options])) as CxlDataService['works']['create'],
+    update: ((id, updates, options) => googleWriteResult('works.update', [id, updates, options])) as CxlDataService['works']['update'],
     softDelete: remote<CxlDataService['works']['softDelete']>('works.softDelete'),
     restore: remote<CxlDataService['works']['restore']>('works.restore'),
     permanentDelete: remote<CxlDataService['works']['permanentDelete']>('works.permanentDelete'),

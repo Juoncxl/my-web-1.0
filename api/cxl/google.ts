@@ -8,6 +8,7 @@ type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
 const ALLOWED_OPTIONS = new Set(['userId','currentUserId','creatorSlug','assetId','category','folderId','search','includeDeleted','onlyDeleted','publicOnly','limit','detail']);
 const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','settings.readCreatorSpace']);
+const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch']);
 const GAS_TIMEOUT_MS = 30_000;
 
 function send(res: Response, status: number, body: unknown) {
@@ -77,6 +78,27 @@ function validPublicActionArgs(action: string, args: unknown[]): boolean {
     && /^cxlc_[a-f0-9]{32}$/i.test(args[0]);
   return false;
 }
+function validRequestId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
+}
+function validOwnerActionArgs(action: string, args: unknown[], ownerId: string): boolean {
+  if (action === 'folders.fetch') return args.length === 1 && (args[0] === undefined || args[0] === ownerId);
+  if (action === 'works.create') return args.length === 2 && record(args[0]) && record(args[1]) && validRequestId(args[1].requestId);
+  if (action === 'works.update') return args.length === 3 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0])
+    && record(args[1]) && record(args[2]) && validRequestId(args[2].requestId)
+    && Number.isInteger(args[2].expectedRevision) && Number(args[2].expectedRevision) >= 1;
+  return false;
+}
+function ownerErrorStatus(code: unknown): number {
+  if (code === 'REVISION_CONFLICT' || code === 'PUBLIC_SYNC_PENDING' || code === 'IDEMPOTENCY_KEY_REUSED' || code === 'CREATOR_MAPPING_CONFLICT') return 409;
+  if (code === 'WORK_NOT_FOUND') return 404;
+  if (code === 'WORK_NOT_OWNED') return 403;
+  if (code === 'UNSUPPORTED_MEDIA_MUTATION' || code === 'UNSUPPORTED_COLLAB_DRAFT') return 422;
+  if (code === 'CREATOR_MAPPING_MISSING' || code === 'CREATOR_MAPPING_AMBIGUOUS' || code === 'FOLDER_SCHEMA_INVALID') return 503;
+  if (code === 'OWNER_REQUIRED') return 401;
+  if (code === 'INVALID_FOLDER' || code === 'INVALID_WORK' || code === 'INVALID_REQUEST_ID' || code === 'REVISION_REQUIRED') return 400;
+  return 502;
+}
 function validateAssetList(value: unknown): Asset[] {
   if (!Array.isArray(value) || value.some(item => !record(item)
     || typeof item.id !== 'string' || typeof item.title !== 'string' || typeof item.category !== 'string'
@@ -95,7 +117,7 @@ export default async function handler(req: Request, res: Response) {
   if (!record(body) || typeof body.action !== 'string' || !Array.isArray(body.args))
     return send(res, 400, { ok: false, error: 'Invalid public read request' });
   const action = body.action;
-  if (!PUBLIC_ACTIONS.has(action) && action !== 'works.fetch')
+  if (!PUBLIC_ACTIONS.has(action) && !OWNER_ACTIONS.has(action) && action !== 'works.fetch')
     return send(res, 400, { ok: false, error: 'Only supported public reads are available through this endpoint' });
   if (PUBLIC_ACTIONS.has(action)) {
     if (!validPublicActionArgs(action, body.args)) return send(res, 400, { ok: false, error: `Invalid ${action} request` });
@@ -109,6 +131,37 @@ export default async function handler(req: Request, res: Response) {
       return send(res, 200, { ok: true, data: await publicGasData(url) });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Google public read failed';
+      const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
+      return send(res, status, { ok: false, error: message.slice(0, 300) });
+    }
+  }
+  if (OWNER_ACTIONS.has(action)) {
+    const authHeader = req.headers.authorization || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const ownerUserId = process.env.CXL_OWNER_USER_ID?.trim() || '';
+    if (!ownerUserId || !process.env.SUPABASE_URL?.trim() || !process.env.SUPABASE_ANON_KEY?.trim())
+      return send(res, 503, { ok: false, error: 'Owner authentication is not configured on the server' });
+    if (!bearer) return send(res, 401, { ok: false, error: 'Owner authentication required' });
+    const authenticatedOwnerId = await verifyOwner(bearer);
+    if (!authenticatedOwnerId) return send(res, 401, { ok: false, error: 'Valid owner authentication required' });
+    if (authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
+    if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId))
+      return send(res, 400, { ok: false, error: `Invalid ${action} request` });
+    const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
+    const secret = process.env.CXL_API_SHARED_SECRET;
+    if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
+    try {
+      const raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: body.args }) });
+      if (!record(raw) || raw.ok !== true) {
+        const code = record(raw) ? raw.code : undefined;
+        const message = record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed';
+        return send(res, ownerErrorStatus(code), { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}),
+          ...(record(raw) && raw.privateSaved === true ? { privateSaved: true, workId: typeof raw.workId === 'string' ? raw.workId : undefined } : {}) });
+      }
+      return send(res, 200, { ok: true, data: raw.data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google owner request failed';
       const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
       return send(res, status, { ok: false, error: message.slice(0, 300) });
     }

@@ -34,7 +34,7 @@ describe('Vercel Google Works read proxy', () => {
 
   it('rejects methods, unknown actions, and invalid options before proxying', async () => {
     expect((await invoke({}, undefined, 'GET')).statusCode).toBe(405);
-    expect((await invoke({ action: 'works.create', args: [] })).statusCode).toBe(400);
+    expect((await invoke({ action: 'works.create', args: [] }, 'Bearer owner-session')).statusCode).toBe(400);
     expect((await invoke({ action: 'works.fetch', args: [{ arbitrary: true }] })).statusCode).toBe(400);
   });
 
@@ -84,6 +84,40 @@ describe('Vercel Google Works read proxy', () => {
   it('refuses owner scope without a verified user token', async () => {
     const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1' }] });
     expect(result.statusCode).toBe(401);
+  });
+
+  it('allows only verified Owner create/update/folder reads and injects the shared secret server-side', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: { id: 'asset_created' }, error: null } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const asset = { title: 'New Work', category: 'character', tags: [], visibility: 'private', isPublic: false, icon: { type: 'emoji', value: '✨' }, content: '' };
+    const requestId = '123e4567-e89b-42d3-a456-426614174000';
+    const create = await invoke({ action: 'works.create', args: [asset, { requestId }] }, 'Bearer owner-session');
+    const update = await invoke({ action: 'works.update', args: ['asset_created', { title: 'Changed' }, { requestId, expectedRevision: 1 }] }, 'Bearer owner-session');
+    const folders = await invoke({ action: 'folders.fetch', args: ['owner-1'] }, 'Bearer owner-session');
+    expect([create.statusCode, update.statusCode, folders.statusCode]).toEqual([200, 200, 200]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'works.create' });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'works.update' });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'folders.fetch' });
+  });
+
+  it('rejects unauthenticated, non-owner, malformed, and out-of-scope mutation requests before GAS', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const asset = { title: 'New', category: 'character' };
+    expect((await invoke({ action: 'works.create', args: [asset, { requestId: '123e4567-e89b-42d3-a456-426614174000' }] })).statusCode).toBe(401);
+    expect((await invoke({ action: 'works.create', args: [asset, { requestId: '123e4567-e89b-42d3-a456-426614174000' }] }, 'Bearer non-owner-session')).statusCode).toBe(401);
+    expect((await invoke({ action: 'works.update', args: ['asset_x', { title: 'X' }, { requestId: 'bad', expectedRevision: 0 }] }, 'Bearer owner-session')).statusCode).toBe(400);
+    expect((await invoke({ action: 'works.permanentDelete', args: ['asset_x'] }, 'Bearer owner-session')).statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces private-saved/public-sync-pending without inviting a duplicate create', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: false,
+      code: 'PUBLIC_SYNC_PENDING', error: 'Public projection sync is pending', privateSaved: true, workId: 'asset_created' }) }));
+    const result = await invoke({ action: 'works.create', args: [{ title: 'New', category: 'character' }, { requestId: '123e4567-e89b-42d3-a456-426614174000' }] }, 'Bearer owner-session');
+    expect(result.statusCode).toBe(409);
+    expect(result.json).toMatchObject({ code: 'PUBLIC_SYNC_PENDING', privateSaved: true, workId: 'asset_created' });
   });
 
   it('rejects owner requests clearly when owner identity configuration is missing', async () => {

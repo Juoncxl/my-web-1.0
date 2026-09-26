@@ -246,7 +246,7 @@ function MainApp() {
     openCreateEditor();
   }, [authLoading, currentUser, openAuthModal, openCreateEditor]);
 
-  const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft) => {
+  const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft, context?: { requestId: string; expectedRevision?: number }) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนบันทึกผลงาน' };
     const serialized = serializeCreatorWorkDraft({
       ...draft,
@@ -256,7 +256,7 @@ function MainApp() {
     if (editingAssetId) {
       const result = await updateAsset(editingAssetId, {
         ...serialized
-      });
+      }, context ? { requestId: context.requestId, expectedRevision: context.expectedRevision } : undefined);
       if (result.data) {
         return { success: true };
       }
@@ -272,7 +272,7 @@ function MainApp() {
       forkedFromAuthor: null,
       linkedAssetIds: [],
       versions: []
-    });
+    }, context ? { requestId: context.requestId } : undefined);
     if (result.data) {
       navigate(getCanonicalProfilePath(currentUser, '?tab=works'));
       return { success: true };

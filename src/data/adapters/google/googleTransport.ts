@@ -14,7 +14,7 @@ export async function callGoogleBackend<T>(action: string, args: unknown[]): Pro
   const endpoint = '/api/cxl/google';
   if (typeof fetch !== 'function') throw new GoogleBackendUnavailableError();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
-  if (action === 'works.fetch') {
+  if (['works.fetch', 'works.create', 'works.update', 'folders.fetch'].includes(action)) {
     const client = getSupabaseClient();
     const { data } = client ? await client.auth.getSession() : { data: { session: null } };
     if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
