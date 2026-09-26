@@ -12,7 +12,7 @@ export function resolveWorkCreator(asset: Pick<Asset, 'authorName' | 'authorAvat
   userId?: string | null;
   publicCreatorId?: string | null;
 }, profile?: User | null): WorkCreatorPresentation {
-  if (profile && profile.id === resolvePublicCreatorKey(asset)) {
+  if (profile && (profile.id === resolvePublicCreatorKey(asset) || profile.id === asset.userId?.trim())) {
     return { displayName: profile.displayName, username: profile.username, avatarUrl: profile.avatarUrl };
   }
   return { displayName: asset.authorName, avatarUrl: asset.authorAvatar };

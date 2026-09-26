@@ -22,4 +22,15 @@ describe('work creator presentation', () => {
       id: 'cxlc_0123456789abcdef0123456789abcdef', displayName: 'Google Creator', username: 'juoncxl', avatarUrl: 'public-avatar', createdAt: ''
     })).toEqual({ displayName: 'Google Creator', username: 'juoncxl', avatarUrl: 'public-avatar' });
   });
+
+  it('keeps the owner profile match on internal userId when both identity keys exist', () => {
+    expect(resolveWorkCreator({
+      userId: 'owner-1',
+      publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef',
+      authorName: 'Snapshot Name',
+      authorAvatar: 'snapshot-avatar'
+    }, {
+      id: 'owner-1', displayName: 'Owner Profile', username: 'juoncxl', avatarUrl: 'owner-avatar', createdAt: ''
+    })).toEqual({ displayName: 'Owner Profile', username: 'juoncxl', avatarUrl: 'owner-avatar' });
+  });
 });
