@@ -4,6 +4,7 @@ import { cxlDataService } from '../data/cxlDataService';
 import { isPublicFeedAsset } from '../lib/accessPolicy';
 import { isPublicFeedVisibility } from '../lib/assetVisibility';
 import { isGenuineProfileNotFound } from '../lib/profileIdentity';
+import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 
 export interface CreatorSpaceSources {
   assets: Asset[];
@@ -25,8 +26,14 @@ export interface CreatorSpaceData {
 }
 
 export function selectCreatorAssets(source: Asset[], profileId: string | undefined, isOwner: boolean): Asset[] {
-  if (!profileId) return [];
-  return source.filter(asset => asset.userId === profileId && (isOwner || isPublicFeedAsset(asset)));
+  const normalizedProfileId = profileId?.trim();
+  if (!normalizedProfileId) return [];
+  return source.filter(asset => {
+    const matchesCreator = isOwner
+      ? asset.userId === normalizedProfileId
+      : resolvePublicCreatorKey(asset) === normalizedProfileId;
+    return matchesCreator && (isOwner || isPublicFeedAsset(asset));
+  });
 }
 
 export function selectCreatorFolders(source: Folder[], profileId: string | undefined, isOwner: boolean): Folder[] {

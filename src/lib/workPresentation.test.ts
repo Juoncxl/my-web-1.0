@@ -12,4 +12,14 @@ describe('work creator presentation', () => {
   it('falls back to legacy snapshot when the current Profile is unavailable', () => {
     expect(resolveWorkCreator({ userId: 'owner-1', authorName: 'Legacy', authorAvatar: 'legacy-avatar' })).toEqual({ displayName: 'Legacy', avatarUrl: 'legacy-avatar' });
   });
+
+  it('uses an opaque public creator ID when a public Work has no internal user ID', () => {
+    expect(resolveWorkCreator({
+      publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef',
+      authorName: 'Snapshot Name',
+      authorAvatar: 'snapshot-avatar'
+    }, {
+      id: 'cxlc_0123456789abcdef0123456789abcdef', displayName: 'Google Creator', username: 'juoncxl', avatarUrl: 'public-avatar', createdAt: ''
+    })).toEqual({ displayName: 'Google Creator', username: 'juoncxl', avatarUrl: 'public-avatar' });
+  });
 });

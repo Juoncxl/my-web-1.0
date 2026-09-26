@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Asset, User } from '../types';
 import { cxlDataService } from '../data/cxlDataService';
+import { collectPublicCreatorKeys } from '../lib/publicCreatorIdentity';
 
 /** Keeps list-card identity current without restoring legacy avatar blobs to Work queries. */
 export function usePublicCreatorProfiles(assets: readonly Asset[], currentUser: User | null): Map<string, User> {
   const creatorIds = useMemo(
-    () => [...new Set(assets.map(asset => asset.userId.trim()).filter(Boolean))].sort(),
+    () => collectPublicCreatorKeys(assets),
     [assets]
   );
   const creatorIdsKey = creatorIds.join('\u0001');

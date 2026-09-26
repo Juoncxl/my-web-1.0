@@ -26,6 +26,24 @@ describe('Creator Space shared data selection', () => {
     expect(selectCreatorAssets([...source, deletedPublic], 'owner-1', false)).toEqual([publicWork]);
   });
 
+  it('matches Google public Works by opaque creator ID while keeping owner matching on user ID', () => {
+    const googleWork = makeAsset('google-public', '', 'public');
+    Object.assign(googleWork, { userId: undefined, publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef' });
+    const ownerWork = makeAsset('owner-private', 'owner-1', 'private');
+    Object.assign(ownerWork, { publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef' });
+
+    expect(selectCreatorAssets([googleWork], 'cxlc_0123456789abcdef0123456789abcdef', false)).toEqual([googleWork]);
+    expect(selectCreatorAssets([ownerWork], 'owner-1', true)).toEqual([ownerWork]);
+    expect(selectCreatorAssets([ownerWork], 'cxlc_0123456789abcdef0123456789abcdef', true)).toEqual([]);
+  });
+
+  it('skips public Works without any creator identity without throwing', () => {
+    const unknownWork = makeAsset('unknown', '', 'public');
+    Object.assign(unknownWork, { userId: undefined, publicCreatorId: undefined });
+
+    expect(selectCreatorAssets([unknownWork], 'cxlc_0123456789abcdef0123456789abcdef', false)).toEqual([]);
+  });
+
   it('exposes folders only to the matching owner from the shared folder source', () => {
     const now = '2026-01-01T00:00:00.000Z';
     const ownFolder: Folder = { id: 'folder-1', userId: 'owner-1', name: 'Own', createdAt: now, updatedAt: now };

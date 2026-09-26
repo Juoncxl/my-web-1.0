@@ -38,6 +38,7 @@ import { getParticipantContentCopy, getParticipantTagCopy } from '../lib/collabo
 import { copyPlainText, createGalleryImageFile, createGalleryImageFilename, createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, resolveWorkDetailGalleryImages, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
 import { cxlDataService } from '../data/cxlDataService';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
+import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
 
@@ -226,7 +227,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   if (!canRender || !asset) return null;
 
-  const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(asset.userId) || null;
+  const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(resolvePublicCreatorKey(asset)) || null;
   const creator = resolveWorkCreator(asset, canonicalCreatorProfile);
   const requestedCover = coverImage || (coverImageSelected ? asset.previewImage || '' : '');
   const galleryImages = resolveWorkDetailGalleryImages(asset, requestedCover);
