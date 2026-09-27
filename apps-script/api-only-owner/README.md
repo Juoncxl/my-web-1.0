@@ -4,7 +4,7 @@ This project is a separate server-to-server endpoint for Vercel. Keep the existi
 
 ## Exposed surface
 
-- `doPost`: accepts only `works.fetch`, `folders.fetch`, `works.create`, and `works.update` after shared-secret and configured Owner identity checks.
+- `doPost`: accepts only the Works/folder contracts and isolated `media.poc.*` actions after shared-secret and configured Owner identity checks.
 - `doGet`: returns a JSON `Method not allowed` envelope. It does not serve HTML.
 - Every helper function ends in `_`, so it is not callable through `google.script.run`.
 
@@ -25,8 +25,24 @@ Set these in **Project Settings → Script Properties** for this API-only projec
 | `PRIVATE_ID` | Existing Drive folder holding canonical full Work JSON revisions. |
 | `PUBLIC_ID` | Existing Drive folder holding sanitized public projection JSON. |
 | `INCOMING_ID` | Existing incoming folder containing `folders.jsonl`, used only by Owner `folders.fetch`. |
+| `CXL_MEDIA_FOLDER_ID` | Canonical Work-media binary destination for the isolated GO 7A.2 Preview proof-of-concept. Keep it private; use a new empty test folder during this POC, never an existing Owner Work/media folder. |
+| `CXL_MEDIA_STAGING_FOLDER_ID` | Separate private folder for temporary GO 7A.2 upload chunks. It must not be the canonical POC media folder or an existing Work folder. |
 
-Do not copy `ROOT_ID` or `MEDIA_ID`; this source does not use them. Existing media references are read from canonical Work JSON, and public/private transitions may update sharing on those referenced files. This source does not create workspaces, import packages, upload media, export backups, or create Drive resources.
+This API-only project deliberately uses `CXL_MEDIA_FOLDER_ID` and `CXL_MEDIA_STAGING_FOLDER_ID` for the isolated POC; it does not alias either value from legacy Owner `MEDIA_ID` or Public project `MEDIA_FOLDER_ID`. Do not copy `ROOT_ID` or `MEDIA_ID` for this API-only bridge. Existing media references are read from canonical Work JSON, and public/private Work transitions may update sharing on those referenced files. The `CXL_MEDIA_*` folders are used only by the gated GO 7A.2 POC; they are never used to migrate or change existing Work media. The source does not create Drive resources.
+
+## GO 7A.2 isolated media proof-of-concept
+
+This branch adds source support only. The route remains unavailable unless the runtime is a Vercel Preview and the server-only/non-public switch `CXL_MEDIA_POC_ENABLED` is manually set to `1`. No environment has been changed by this source update. The POC accepts only standalone test uploads up to 10 MiB, split into fixed 2 MiB-or-smaller chunks. It generates test Work/media references itself; it does not attach files to a real CXL Work or call the normal Work editor/write path.
+
+Before a live POC can run, an administrator must create or select two **new, empty, private and separate** Drive folders and set their IDs as Script Properties `CXL_MEDIA_FOLDER_ID` and `CXL_MEDIA_STAGING_FOLDER_ID` in the API-only Apps Script project. Do not point either property at existing Owner/Public media folders. Do not send the IDs in chat or add them to source control. The source checks that both folders are private and rejects them if they are the same folder. If either folder is missing or not private, stop before attempting an upload.
+
+The POC uses these isolated actions: Owner-authenticated `media.poc.begin`, `media.poc.chunk`, `media.poc.finalize`, `media.poc.setPublic`, `media.poc.ownerChunk`, and `media.poc.cleanup`; anonymous `media.poc.publicChunk` is permitted only after the association check. Private delivery requires the Vercel Owner session. The anonymous public test delivery is available only while the generated synthetic test association is active and an authenticated Owner has explicitly marked it public; turning it private makes the next anonymous request fail. Canonical POC files remain private in Drive in both states; anonymous bytes are delivered only through the server proxy after the POC association check. Neither route exposes Drive IDs, file paths, Apps Script URLs, or shared secrets.
+
+Chunks are accepted out of order, checked for exact size and SHA-256, and idempotent for identical retries; a retry with different bytes is rejected. Finalization requires every chunk, validates total size/checksum and MIME against the binary signature, writes one private canonical POC file, and removes that upload's staging chunks. Abandoned sessions expire after 24 hours. The authenticated cleanup action handles at most five expired sessions per call and only removes exact POC chunk filenames from the staging folder; it never scans or deletes canonical files or Work JSON. There is no trigger.
+
+The Owner-private and anonymous-public Vercel reads request one byte range at a time from the private canonical Drive file. GAS uses the execution account's OAuth token for Drive `alt=media` range reads and returns only that range as Base64; Vercel validates its checksum and writes decoded bytes to the Node response with backpressure. It does not send a single full-file Base64 JSON response through Vercel. If Drive returns a full `200` body instead of `206`, GAS verifies the full size before slicing; the live Preview run must confirm the actual response mode, latency, and memory/time use. Apps Script may request its external-request OAuth permission on first authorization. Full 10 MiB behavior and end-to-end streaming still require live Preview validation after the isolated folders and Preview switch are configured. If the 10 MiB round trip is incomplete or unreliable, stop; do not reduce the supported limit or attach this path to real Works.
+
+Preview timing contains only the allowlisted action/phase labels and numeric durations. It does not contain IDs, file names, URLs, credentials, request bodies, or image bytes.
 
 ## Resource access
 

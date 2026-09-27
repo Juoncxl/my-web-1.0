@@ -13,10 +13,18 @@ var OWNER_SEARCH_MAX_QUERY_CHARS_ = 256;
 var OWNER_SEARCH_OVERLAP_CHARS_ = OWNER_SEARCH_MAX_QUERY_CHARS_ - 1;
 var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','icon','content','contentBlocks','uiCodeSnippet','previewImage','previewImages','media','folderId','isPublic','visibility','status','tags','createdAt','updatedAt','deletedAt','likesCount','forkedFromAuthor','versions'];
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
-var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update'];
+var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update',
+  'media.poc.begin','media.poc.chunk','media.poc.finalize','media.poc.setPublic',
+  'media.poc.ownerChunk','media.poc.publicChunk','media.poc.cleanup'];
 var API_MAX_POST_CHARS_ = 5000000;
-var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read'];
+var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','total'];
 var API_TIMING_CONTEXT_ = null;
+var MEDIA_POC_CHUNK_BYTES_ = 2 * 1024 * 1024;
+var MEDIA_POC_MAX_BYTES_ = 10 * 1024 * 1024;
+var MEDIA_POC_MAX_CLEANUP_SESSIONS_ = 5;
+var MEDIA_POC_SESSION_PREFIX_ = 'CXL_MEDIA_POC_SESSION_';
+var MEDIA_POC_MANIFEST_PREFIX_ = 'CXL_MEDIA_POC_MEDIA_';
+var MEDIA_POC_ALLOWED_MIME_ = ['image/jpeg','image/png','image/webp','image/gif'];
 
 function doGet() {
   return apiJson_({ok:false,error:'Method not allowed',code:'METHOD_NOT_ALLOWED',httpStatus:405});
@@ -59,6 +67,8 @@ function doPost(e) {
       return apiJson_({ok:true,data:saveCxlWorkApi_('create',args[0],args[1],configuredOwner)});
     if(body.action==='works.update'&&args.length===3)
       return apiJson_({ok:true,data:saveCxlWorkApi_('update',{id:args[0],updates:args[1]},args[2],configuredOwner)});
+    if(body.action.indexOf('media.poc.')===0)
+      return apiJson_({ok:true,data:mediaPocDispatch_(body.action,args,configuredOwner)});
     return apiJson_({ok:false,error:'Invalid action arguments',code:'INVALID_REQUEST',httpStatus:400});
   } catch(error) {
     return apiJson_({ok:false,error:String(error&&error.message||error),code:error&&error.apiCode||'OWNER_API_ERROR',
@@ -89,9 +99,221 @@ function ownerTimingPhase_(phase,durationMs) {
 
 function apiFail_(code,message) { var error=new Error(message);error.apiCode=code;throw error; }
 
+function mediaPocDispatch_(action,args,ownerUserId) {
+  var operation=function(){
+    if(action==='media.poc.begin'&&args.length===1)return mediaPocBegin_(args[0],ownerUserId);
+    if(action==='media.poc.chunk'&&args.length===1)return mediaPocChunk_(args[0]);
+    if(action==='media.poc.finalize'&&args.length===1)return mediaPocFinalize_(args[0]);
+    if(action==='media.poc.setPublic'&&args.length===1)return mediaPocSetPublic_(args[0],ownerUserId);
+    if(action==='media.poc.ownerChunk'&&args.length===1)return mediaPocReadChunk_(args[0],ownerUserId,false);
+    if(action==='media.poc.publicChunk'&&args.length===1)return mediaPocReadChunk_(args[0],ownerUserId,true);
+    if(action==='media.poc.cleanup'&&args.length===0)return mediaPocCleanup_();
+    apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media proof-of-concept request');
+  };
+  if(action==='media.poc.ownerChunk'||action==='media.poc.publicChunk')return operation();
+  var lock=LockService.getScriptLock();lock.waitLock(30000);
+  try{return operation();}finally{lock.releaseLock();}
+}
+
+function mediaPocUuid_(value) { return typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value); }
+function mediaPocHex_(bytes) { return bytes.map(function(value){var byte=(Number(value)+256)%256;return ('0'+byte.toString(16)).slice(-2);}).join(''); }
+function mediaPocSha256_(bytes) { return mediaPocHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,bytes)); }
+function mediaPocProps_() { return props_(); }
+function mediaPocSessionKey_(uploadId) { return MEDIA_POC_SESSION_PREFIX_+uploadId; }
+function mediaPocManifestKey_(mediaId) { return MEDIA_POC_MANIFEST_PREFIX_+mediaId; }
+function mediaPocReadJson_(key) {
+  var raw=mediaPocProps_().getProperty(key);if(!raw)return null;
+  try{return JSON.parse(raw);}catch(_error){apiFail_('MEDIA_POC_STATE_INVALID','Isolated media test state is invalid');}
+}
+function mediaPocStoreJson_(key,value) { mediaPocProps_().setProperty(key,JSON.stringify(value)); }
+function mediaPocMimeExtension_(mime) { return {'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif'}[mime]||''; }
+function mediaPocExpectedMime_(bytes) {
+  if(bytes.length>=3&&(Number(bytes[0])+256)%256===0xff&&(Number(bytes[1])+256)%256===0xd8&&(Number(bytes[2])+256)%256===0xff)return 'image/jpeg';
+  if(bytes.length>=8&&mediaPocHex_(bytes.slice(0,8))==='89504e470d0a1a0a')return 'image/png';
+  if(bytes.length>=6&&String.fromCharCode.apply(null,bytes.slice(0,6))==='GIF87a'||bytes.length>=6&&String.fromCharCode.apply(null,bytes.slice(0,6))==='GIF89a')return 'image/gif';
+  if(bytes.length>=12&&String.fromCharCode.apply(null,bytes.slice(0,4))==='RIFF'&&String.fromCharCode.apply(null,bytes.slice(8,12))==='WEBP')return 'image/webp';
+  return '';
+}
+function mediaPocPrivateFolder_(propertyName) {
+  var id=mediaPocProps_().getProperty(propertyName)||'';
+  if(!id)apiFail_('MEDIA_POC_NOT_CONFIGURED','Isolated media test folders are not configured');
+  var folder;
+  try{folder=DriveApp.getFolderById(id);}catch(_error){apiFail_('MEDIA_POC_NOT_CONFIGURED','Isolated media test folders are not accessible');}
+  if(!folder||typeof folder.getSharingAccess!=='function'||folder.getSharingAccess()!==DriveApp.Access.PRIVATE)
+    apiFail_('MEDIA_POC_FOLDER_NOT_PRIVATE','Isolated media folders must be private');
+  return folder;
+}
+function mediaPocSession_(uploadId) {
+  if(!mediaPocUuid_(uploadId))apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media test request');
+  var session=mediaPocReadJson_(mediaPocSessionKey_(uploadId));
+  if(!session)apiFail_('MEDIA_POC_SESSION_NOT_FOUND','Isolated media upload session was not found');
+  if(Number(session.expiresAt)<=Date.now())apiFail_('MEDIA_POC_SESSION_EXPIRED','Isolated media upload session expired');
+  return session;
+}
+function mediaPocPublicResult_(session,manifest) {
+  return {uploadId:session.uploadId,workNonce:session.workNonce,workId:session.workId,mediaId:session.mediaId,ref:'media:'+session.mediaId,
+    mimeType:session.mimeType,size:session.totalFileSize,sha256:session.sha256,totalChunks:session.totalChunks,
+    state:manifest&&manifest.isPublic?'public':'private'};
+}
+function mediaPocBegin_(input,ownerUserId) {
+  var started=Date.now();
+  if(!input||typeof input!=='object'||Array.isArray(input)||!mediaPocUuid_(input.uploadId)||!mediaPocUuid_(input.mediaId)
+    ||!mediaPocUuid_(input.workNonce)||!Number.isInteger(input.totalFileSize)||input.totalFileSize<1||input.totalFileSize>MEDIA_POC_MAX_BYTES_
+    ||input.rawChunkSize!==MEDIA_POC_CHUNK_BYTES_||!Number.isInteger(input.totalChunks)
+    ||input.totalChunks!==Math.ceil(input.totalFileSize/MEDIA_POC_CHUNK_BYTES_)||input.totalChunks<1||input.totalChunks>5
+    ||MEDIA_POC_ALLOWED_MIME_.indexOf(input.mimeType)<0||typeof input.sha256!=='string'||!/^[a-f0-9]{64}$/i.test(input.sha256))
+    apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media upload metadata');
+  var canonicalFolder=mediaPocPrivateFolder_('CXL_MEDIA_FOLDER_ID'),stagingFolder=mediaPocPrivateFolder_('CXL_MEDIA_STAGING_FOLDER_ID');
+  if(String(canonicalFolder.getId())===String(stagingFolder.getId()))apiFail_('MEDIA_POC_FOLDER_NOT_PRIVATE','Isolated media folders must be separate');
+  var workId='asset_media_poc_'+input.workNonce,sessionKey=mediaPocSessionKey_(input.uploadId),old=mediaPocReadJson_(sessionKey);
+  var expected={uploadId:input.uploadId,mediaId:input.mediaId,workNonce:input.workNonce,workId:workId,totalFileSize:input.totalFileSize,
+    rawChunkSize:MEDIA_POC_CHUNK_BYTES_,totalChunks:input.totalChunks,mimeType:input.mimeType,sha256:input.sha256.toLowerCase(),
+    ownerUserId:ownerUserId,expiresAt:Date.now()+24*60*60*1000,status:'uploading'};
+  if(old){
+    var keys=['uploadId','mediaId','workNonce','workId','totalFileSize','rawChunkSize','totalChunks','mimeType','sha256','ownerUserId'];
+    if(keys.some(function(key){return String(old[key])!==String(expected[key]);}))apiFail_('MEDIA_POC_IDEMPOTENCY_CONFLICT','Upload identifier is already used for different test data');
+    expected=old;
+  } else {
+    if(mediaPocReadJson_(mediaPocManifestKey_(input.mediaId)))apiFail_('MEDIA_POC_IDEMPOTENCY_CONFLICT','Test media identifier is already in use');
+    mediaPocStoreJson_(sessionKey,expected);
+  }
+  ownerTimingPhase_('chunk_receive',Date.now()-started);
+  return mediaPocPublicResult_(expected,mediaPocReadJson_(mediaPocManifestKey_(expected.mediaId)));
+}
+function mediaPocBase64Bytes_(encoded) {
+  if(typeof encoded!=='string'||!encoded.length||encoded.length>4*Math.ceil(MEDIA_POC_CHUNK_BYTES_/3)
+    ||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))
+    apiFail_('INVALID_MEDIA_POC_CHUNK','Invalid isolated media chunk');
+  var bytes;try{bytes=Utilities.base64Decode(encoded);}catch(_error){apiFail_('INVALID_MEDIA_POC_CHUNK','Invalid isolated media chunk');}
+  if(Utilities.base64Encode(bytes)!==encoded)apiFail_('INVALID_MEDIA_POC_CHUNK','Invalid isolated media chunk');
+  return bytes;
+}
+function mediaPocChunkName_(uploadId,index) { return 'cxl-media-poc-chunk-'+uploadId+'-'+('0'+index).slice(-2)+'.bin'; }
+function mediaPocUniqueFile_(folder,name) {
+  var files=folder.getFilesByName(name),found=[];while(files.hasNext())found.push(files.next());
+  if(found.length>1)apiFail_('MEDIA_POC_DUPLICATE_FILE','Isolated media storage contains duplicate test files');
+  return found[0]||null;
+}
+function mediaPocChunk_(input) {
+  var receiveStarted=Date.now();
+  if(!input||typeof input!=='object'||Array.isArray(input)||!Number.isInteger(input.chunkIndex))apiFail_('INVALID_MEDIA_POC_CHUNK','Invalid isolated media chunk');
+  var session=mediaPocSession_(input.uploadId);
+  if(session.status!=='uploading')apiFail_('MEDIA_POC_SESSION_CLOSED','Isolated media upload session is closed');
+  if(input.chunkIndex<0||input.chunkIndex>=session.totalChunks||typeof input.sha256!=='string'||!/^[a-f0-9]{64}$/i.test(input.sha256))apiFail_('INVALID_MEDIA_POC_CHUNK','Invalid isolated media chunk');
+  var bytes=mediaPocBase64Bytes_(input.base64),expectedSize=Math.min(session.rawChunkSize,session.totalFileSize-input.chunkIndex*session.rawChunkSize);
+  if(bytes.length!==expectedSize||mediaPocSha256_(bytes)!==input.sha256.toLowerCase())apiFail_('MEDIA_POC_CHUNK_CHECKSUM','Isolated media chunk checksum or size did not match');
+  ownerTimingPhase_('chunk_receive',Date.now()-receiveStarted);var writeStarted=Date.now(),folder=mediaPocPrivateFolder_('CXL_MEDIA_STAGING_FOLDER_ID');
+  var name=mediaPocChunkName_(session.uploadId,input.chunkIndex),existing=mediaPocUniqueFile_(folder,name),chunkHash=mediaPocSha256_(bytes);
+  if(existing){var saved=existing.getBlob().getBytes();if(saved.length!==bytes.length||mediaPocSha256_(saved)!==chunkHash)apiFail_('MEDIA_POC_CHUNK_CONFLICT','A different chunk already exists for this upload position');}
+  else {
+    var blob=Utilities.newBlob(bytes,'application/octet-stream',name),file=folder.createFile(blob);
+    file.setSharing(DriveApp.Access.PRIVATE,DriveApp.Permission.VIEW);
+    if(file.getSharingAccess()!==DriveApp.Access.PRIVATE)apiFail_('MEDIA_POC_FOLDER_NOT_PRIVATE','Staged media chunk is not private');
+  }
+  ownerTimingPhase_('chunk_persist',Date.now()-writeStarted);
+  return {uploadId:session.uploadId,chunkIndex:input.chunkIndex,stored:true,idempotent:!!existing};
+}
+function mediaPocDeleteStaged_(session) {
+  var folder=mediaPocPrivateFolder_('CXL_MEDIA_STAGING_FOLDER_ID'),deleted=0;
+  for(var i=0;i<session.totalChunks;i++){
+    var file=mediaPocUniqueFile_(folder,mediaPocChunkName_(session.uploadId,i));
+    if(file){file.setTrashed(true);deleted++;}
+  }
+  return deleted;
+}
+function mediaPocFinalize_(input) {
+  var lookupStarted=Date.now();if(!input||typeof input!=='object'||Array.isArray(input)||!mediaPocUuid_(input.uploadId))apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media finalize request');
+  var session=mediaPocReadJson_(mediaPocSessionKey_(input.uploadId));
+  if(!session)apiFail_('MEDIA_POC_SESSION_NOT_FOUND','Isolated media upload session was not found');
+  var manifestKey=mediaPocManifestKey_(session.mediaId),manifest=mediaPocReadJson_(manifestKey);
+  if(manifest){
+    if(manifest.uploadId!==session.uploadId||manifest.sha256!==session.sha256||manifest.totalFileSize!==session.totalFileSize)apiFail_('MEDIA_POC_IDEMPOTENCY_CONFLICT','Finalized test media does not match this upload');
+    var cleanupStarted=Date.now();mediaPocDeleteStaged_(session);ownerTimingPhase_('staging_cleanup',Date.now()-cleanupStarted);
+    return mediaPocPublicResult_(session,manifest);
+  }
+  if(Number(session.expiresAt)<=Date.now())apiFail_('MEDIA_POC_SESSION_EXPIRED','Isolated media upload session expired');
+  ownerTimingPhase_('finalize_lookup',Date.now()-lookupStarted);var assemblyStarted=Date.now(),staging=mediaPocPrivateFolder_('CXL_MEDIA_STAGING_FOLDER_ID'),bytes=[],total=0;
+  for(var index=0;index<session.totalChunks;index++){
+    var chunk=mediaPocUniqueFile_(staging,mediaPocChunkName_(session.uploadId,index));
+    if(!chunk)apiFail_('MEDIA_POC_CHUNK_MISSING','An isolated media chunk is missing');
+    var part=chunk.getBlob().getBytes(),expected=Math.min(session.rawChunkSize,session.totalFileSize-index*session.rawChunkSize);
+    if(part.length!==expected)apiFail_('MEDIA_POC_CHUNK_CHECKSUM','An isolated media chunk has an invalid size');
+    for(var b=0;b<part.length;b++)bytes.push(part[b]);total+=part.length;part=null;
+  }
+  if(total!==session.totalFileSize)apiFail_('MEDIA_POC_CHUNK_CHECKSUM','Isolated media upload size did not match');
+  ownerTimingPhase_('final_assembly',Date.now()-assemblyStarted);var checksumStarted=Date.now();
+  if(bytes.length!==session.totalFileSize||mediaPocSha256_(bytes)!==session.sha256)apiFail_('MEDIA_POC_FINAL_CHECKSUM','Isolated media checksum did not match');
+  ownerTimingPhase_('checksum_validation',Date.now()-checksumStarted);var binaryStarted=Date.now(),detectedMime=mediaPocExpectedMime_(bytes);
+  if(!detectedMime||detectedMime!==session.mimeType)apiFail_('MEDIA_POC_MIME_MISMATCH','Isolated media type did not match its binary signature');
+  ownerTimingPhase_('binary_validation',Date.now()-binaryStarted);var writeStarted=Date.now(),folder=mediaPocPrivateFolder_('CXL_MEDIA_FOLDER_ID');
+  var fileName='cxl-media-poc-'+session.mediaId+'.'+mediaPocMimeExtension_(session.mimeType),file=mediaPocUniqueFile_(folder,fileName);
+  if(file){var existingBytes=file.getBlob().getBytes();if(existingBytes.length!==bytes.length||mediaPocSha256_(existingBytes)!==session.sha256)apiFail_('MEDIA_POC_IDEMPOTENCY_CONFLICT','Canonical test media name is already in use');}
+  else file=folder.createFile(Utilities.newBlob(bytes,session.mimeType,fileName));
+  file.setSharing(DriveApp.Access.PRIVATE,DriveApp.Permission.VIEW);
+  if(file.getSharingAccess()!==DriveApp.Access.PRIVATE)apiFail_('MEDIA_POC_FOLDER_NOT_PRIVATE','Canonical test media is not private');
+  ownerTimingPhase_('canonical_drive_write',Date.now()-writeStarted);
+  manifest={uploadId:session.uploadId,workNonce:session.workNonce,workId:session.workId,mediaId:session.mediaId,fileId:file.getId(),mimeType:session.mimeType,
+    totalFileSize:session.totalFileSize,sha256:session.sha256,active:true,isPublic:false,ownerUserId:session.ownerUserId,createdAt:new Date().toISOString()};
+  mediaPocStoreJson_(manifestKey,manifest);session.status='complete';mediaPocStoreJson_(mediaPocSessionKey_(session.uploadId),session);
+  var cleanupStarted=Date.now();mediaPocDeleteStaged_(session);ownerTimingPhase_('staging_cleanup',Date.now()-cleanupStarted);
+  return mediaPocPublicResult_(session,manifest);
+}
+function mediaPocSetPublic_(input,ownerUserId) {
+  if(!input||typeof input!=='object'||Array.isArray(input)||!mediaPocUuid_(input.mediaId)||!mediaPocUuid_(input.workNonce)||typeof input.isPublic!=='boolean')apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media visibility request');
+  var manifest=mediaPocReadJson_(mediaPocManifestKey_(input.mediaId));
+  if(!manifest||manifest.ownerUserId!==ownerUserId||manifest.workId!=='asset_media_poc_'+input.workNonce)apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');
+  var file;try{file=DriveApp.getFileById(manifest.fileId);}catch(_error){apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');}
+  if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE||file.getSize()!==manifest.totalFileSize)apiFail_('MEDIA_POC_MEDIA_INVALID','Isolated media test item is invalid');
+  manifest.isPublic=input.isPublic;manifest.active=true;mediaPocStoreJson_(mediaPocManifestKey_(input.mediaId),manifest);
+  return {workId:manifest.workId,mediaId:manifest.mediaId,ref:'media:'+manifest.mediaId,state:manifest.isPublic?'public':'private'};
+}
+function mediaPocDriveChunk_(fileId,start,expectedLength,totalSize) {
+  var end=start+expectedLength-1,url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media';
+  var response;
+  try{response=UrlFetchApp.fetch(url,{method:'get',headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken(),Range:'bytes='+start+'-'+end},muteHttpExceptions:true});}
+  catch(_error){apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
+  var status=response.getResponseCode(),content=response.getContent();
+  if(status===206){if(content.length!==expectedLength)apiFail_('MEDIA_POC_MEDIA_INVALID','Isolated media byte range has an invalid size');return content;}
+  if(status===200&&content.length===totalSize){var full=content.slice(start,end+1);if(full.length===expectedLength)return full;}
+  apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');
+}
+function mediaPocReadChunk_(input,ownerUserId,isPublic) {
+  var phaseStarted=Date.now();
+  if(!input||typeof input!=='object'||Array.isArray(input)||!mediaPocUuid_(input.mediaId)||!mediaPocUuid_(input.workNonce)
+    ||!Number.isInteger(input.chunkIndex)||input.chunkIndex<0)apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media read request');
+  var manifest=mediaPocReadJson_(mediaPocManifestKey_(input.mediaId)),expectedWorkId='asset_media_poc_'+input.workNonce;
+  if(!manifest||!manifest.active||manifest.workId!==expectedWorkId||input.ref!=='media:'+input.mediaId)
+    apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');
+  if(isPublic){ownerTimingPhase_('public_media_authorization',Date.now()-phaseStarted);if(manifest.isPublic!==true)apiFail_('MEDIA_POC_MEDIA_NOT_PUBLIC','Isolated media test item is private');}
+  else if(manifest.ownerUserId!==ownerUserId)apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');
+  else ownerTimingPhase_('owner_media_read',Date.now()-phaseStarted);
+  var count=Math.ceil(manifest.totalFileSize/MEDIA_POC_CHUNK_BYTES_);
+  if(input.chunkIndex>=count)apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media chunk index');
+  var readStarted=Date.now(),file;try{file=DriveApp.getFileById(manifest.fileId);}catch(_error){apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');}
+  if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE)apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');
+  if(file.getSize()!==manifest.totalFileSize)apiFail_('MEDIA_POC_MEDIA_INVALID','Isolated media test item is invalid');
+  var start=input.chunkIndex*MEDIA_POC_CHUNK_BYTES_,expectedLength=Math.min(MEDIA_POC_CHUNK_BYTES_,manifest.totalFileSize-start);
+  var chunkBytes=mediaPocDriveChunk_(manifest.fileId,start,expectedLength,manifest.totalFileSize);
+  ownerTimingPhase_(isPublic?'public_media_read':'owner_media_read',Date.now()-readStarted);
+  return {workId:manifest.workId,mediaId:manifest.mediaId,ref:'media:'+manifest.mediaId,mimeType:manifest.mimeType,
+    totalFileSize:manifest.totalFileSize,totalChunks:count,chunkIndex:input.chunkIndex,sha256:manifest.sha256,
+    chunkSha256:mediaPocSha256_(chunkBytes),base64:Utilities.base64Encode(chunkBytes)};
+}
+function mediaPocCleanup_() {
+  var started=Date.now(),all=mediaPocProps_().getProperties(),sessions=Object.keys(all).filter(function(key){if(key.indexOf(MEDIA_POC_SESSION_PREFIX_)!==0)return false;try{return Number(JSON.parse(all[key]).expiresAt)<=Date.now();}catch(_error){return false;}}).slice(0,MEDIA_POC_MAX_CLEANUP_SESSIONS_),deletedSessions=0,deletedChunks=0;
+  var staging=mediaPocPrivateFolder_('CXL_MEDIA_STAGING_FOLDER_ID');
+  sessions.forEach(function(key){var session;try{session=JSON.parse(all[key]);}catch(_error){session=null;}
+    if(!session||Number(session.expiresAt)>Date.now())return;
+    for(var i=0;i<Math.min(Number(session.totalChunks)||0,5);i++){var file=mediaPocUniqueFile_(staging,mediaPocChunkName_(session.uploadId,i));if(file){file.setTrashed(true);deletedChunks++;}}
+    mediaPocProps_().deleteProperty(key);deletedSessions++;
+  });
+  var remaining=Object.keys(mediaPocProps_().getProperties()).filter(function(key){return key.indexOf(MEDIA_POC_SESSION_PREFIX_)===0;}).length;
+  ownerTimingPhase_('staging_cleanup',Date.now()-started);return {deletedSessions:deletedSessions,deletedChunks:deletedChunks,remaining:remaining};
+}
+
 function config_() {
   var p = props_();
-  return { rootId:p.getProperty('ROOT_ID'), privateId:p.getProperty('PRIVATE_ID'), publicId:p.getProperty('PUBLIC_ID'), incomingId:p.getProperty('INCOMING_ID'), mediaId:p.getProperty('MEDIA_ID'), privateSheetId:p.getProperty('PRIVATE_SHEET_ID'), publicSheetId:p.getProperty('PUBLIC_SHEET_ID') };
+  return { rootId:p.getProperty('ROOT_ID'), privateId:p.getProperty('PRIVATE_ID'), publicId:p.getProperty('PUBLIC_ID'), incomingId:p.getProperty('INCOMING_ID'), privateSheetId:p.getProperty('PRIVATE_SHEET_ID'), publicSheetId:p.getProperty('PUBLIC_SHEET_ID'), cxlMediaFolderId:p.getProperty('CXL_MEDIA_FOLDER_ID'), cxlMediaStagingFolderId:p.getProperty('CXL_MEDIA_STAGING_FOLDER_ID') };
 }
 
 function cxlAssetFromRecord_(record) {
