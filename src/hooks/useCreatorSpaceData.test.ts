@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset, Folder, User } from '../types';
-import { resolveOwnerProfileEnrichmentFailure, selectCreatorAssets, selectCreatorFolders, selectCreatorSavedAssets } from './useCreatorSpaceData';
+import { getCreatorSpaceRenderState, resolveOwnerProfileEnrichmentFailure, selectCreatorAssets, selectCreatorFolders, selectCreatorSavedAssets } from './useCreatorSpaceData';
 
 function makeAsset(id: string, userId: string, visibility: Asset['visibility']): Asset {
   const now = '2026-01-01T00:00:00.000Z';
@@ -14,6 +14,15 @@ function makeAsset(id: string, userId: string, visibility: Asset['visibility']):
 }
 
 describe('Creator Space shared data selection', () => {
+  it('renders only neutral session loading while auth restoration is unresolved', () => {
+    expect(getCreatorSpaceRenderState({
+      authLoading: true, isProfileLoading: false, profile: null, isNotFound: true
+    })).toBe('session-loading');
+    expect(getCreatorSpaceRenderState({
+      authLoading: false, isProfileLoading: false, profile: null, isNotFound: false
+    })).toBe('profile-failed');
+  });
+
   it('reuses the App asset source while preserving owner and visitor visibility', () => {
     const publicWork = makeAsset('public', 'owner-1', 'public');
     const privateWork = makeAsset('private', 'owner-1', 'private');

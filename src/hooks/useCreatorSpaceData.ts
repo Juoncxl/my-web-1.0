@@ -25,6 +25,20 @@ export interface CreatorSpaceData {
   refresh: (options?: { background?: boolean }) => Promise<void>;
 }
 
+export type CreatorSpaceRenderState = 'session-loading' | 'profile-loading' | 'not-found' | 'profile-failed' | 'ready';
+
+export function getCreatorSpaceRenderState(input: {
+  authLoading: boolean;
+  isProfileLoading: boolean;
+  profile: User | null;
+  isNotFound: boolean;
+}): CreatorSpaceRenderState {
+  if (input.authLoading) return 'session-loading';
+  if (input.profile) return 'ready';
+  if (input.isProfileLoading) return 'profile-loading';
+  return input.isNotFound ? 'not-found' : 'profile-failed';
+}
+
 export function selectCreatorAssets(source: Asset[], profileId: string | undefined, isOwner: boolean): Asset[] {
   const normalizedProfileId = profileId?.trim();
   if (!normalizedProfileId) return [];
@@ -69,7 +83,8 @@ export function useCreatorSpaceData(
   slug: string,
   currentUserId: string | undefined,
   ownerFallback: User | null | undefined,
-  sources: CreatorSpaceSources
+  sources: CreatorSpaceSources,
+  authLoading = false
 ): CreatorSpaceData {
   const decodedSlug = (() => {
     try {
@@ -86,7 +101,9 @@ export function useCreatorSpaceData(
     )
   );
   const ownerProfileFallback = isOwnerSlug && ownerFallback?.id === currentUserId ? ownerFallback : null;
-  const [profile, setProfile] = useState<User | null>(() => cxlDataService.profiles.getCreatorSnapshot(slug) || ownerProfileFallback);
+  const [profile, setProfile] = useState<User | null>(() =>
+    authLoading ? null : cxlDataService.profiles.getCreatorSnapshot(slug) || ownerProfileFallback
+  );
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isNotFound, setIsNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +112,7 @@ export function useCreatorSpaceData(
   const blockingLoadActive = useRef(false);
 
   const refresh = useCallback(async (options: { background?: boolean } = {}) => {
+    if (authLoading) return;
     const background = options.background === true;
     if (background && blockingLoadActive.current) return;
     const requestId = ++requestSequence.current;
@@ -157,9 +175,10 @@ export function useCreatorSpaceData(
         setIsProfileLoading(false);
       }
     }
-  }, [currentUserId, isOwnerSlug, ownerProfileFallback, slug]);
+  }, [authLoading, currentUserId, isOwnerSlug, ownerProfileFallback, slug]);
 
   useEffect(() => {
+    if (authLoading) return;
     if (initializedSlug.current === slug) return;
     const identityChanged = initializedSlug.current !== null;
     initializedSlug.current = slug;
@@ -173,23 +192,24 @@ export function useCreatorSpaceData(
       });
     }
     void refresh();
-  }, [decodedSlug, ownerProfileFallback, refresh, slug]);
+  }, [authLoading, decodedSlug, ownerProfileFallback, refresh, slug]);
 
-  const isOwner = Boolean(profile && (
-    profile.id === currentUserId ||
-    (ownerFallback?.publicCreatorId && profile.publicCreatorId === ownerFallback.publicCreatorId)
+  const resolvedProfile = isOwnerSlug && ownerProfileFallback ? profile || ownerProfileFallback : profile;
+  const isOwner = Boolean(resolvedProfile && (
+    resolvedProfile.id === currentUserId ||
+    (ownerFallback?.publicCreatorId && resolvedProfile.publicCreatorId === ownerFallback.publicCreatorId)
   ));
   const assets = useMemo(
-    () => selectCreatorAssets(sources.assets, isOwner ? currentUserId : profile?.publicCreatorId || profile?.id, isOwner),
-    [currentUserId, isOwner, profile?.id, profile?.publicCreatorId, sources.assets]
+    () => selectCreatorAssets(sources.assets, isOwner ? currentUserId : resolvedProfile?.publicCreatorId || resolvedProfile?.id, isOwner),
+    [currentUserId, isOwner, resolvedProfile?.id, resolvedProfile?.publicCreatorId, sources.assets]
   );
   const folders = useMemo(
-    () => selectCreatorFolders(sources.folders, isOwner ? currentUserId : profile?.id, isOwner),
-    [currentUserId, isOwner, profile?.id, sources.folders]
+    () => selectCreatorFolders(sources.folders, isOwner ? currentUserId : resolvedProfile?.id, isOwner),
+    [currentUserId, isOwner, resolvedProfile?.id, sources.folders]
   );
 
   return {
-    profile,
+    profile: resolvedProfile,
     assets,
     folders,
     isProfileLoading,
