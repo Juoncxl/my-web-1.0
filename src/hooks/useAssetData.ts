@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Asset, User } from '../types';
 import { cxlDataService, type FetchAssetsOptions, type WorkCreateOptions, type WorkUpdateOptions } from '../data/cxlDataService';
+import { ScopedReadLifecycle } from './scopedReadLifecycle';
 
 type ReportError = (message: string | null) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
@@ -18,8 +19,7 @@ export function useAssetData(
   // public rows twice during application boot.
   const loadIdentityUserId = loadOptions.publicOnly ? undefined : currentUser?.id;
   const requestSequence = useRef(0);
-  const scopeSequence = useRef(0);
-  const previousUserId = useRef<string | undefined>(loadIdentityUserId);
+  const readLifecycle = useRef(new ScopedReadLifecycle());
   const loadScopeKey = [
     loadOptions.assetId || '',
     loadOptions.creatorSlug || '',
@@ -33,15 +33,17 @@ export function useAssetData(
     loadOptions.search || '',
     loadOptions.limit || ''
   ].join('|');
-  const previousLoadScopeKey = useRef(loadScopeKey);
+  const requestScopeKey = JSON.stringify([loadIdentityUserId || '', loadScopeKey]);
   const hasLoadedAssets = useRef(false);
 
   const refreshAssets = useCallback(async () => {
     if (!enabled) return;
 
     const requestId = ++requestSequence.current;
-    const requestScope = scopeSequence.current;
+    const ticket = readLifecycle.current.capture(requestScopeKey);
+    if (!ticket) return;
     const isInitialLoad = !hasLoadedAssets.current;
+    const isCurrentRequest = () => requestId === requestSequence.current && readLifecycle.current.isCurrent(ticket);
 
     if (isInitialLoad) setIsLoadingAssets(true);
 
@@ -50,7 +52,7 @@ export function useAssetData(
         ...loadOptions,
         currentUserId: loadIdentityUserId,
       });
-      if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
+      if (!isCurrentRequest()) return;
       if (res.error) {
         reportError(res.error);
         return;
@@ -61,17 +63,18 @@ export function useAssetData(
       // old message visible after the cards have rendered is misleading.
       reportError(null);
     } catch (error) {
-      if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
+      if (!isCurrentRequest()) return;
       console.error('Error loading assets:', error);
       reportError('โหลดคลังผลงานไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     } finally {
-      if (requestId === requestSequence.current && requestScope === scopeSequence.current && isInitialLoad) {
+      if (isCurrentRequest() && isInitialLoad) {
         setIsLoadingAssets(false);
       }
     }
   }, [
     loadIdentityUserId,
     enabled,
+    requestScopeKey,
     loadOptions.assetId,
     loadOptions.category,
     loadOptions.creatorSlug,
@@ -86,20 +89,19 @@ export function useAssetData(
     reportError
   ]);
 
-  useEffect(() => {
-    if (!enabled) return;
-
-    const userId = loadIdentityUserId;
-    if (previousUserId.current !== userId || previousLoadScopeKey.current !== loadScopeKey) {
-      previousUserId.current = userId;
-      previousLoadScopeKey.current = loadScopeKey;
-      scopeSequence.current += 1;
+  useLayoutEffect(() => {
+    if (readLifecycle.current.transition(requestScopeKey)) {
+      requestSequence.current += 1;
       hasLoadedAssets.current = false;
       setAssets([]);
       setIsLoadingAssets(true);
     }
+  }, [requestScopeKey]);
+
+  useEffect(() => {
+    if (!enabled || !readLifecycle.current.claimAutomaticLoad(requestScopeKey)) return;
     void refreshAssets();
-  }, [enabled, loadIdentityUserId, loadScopeKey, refreshAssets]);
+  }, [enabled, requestScopeKey, refreshAssets]);
 
   const createAsset = useCallback(async (assetData: NewAssetData, options?: WorkCreateOptions) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
@@ -202,7 +204,7 @@ export function useAssetData(
   // Render the next account scope as loading immediately. Effects run after
   // paint, so relying only on setIsLoadingAssets inside the effect can flash a
   // stale/empty result for one frame during session restoration or re-login.
-  const isChangingAccountScope = previousUserId.current !== loadIdentityUserId;
+  const isChangingAccountScope = readLifecycle.current.capture(requestScopeKey) === null;
 
   return {
     assets,

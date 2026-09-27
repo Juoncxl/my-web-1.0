@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Folder } from '../types';
 import { cxlDataService } from '../data/cxlDataService';
+import { ScopedReadLifecycle } from './scopedReadLifecycle';
 
 type ReportError = (message: string) => void;
 
@@ -8,20 +9,22 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isLoadingFolders, setIsLoadingFolders] = useState(Boolean(currentUserId));
   const requestSequence = useRef(0);
-  const scopeSequence = useRef(0);
-  const previousUserId = useRef(currentUserId);
+  const readLifecycle = useRef(new ScopedReadLifecycle());
+  const requestScopeKey = currentUserId || '__anonymous__';
   const hasLoadedFolders = useRef(false);
 
   const refreshFolders = useCallback(async () => {
     if (!currentUserId) return;
 
     const requestId = ++requestSequence.current;
-    const requestScope = scopeSequence.current;
+    const ticket = readLifecycle.current.capture(requestScopeKey);
+    if (!ticket) return;
+    const isCurrentRequest = () => requestId === requestSequence.current && readLifecycle.current.isCurrent(ticket);
     const isInitialLoad = !hasLoadedFolders.current;
     if (isInitialLoad) setIsLoadingFolders(true);
     try {
       const res = await cxlDataService.folders.fetch(currentUserId);
-      if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
+      if (!isCurrentRequest()) return;
       if (res.error) {
         reportError(res.error);
         return;
@@ -29,25 +32,29 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
       setFolders(res.data);
       hasLoadedFolders.current = true;
     } catch (error) {
-      if (requestId !== requestSequence.current || requestScope !== scopeSequence.current) return;
+      if (!isCurrentRequest()) return;
       console.error('Error loading folders:', error);
       reportError('โหลดโฟลเดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     } finally {
-      if (requestId === requestSequence.current && requestScope === scopeSequence.current && isInitialLoad) {
+      if (isCurrentRequest() && isInitialLoad) {
         setIsLoadingFolders(false);
       }
     }
-  }, [currentUserId, reportError]);
+  }, [currentUserId, reportError, requestScopeKey]);
 
-  useEffect(() => {
-    if (previousUserId.current !== currentUserId) {
-      previousUserId.current = currentUserId;
-      scopeSequence.current += 1;
+  useLayoutEffect(() => {
+    if (readLifecycle.current.transition(requestScopeKey)) {
+      requestSequence.current += 1;
       hasLoadedFolders.current = false;
       setFolders([]);
+      setIsLoadingFolders(Boolean(currentUserId));
     }
-    if (currentUserId) void refreshFolders();
-  }, [currentUserId, refreshFolders]);
+  }, [currentUserId, requestScopeKey]);
+
+  useEffect(() => {
+    if (!currentUserId || !readLifecycle.current.claimAutomaticLoad(requestScopeKey)) return;
+    void refreshFolders();
+  }, [currentUserId, refreshFolders, requestScopeKey]);
 
   const createFolder = useCallback(async (name: string, icon = '📁', color = 'purple') => {
     if (!currentUserId) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
@@ -70,7 +77,7 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
     return result;
   }, [currentUserId]);
 
-  const isChangingAccountScope = previousUserId.current !== currentUserId;
+  const isChangingAccountScope = readLifecycle.current.capture(requestScopeKey) === null;
   return {
     folders,
     isLoadingFolders: isLoadingFolders || isChangingAccountScope,
