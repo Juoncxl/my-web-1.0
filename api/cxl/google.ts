@@ -170,7 +170,7 @@ export default async function handler(req: Request, res: Response) {
         : action === 'works.create' && authMode === 'vercel'
           ? [{ ...(body.args[0] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[1]]
           : action === 'works.update' && authMode === 'vercel'
-            ? [body.args[0], { ...(body.args[1] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[2]]
+            ? body.args
             : body.args;
       const raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs }) });

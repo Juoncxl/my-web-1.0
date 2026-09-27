@@ -10,6 +10,7 @@ import {
   prepareAssetMedia
 } from '../../../lib/workMedia';
 import { callGoogleBackend } from './googleTransport';
+import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
 
 type Operation = (...args: any[]) => any;
 const remote = <T extends Operation>(action: string): T =>
@@ -37,7 +38,7 @@ export const googleDataAdapter = {
   works: {
     fetch: remote<CxlDataService['works']['fetch']>('works.fetch'),
     create: ((asset, options) => googleWriteResult('works.create', [asset, options])) as CxlDataService['works']['create'],
-    update: ((id, updates, options) => googleWriteResult('works.update', [id, updates, options])) as CxlDataService['works']['update'],
+    update: ((id, updates, options) => googleWriteResult('works.update', toGoogleWorkUpdateRequest(id, updates, options))) as CxlDataService['works']['update'],
     softDelete: remote<CxlDataService['works']['softDelete']>('works.softDelete'),
     restore: remote<CxlDataService['works']['restore']>('works.restore'),
     permanentDelete: remote<CxlDataService['works']['permanentDelete']>('works.permanentDelete'),

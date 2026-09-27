@@ -226,6 +226,29 @@ describe('Vercel Google Works read proxy', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).args[0].userId).toBe('owner-1');
   });
 
+  it('does not inject server-owned userId into works.update payloads', async () => {
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: { id: 'asset_work' }, error: null } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.update', args: ['asset_work', { title: 'Edited' }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 2
+    }] }, undefined, 'POST', { cookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' });
+
+    expect(result.statusCode).toBe(200);
+    const gasRequest = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(gasRequest.args).toEqual(['asset_work', { title: 'Edited' }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 2
+    }]);
+    expect(gasRequest.args[1]).not.toHaveProperty('userId');
+    expect(gasRequest.ownerUserId).toBe('owner-1');
+  });
+
   it('keeps anonymous public Works reads unchanged in Vercel auth mode without Owner config', async () => {
     vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
     vi.stubEnv('CXL_OWNER_USER_ID', '');
