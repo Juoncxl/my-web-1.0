@@ -142,10 +142,9 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
     && item.assetId === asset.id && ['icon', 'gallery', 'prompt_example'].includes(item.purpose));
   if (!records.length) return asset;
 
-  const urlFor = (id: string | null, purpose: 'icon' | 'gallery' | 'prompt_example', contextId?: string) => {
+  const urlFor = (id: string | null) => {
     if (!id) return undefined;
-    const item = records.find(record => record.id === id && record.purpose === purpose
-      && (purpose !== 'prompt_example' || record.contextId === contextId));
+    const item = records.find(record => record.id === id);
     return item ? googleWorkMediaProxyUrl(asset.id, item.id, scope) : undefined;
   };
   const media = (asset.media || []).map(item => {
@@ -158,20 +157,20 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
   const iconId = asset.icon?.type === 'image'
     ? asset.icon.mediaId || mediaIdFromRef(asset.icon.value)
     : null;
-  const iconUrl = urlFor(iconId, 'icon');
+  const iconUrl = urlFor(iconId);
   const previewImages = asset.previewImages?.map(source => {
     const id = mediaIdFromRef(source);
-    return urlFor(id, 'gallery') || source;
+    return urlFor(id) || source;
   });
   const previewImageId = mediaIdFromRef(asset.previewImage);
   const coverRecord = records.find(item => item.purpose === 'gallery' && item.isCover);
-  const previewImage = urlFor(previewImageId, 'gallery')
-    || (!asset.previewImage && coverRecord ? urlFor(coverRecord.id, 'gallery') : undefined)
+  const previewImage = urlFor(previewImageId)
+    || (!asset.previewImage && coverRecord ? urlFor(coverRecord.id) : undefined)
     || asset.previewImage;
   const contentBlocks = asset.contentBlocks?.map(block => {
     if (block.type !== 'Image') return block;
     const id = block.mediaId || mediaIdFromRef(block.body);
-    const imageUrl = urlFor(id, 'prompt_example', block.id);
+    const imageUrl = urlFor(id);
     return imageUrl ? { ...block, body: imageUrl, mediaId: id || undefined } : block;
   });
 

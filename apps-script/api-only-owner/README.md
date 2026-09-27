@@ -8,7 +8,7 @@ This project is a separate server-to-server endpoint for Vercel. Keep the existi
 - `doGet`: returns a JSON `Method not allowed` envelope. It does not serve HTML.
 - Every helper function ends in `_`, so it is not callable through `google.script.run`.
 
-GO 7A.2 read validation is complete. This source adds the GO 7B.1 standard Work media write foundation; it is not a live deployment. Vercel permits media upload actions only in Preview, and the runtime still needs its own Preview configuration and live validation before GO 7B.4.
+GO 7A.2 read validation is complete. This source contains the GO 7B.1 write, GO 7B.2 read/hydration, and GO 7B.3 replace/remove plus orphan-cleanup implementations; none of GO 7B is live validated yet. Vercel media actions remain Preview-only, and the runtime still needs Preview configuration and live validation at GO 7B.4.
 
 Apps Script `ContentService` does not expose a method to set an arbitrary HTTP status code. Error replies therefore carry a `httpStatus` and stable `code` in the JSON envelope; the Vercel Owner proxy translates `OWNER_API_UNAUTHORIZED` to HTTP 401. Malformed JSON and unknown actions fail closed before any action dispatch.
 
@@ -61,7 +61,7 @@ The API script uses the configured resources by ID and contains no hardcoded pri
 5. Deploy the new project as a Web App with **Execute as: the API deployment account**. Set access to **Anyone** only for this API-only project so Vercel server requests can reach `doPost`. This does not change the access policy of the existing Owner Web App, which remains **Only myself**.
 6. Save the new `/exec` URL as Vercel Preview's server-only `CXL_GAS_OWNER_URL`. Keep `CXL_API_SHARED_SECRET` server-only. Do not put either value in `VITE_*`, a client bundle, or a request URL.
 7. Before enabling any write flag, validate the endpoint with read-only `works.fetch` via the Vercel Owner proxy. Confirm missing/wrong secret fail closed and the existing Owner UI still works at its unchanged private deployment.
-8. GO 7A.2 media reads are live validated. GO 7B.1 source is still not deployed; keep the existing Preview read-only until the GO 7B.4 live validation gate. Do not change Production or `main` in this step.
+8. GO 7A.2 media reads are live validated. GO 7B.1–7B.3 source is not deployed; keep the existing Preview read-only until the GO 7B.4 live validation gate. Do not change Production or `main` in this step.
 
 ## GO 7B.1 standard Work media write foundation
 
@@ -69,13 +69,23 @@ The Preview Owner editor accepts standard Work icon, gallery/cover, and content-
 
 New upload actions are `media.upload.begin`, `media.upload.chunk`, and `media.upload.finalize`. They require the authenticated Owner session and CSRF at Vercel and the existing server-to-server secret at GAS. A finalized image is still private and pending. `works.create`/`works.update` validates that every new reference matches an Owner-bound, target-Work-bound finalized manifest, then adds its media record during the existing Script Lock and canonical revision write sequence. The manifest is marked attached after the canonical revision and private index are written; an idempotent retry repairs that marker if the response is interrupted. Public Work transitions force files marked `delivery: vercel_proxy` to remain Drive-private.
 
-The commit accepts additions and safe gallery order/cover metadata updates. Removing or replacing an existing media identity is rejected until GO 7B.3 implements cleanup. Failed uploads do not change the Work. A finalized file whose Work commit fails remains private and unattached; its cleanup is deliberately deferred to GO 7B.3. This stage does not hydrate/read Work media, does not upload Collaboration draft/reference media, and does not backfill legacy media.
+Failed uploads do not change the Work. A finalized file whose Work commit fails remains private and unattached until bounded orphan cleanup expires it. Read hydration and replacement/removal are implemented in the following GO 7B stages; Collaboration draft/reference media and legacy backfill remain unsupported.
 
 Before GO 7B.4 live validation, create two **new, empty, private, separate** Drive folders and set `CXL_WORK_MEDIA_FOLDER_ID` and `CXL_WORK_MEDIA_STAGING_FOLDER_ID` in this API-only Apps Script project. Do not reuse either GO 7A.2 POC folder or any legacy media folder. The Vercel `/api/cxl/google` upload/write route accepts media-bearing requests only in Preview. No Apps Script deployment, Vercel deployment, or environment change is part of this source update.
 
 ## Contract/data behavior
 
-The bridge reuses the GO 6A Work persistence and public projection logic: Drive revision JSON remains canonical; private/public indexes and `WorkCreatorMap` are updated through the existing sync path; summary JSON uses the current allowlist; create retry keys and update revisions are enforced; and public-sync partial failure returns `PUBLIC_SYNC_PENDING`. GO 7B.1 adds only standard Work media additions and retains private Drive delivery for those files. Collaboration media, media reads/hydration, replacements/removals, failure cleanup, and legacy backfill remain deferred. It does not expose private Owner functions through `google.script.run`.
+## GO 7B.2 read and hydration
+
+Owner hydration converts standard Work `media:` references into same-origin Vercel proxy URLs only in the read layer. Owner reads require the Owner session; public reads require a current public Work projection association. Canonical Work JSON remains `media:` references and browser responses do not contain Drive IDs or URLs. Drive files remain private. Supabase and legacy media hydration keep their existing adapter behavior.
+
+## GO 7B.3 replace/remove and cleanup
+
+The locked Work write derives previous and next media references from the canonical record and validated standard Work fields. New uploads finalize before the Work write. Google proxy media records are removed from the new canonical revision only when no reference remains. Manifests are retired only after the private Work index points to the committed revision, so a failed validation or revision conflict leaves existing media untouched. The canonical association check rejects reads of removed media immediately, including public reads while a public projection is stale.
+
+Finalized unassociated uploads expire 24 hours after finalization. Retired files remain private for 24 hours after the Work commit, then become eligible for trashing. The authenticated Preview-only `media.cleanup` action scans at most five Work-media session/manifest records per invocation, skips active uploads, verifies the current Owner/Work association, and checks the exact private Work-media folder/name before deleting. POC, legacy/Supabase media, and unrelated Drive files are outside its key/folder contract. Cleanup retains a deleted media identity tombstone so the same `mediaId` cannot be reused. GO 7B.3 is implementation complete but not deployed or live validated; that remains GO 7B.4.
+
+The bridge still reuses the GO 6A Work persistence and public projection logic: Drive revision JSON remains canonical; private/public indexes and `WorkCreatorMap` are updated through the existing sync path; summary JSON uses the current allowlist; create retry keys and update revisions are enforced; and public-sync partial failure returns `PUBLIC_SYNC_PENDING`. Collaboration media and legacy backfill remain deferred. It does not expose private Owner functions through `google.script.run`.
 
 Because `doPost` is public at the transport layer, the shared secret is the server-to-server credential. Keep it high entropy, rotate it if exposed, and keep Owner OIDC/session verification in Vercel. Apps Script does not independently verify the browser Owner session.
 

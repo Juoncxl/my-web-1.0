@@ -111,6 +111,27 @@ describe('Google standard Work media upload foundation', () => {
     expect(hydrateGoogleWorkMedia({ ...asset, category: 'collab' })).toEqual({ ...asset, category: 'collab' });
   });
 
+  it('hydrates one Google media identity at every standard Work placement that references it', () => {
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const shared = IDS.icon;
+    const asset = {
+      id: workId, userId: 'owner', title: 'Shared media', authorName: 'Owner',
+      icon: { type: 'image' as const, value: `media:${shared}`, mediaId: shared },
+      category: 'prompts' as const, content: '',
+      contentBlocks: [{ id: 'block-shared', type: 'Image' as const, title: 'Shared', body: `media:${shared}`, mediaId: shared }],
+      previewImage: `media:${shared}`, previewImages: [`media:${shared}`],
+      media: [{ id: shared, assetId: workId, storagePath: `google-work-media/${shared}`, purpose: 'icon' as const,
+        mimeType: 'image/png', fileSize: 8, sortOrder: 0, isCover: false, delivery: 'vercel_proxy' as const }],
+      isPublic: true, visibility: 'public' as const, status: 'finished' as const, createdAt: '', updatedAt: '', tags: []
+    };
+
+    const hydrated = hydrateGoogleWorkMedia(asset);
+
+    expect(hydrated.icon.type === 'image' && hydrated.icon.value).toContain(`ref=media%3A${shared}`);
+    expect(hydrated.previewImage).toBe(hydrated.previewImages?.[0]);
+    expect(hydrated.contentBlocks?.[0].body).toContain(`ref=media%3A${shared}`);
+  });
+
   it('does not prepare Collaboration media for the standard Work upload route', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

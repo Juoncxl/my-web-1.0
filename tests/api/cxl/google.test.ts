@@ -428,4 +428,33 @@ describe('Vercel Google Works read proxy', () => {
     expect([upload.statusCode, commit.statusCode]).toEqual([404, 404]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('allows bounded Work-media cleanup only for a CSRF-protected Owner session in Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: {
+      processed: 3, deletedSessions: 1, deletedChunks: 2, deletedMedia: 0, retiredMedia: 1, repairedManifests: 0, skipped: 1
+    } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const headers = { cookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' };
+
+    const missingCsrf = await invoke({ action: 'media.cleanup', args: [] }, undefined, 'POST', { cookie, origin: 'https://cxl.example' });
+    const invalidArgs = await invoke({ action: 'media.cleanup', args: [{ mediaId: '123e4567-e89b-42d3-a456-426614174010' }] }, undefined, 'POST', headers);
+    const accepted = await invoke({ action: 'media.cleanup', args: [] }, undefined, 'POST', headers);
+
+    expect([missingCsrf.statusCode, invalidArgs.statusCode, accepted.statusCode]).toEqual([403, 400, 200]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request).toMatchObject({ action: 'media.cleanup', args: [], ownerUserId: 'owner-1', authorization: 'server-only-secret' });
+    expect(JSON.stringify(request)).not.toMatch(/cookie|csrf-token|google-owner-subject/);
+    vi.stubEnv('VERCEL_ENV', 'production');
+    const production = await invoke({ action: 'media.cleanup', args: [] }, undefined, 'POST', headers);
+    expect(production.statusCode).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

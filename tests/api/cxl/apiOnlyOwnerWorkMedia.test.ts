@@ -120,12 +120,14 @@ describe('API-only Owner standard Work media foundation', () => {
     expect(chunk).toMatchObject({ stored: true, chunkIndex: 0 });
     expect(finalized).toMatchObject({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID, finalized: true });
     const manifest = JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!);
-    expect(manifest).toMatchObject({ ownerUserId: OWNER_ID, workId: WORK_ID, state: 'finalized', delivery: 'vercel_proxy', sharing_access: 'private' });
+    expect(manifest).toMatchObject({ ownerUserId: OWNER_ID, workId: WORK_ID, state: 'finalized', delivery: 'vercel_proxy', sharing_access: 'private',
+      rawChunkSize: 2 * 1024 * 1024, orphanExpiresAt: expect.any(Number) });
     expect(manifest.drive_file_id).toBeTruthy();
     expect(JSON.stringify([begin, retry, chunk, finalized])).not.toContain(manifest.drive_file_id);
     const canonical = folders.get('canonical')!.files[0];
     expect(canonical.getSharingAccess()).toBe('private');
     expect(folders.get('staging')!.files.every(file => file.trashed)).toBe(true);
+    expect(context.mediaWorkBegin_({ ...metadata, uploadId: RETRY_UPLOAD_ID }, OWNER_ID)).toMatchObject({ uploadId: UPLOAD_ID, finalized: true });
   });
 
   it('attaches only matching finalized media and keeps proxy media private for public Works', () => {
@@ -150,16 +152,88 @@ describe('API-only Owner standard Work media foundation', () => {
     expect(JSON.stringify(projection)).not.toContain(file.getId());
   });
 
-  it('rejects media identity removal/replacement and media refs outside supported placements', () => {
+  it('allows server-derived replace/remove while rejecting new refs outside supported placements', () => {
     const { context } = makeWorkMediaBridge();
-    const old = { icon: { type: 'image', value: `media:${MEDIA_ID}` }, previewImages: [], contentBlocks: [], media: [] };
+    const old = { icon: { type: 'image', value: `media:${MEDIA_ID}` }, previewImages: [], contentBlocks: [],
+      media: [{ id: MEDIA_ID, delivery: 'vercel_proxy' }] };
     expect(() => context.rejectUnsupportedWorkMedia_({ icon: { type: 'emoji', value: '✨' }, previewImages: [], contentBlocks: [], media: [] }, old, []))
-      .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
+      .not.toThrow();
+    expect(() => context.rejectUnsupportedWorkMedia_({ icon: { type: 'image', value: 'media:123e4567-e89b-42d3-a456-426614174009' }, previewImages: [], contentBlocks: [], media: [] }, old,
+      ['123e4567-e89b-42d3-a456-426614174009']))
+      .not.toThrow();
     expect(() => context.rejectUnsupportedWorkMedia_({ content: `media:${MEDIA_ID}`, icon: { type: 'emoji', value: '✨' }, previewImages: [], contentBlocks: [], media: [] }, null, [MEDIA_ID]))
       .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
     expect(() => context.mediaWorkReferenceMap_({ icon: { type: 'image', value: `media:${MEDIA_ID}`, mediaId: '123e4567-e89b-42d3-a456-426614174009' } }))
       .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
     expect(context.mediaWorkReferenceMap_({ previewImage: `media:${MEDIA_ID}`, previewImages: [] })[MEDIA_ID]).toMatchObject({ purpose: 'gallery', sortOrder: 0, isCover: true });
+  });
+
+  it('retires the old manifest only after the new canonical Work index commit', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const previousAsset = { id: WORK_ID, userId: OWNER_ID, title: 'Before', category: 'prompts', status: 'finished',
+      visibility: 'private', isPublic: false, icon: { type: 'image', value: `media:${MEDIA_ID}`, mediaId: MEDIA_ID },
+      previewImage: '', previewImages: [], contentBlocks: [], content: '', tags: [], media: [] };
+    const file = folders.get('canonical')!.createFile({ name: `cxl-work-media-${MEDIA_ID}.png`, getBytes: () => [1, 2, 3] });
+    file.setSharing('private');
+    const mediaRecord = { id: MEDIA_ID, asset_id: WORK_ID, drive_file_id: file.getId(), delivery: 'vercel_proxy',
+      purpose: 'icon', context_id: null, file_size: 3, mime_type: 'image/png', sharing_access: 'private' };
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID,
+      workId: WORK_ID, ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: 3, mimeType: 'image/png',
+      sha256: 'a'.repeat(64), purpose: 'icon', contextId: null, sortOrder: 0, isCover: false, totalChunks: 1,
+      delivery: 'vercel_proxy', state: 'attached', sharing_access: 'private' }));
+    const currentRecord = { revision: 3, row: { id: WORK_ID, user_id: OWNER_ID, title: 'Before', category: 'prompts', status: 'finished',
+      visibility: 'private', is_public: false, deleted_at: '', folder_id: '', tags: [], icon: previousAsset.icon,
+      preview_image: '', preview_images: [], content_blocks: [], versions: [] }, cxlAsset: previousAsset, mediaRecords: [mediaRecord] };
+    const originalRecord = structuredClone(currentRecord);
+    const indexRow = { _sheetRow: 2, id: WORK_ID, revision: 3, file_id: 'revision-3' };
+    const events: string[] = [];
+    context.config_ = () => ({ privateSheetId: 'private-index', privateId: 'canonical' });
+    context.sheet_ = () => ({});
+    context.rowAtSheetNumber_ = () => indexRow;
+    context.ensurePrivateHeaders_ = () => undefined;
+    context.ownerSearchArtifacts_ = () => ({ version: 1, chunks: [], token: 'search-token', updatedAt: '2026-09-28T00:00:00.000Z' });
+    context.ownerSearchSheet_ = () => ({});
+    context.appendOwnerSearchChunks_ = () => undefined;
+    context.privateMeta_ = () => ({ id: WORK_ID });
+    context.shareRecordMedia_ = () => undefined;
+    context.putJsonRevision_ = () => { events.push('revision_write'); return 'revision-4'; };
+    context.setPrivateIndexRow_ = () => { events.push('private_index'); throw new Error('index write failed'); };
+    const markRetired = context.mediaWorkMarkRetired_;
+    context.mediaWorkMarkRetired_ = (...args: unknown[]) => { events.push('retire'); return markRetired(...args); };
+    const nextAsset = { ...previousAsset, icon: { type: 'emoji', value: '✨' } };
+    const input = { id: WORK_ID, ownerUserId: OWNER_ID, revision: 3, writeRequestId: 'request-1', writeOperation: 'update',
+      writeFingerprint: 'fingerprint', title: 'After', category: 'prompts', status: 'finished', visibility: 'private', tags: [],
+      cxlAsset: nextAsset, mediaIds: [] };
+    const options = { idempotent: true, deferPublicSync: true, privateSheet: {}, preloadedIndexRow: indexRow, preloadedRecord: structuredClone(originalRecord) };
+
+    expect(() => context.saveOwnerWork_(input, options)).toThrow('index write failed');
+    expect(events).toEqual(['revision_write', 'private_index']);
+    expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!).state).toBe('attached');
+    expect(file.getSharingAccess()).toBe('private');
+
+    context.setPrivateIndexRow_ = () => { events.push('private_index'); };
+    options.preloadedRecord = structuredClone(originalRecord);
+    events.length = 0;
+    const saved = context.saveOwnerWork_(input, options);
+
+    expect(events).toEqual(['revision_write', 'private_index', 'retire']);
+    expect(saved.record.mediaRecords).toEqual([]);
+    expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!)).toMatchObject({ state: 'retired', retiredFromRevision: 4 });
+    expect(file.trashed).toBe(false);
+    expect(file.getSharingAccess()).toBe('private');
+  });
+
+  it('keeps a shared media identity attached while any canonical reference remains', () => {
+    const { context } = makeWorkMediaBridge();
+    const shared = `media:${MEDIA_ID}`;
+    const previous = { icon: { type: 'image', value: shared }, previewImages: [shared], previewImage: shared,
+      contentBlocks: [{ id: 'image-1', type: 'Image', body: shared }], media: [] };
+    const next = { icon: { type: 'emoji', value: '✨' }, previewImages: [shared], previewImage: shared,
+      contentBlocks: [], media: [] };
+    expect(context.mediaWorkReferencedIds_(next)).toEqual({ [MEDIA_ID]: true });
+    expect(Object.keys(context.mediaWorkReferenceMap_(previous))).toEqual([MEDIA_ID]);
+    expect(context.mediaWorkReferenceMap_(previous)[MEDIA_ID].references).toHaveLength(3);
+    expect(() => context.rejectUnsupportedWorkMedia_(next, previous, [])).not.toThrow();
   });
 
   it('includes public content-block media associations while redacting Drive identifiers', () => {
@@ -201,6 +275,11 @@ describe('API-only Owner standard Work media foundation', () => {
     const privateSummary = JSON.parse(context.privateSummaryJson_(record)).asset;
     expect(privateSummary.media).toMatchObject([{ id: MEDIA_ID, purpose: 'icon', delivery: 'vercel_proxy' }]);
     expect(JSON.stringify(privateSummary)).not.toContain(file.getId());
+
+    record.cxlAsset = { ...asset, icon: { type: 'emoji', value: '✨', mediaId: '' } };
+    expect(() => context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
+    expect(file.getSharingAccess()).toBe('private');
   });
 
   it('requires the current public projection to contain the same Work media association', () => {
@@ -239,5 +318,102 @@ describe('API-only Owner standard Work media foundation', () => {
     context.parse_ = () => ({ ...projection, cxlAsset: { ...asset, icon: { type: 'emoji', value: '✨' } } });
     expect(() => context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, true))
       .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
+  });
+
+  it('cleans only expired Work-media orphans and leaves POC and unrelated Drive files alone', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const orphan = folders.get('canonical')!.createFile({ name: `cxl-work-media-${MEDIA_ID}.png`, getBytes: () => [...bytes] });
+    orphan.setSharing('private');
+    const poc = folders.get('canonical')!.createFile({ name: 'poc-file.png', getBytes: () => [...bytes] });
+    poc.setSharing('private');
+    const unrelated = folders.get('canonical')!.createFile({ name: 'unrelated.png', getBytes: () => [...bytes] });
+    unrelated.setSharing('private');
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID,
+      workId: WORK_ID, ownerUserId: OWNER_ID, drive_file_id: orphan.getId(), totalFileSize: bytes.length, mimeType: 'image/png',
+      sha256: sha256(bytes), purpose: 'icon', contextId: null, sortOrder: 0, isCover: false, totalChunks: 1,
+      delivery: 'vercel_proxy', state: 'finalized', sharing_access: 'private', createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+      orphanExpiresAt: Date.now() - 1 }));
+    properties.set('CXL_MEDIA_POC_MEDIA_fixture', JSON.stringify({ drive_file_id: poc.getId(), isPublic: false }));
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({});
+    context.rowById_ = () => null;
+
+    const result = context.mediaWorkCleanup_(OWNER_ID);
+
+    expect(result).toMatchObject({ processed: 1, deletedMedia: 1 });
+    expect(orphan.trashed).toBe(true);
+    expect(orphan.getSharingAccess()).toBe('private');
+    expect(poc.trashed).toBe(false);
+    expect(unrelated.trashed).toBe(false);
+    expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!).state).toBe('deleted');
+    expect(JSON.stringify(result)).not.toMatch(new RegExp(`${MEDIA_ID}|${orphan.getId()}`));
+  });
+
+  it('limits cleanup to five property records per invocation and skips active uploads', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const ids = Array.from({ length: 6 }, (_, index) => `123e4567-e89b-42d3-a456-42661417400${index + 1}`);
+    const files = ids.map(mediaId => {
+      const file = folders.get('canonical')!.createFile({ name: `cxl-work-media-${mediaId}.png`, getBytes: () => [...bytes] });
+      file.setSharing('private');
+      properties.set(`CXL_WORK_MEDIA_MANIFEST_${mediaId}`, JSON.stringify({ uploadId: UPLOAD_ID, mediaId,
+        workId: WORK_ID, ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: bytes.length, mimeType: 'image/png',
+        sha256: sha256(bytes), purpose: 'icon', contextId: null, sortOrder: 0, isCover: false, totalChunks: 1,
+        delivery: 'vercel_proxy', state: 'finalized', sharing_access: 'private', createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+        orphanExpiresAt: Date.now() - 1 }));
+      return file;
+    });
+    const activeUploadId = '123e4567-e89b-42d3-a456-426614174099';
+    const activeMediaId = '123e4567-e89b-42d3-a456-426614174098';
+    const staged = folders.get('staging')!.createFile({ name: `cxl-work-media-chunk-${activeUploadId}-00.bin`, getBytes: () => [...bytes] });
+    staged.setSharing('private');
+    properties.set(`CXL_WORK_MEDIA_UPLOAD_SESSION_${activeUploadId}`, JSON.stringify({ uploadId: activeUploadId, mediaId: activeMediaId,
+      workId: WORK_ID, ownerUserId: OWNER_ID, status: 'uploading', expiresAt: Date.now() + 60000,
+      totalChunks: 1, mimeType: 'image/png', totalFileSize: bytes.length, sha256: sha256(bytes) }));
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({});
+    context.rowById_ = () => null;
+
+    const first = context.mediaWorkCleanup_(OWNER_ID);
+
+    expect(first.processed).toBe(5);
+    expect(first.deletedMedia).toBe(5);
+    expect(files.filter(file => !file.trashed)).toHaveLength(1);
+    expect(staged.trashed).toBe(false);
+    const second = context.mediaWorkCleanup_(OWNER_ID);
+    expect(second.processed).toBeLessThanOrEqual(5);
+    expect(files.every(file => file.trashed)).toBe(true);
+  });
+
+  it('marks removed attached media retired first and keeps its Drive file private until TTL cleanup', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const file = folders.get('canonical')!.createFile({ name: `cxl-work-media-${MEDIA_ID}.png`, getBytes: () => [...bytes] });
+    file.setSharing('private');
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID,
+      workId: WORK_ID, ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: bytes.length, mimeType: 'image/png',
+      sha256: sha256(bytes), purpose: 'icon', contextId: null, sortOrder: 0, isCover: false, totalChunks: 1,
+      delivery: 'vercel_proxy', state: 'attached', sharing_access: 'private' }));
+    const currentRecord = { revision: 4, row: { id: WORK_ID, user_id: OWNER_ID, category: 'prompts' },
+      cxlAsset: { id: WORK_ID, icon: { type: 'emoji', value: '✨' }, previewImages: [], contentBlocks: [] }, mediaRecords: [] };
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({});
+    context.rowById_ = () => ({ file_id: 'current-work' });
+    context.parse_ = () => currentRecord;
+
+    const retired = context.mediaWorkCleanup_(OWNER_ID);
+    expect(retired).toMatchObject({ retiredMedia: 1, deletedMedia: 0 });
+    const manifest = JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!);
+    expect(manifest.state).toBe('retired');
+    expect(manifest.retireAfter).toBeGreaterThan(Date.now());
+    expect(file.trashed).toBe(false);
+    expect(file.getSharingAccess()).toBe('private');
+
+    manifest.retireAfter = Date.now() - 1;
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify(manifest));
+    const deleted = context.mediaWorkCleanup_(OWNER_ID);
+    expect(deleted.deletedMedia).toBe(1);
+    expect(file.trashed).toBe(true);
   });
 });
