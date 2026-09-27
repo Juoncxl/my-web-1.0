@@ -56,10 +56,13 @@ describe('Google server transport boundary', () => {
     vi.stubGlobal('document', { cookie: '__Host-cxl_csrf=csrf-token' });
     await callGoogleBackend('works.fetch', [{ userId: 'client-supplied-id' }], true);
     await callGoogleBackend('works.create', [{ title: 'Work' }, { requestId: 'id' }], true);
+    await callGoogleBackend('folders.fetch', ['browser-spoofed-id'], true);
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
     expect(fetchMock.mock.calls[0][1].credentials).toBe('same-origin');
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined();
     expect(fetchMock.mock.calls[1][1].headers['X-CXL-CSRF']).toBe('csrf-token');
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ action: 'folders.fetch', args: [] });
+    expect(fetchMock.mock.calls[2][1].headers.Authorization).toBeUndefined();
   });
 
   it('fails closed when browser fetch is unavailable', async () => {

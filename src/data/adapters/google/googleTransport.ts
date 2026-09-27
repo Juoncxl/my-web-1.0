@@ -12,6 +12,9 @@ export class GoogleBackendUnavailableError extends Error {
 
 export async function callGoogleBackend<T>(action: string, args: unknown[], useVercelOwnerAuth = isVercelOwnerAuth): Promise<T> {
   const endpoint = '/api/cxl/google';
+  // The server derives Owner scope from its verified HttpOnly session. Keep the
+  // legacy typed fetch(userId) signature, but never send that identity as authority.
+  const requestArgs = useVercelOwnerAuth && action === 'folders.fetch' ? [] : args;
   if (typeof fetch !== 'function') throw new GoogleBackendUnavailableError();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
   if (useVercelOwnerAuth && ['works.create', 'works.update'].includes(action)) {
@@ -30,7 +33,7 @@ export async function callGoogleBackend<T>(action: string, args: unknown[], useV
     method: 'POST',
     credentials: 'same-origin',
     headers,
-    body: JSON.stringify({ action, args } satisfies GoogleActionRequest)
+    body: JSON.stringify({ action, args: requestArgs } satisfies GoogleActionRequest)
   });
   const result = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null;
   if (!response.ok || !result?.ok) {

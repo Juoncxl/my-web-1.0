@@ -127,18 +127,23 @@ describe('CXL data service boundary', () => {
   });
 
   it('keeps Owner-only unsupported operations explicit and routes only configured core writes to Google', async () => {
+    const folderFetch = vi.spyOn(googleDataAdapter.folders, 'fetch').mockResolvedValue({ data: [], error: null });
     const service = createCxlDataService('google', 'google', undefined, 'vercel');
     expect(service.works.fetch).toBe(googleDataAdapter.works.fetch);
     expect(service.profiles.getPublic).toBe(googleDataAdapter.profiles.getPublic);
     expect(service.settings.readCreatorSpace).toBe(googleDataAdapter.settings.readCreatorSpace);
     await expect(service.works.create({} as any)).resolves.toMatchObject({ data: null, error: expect.stringContaining('Google Works write Preview flag') });
-    await expect(service.folders.fetch('owner')).resolves.toMatchObject({ data: [], error: expect.stringContaining('Google Works write Preview flag') });
+    await expect(service.folders.fetch('browser-spoofed-id')).resolves.toEqual({ data: [], error: null });
+    expect(folderFetch).toHaveBeenCalledWith('browser-spoofed-id');
+    expect(service.folders.create).not.toBe(googleDataAdapter.folders.create);
+    await expect(service.folders.create({ userId: 'owner', name: 'Folder' } as any)).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
     await expect(service.settings.writeCreatorSpace('owner', {} as any)).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
     await expect(service.folders.delete('folder', 'owner')).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
     await expect(service.engagement.setBookmark('owner', 'work', true)).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
     await expect(service.engagement.fetchBookmarks('owner')).resolves.toMatchObject({ data: [], error: expect.stringContaining('deferred') });
     await expect(service.collaborations.fetchDrafts({ userId: 'owner' })).resolves.toMatchObject({ data: [], error: expect.stringContaining('deferred') });
     await expect(service.media.hydrate([] as any)).rejects.toThrow('deferred');
+    folderFetch.mockRestore();
   });
 
   it('keeps Google available as a separate contract-compatible adapter', () => {

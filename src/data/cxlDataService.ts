@@ -63,11 +63,12 @@ export function createCxlDataService(
     : ownerAuthBackend === 'vercel'
       ? (async () => ({ data: null, error: 'Work update requires the Google Works write Preview flag in Vercel Owner auth mode' })) as CxlDataService['works']['update']
       : supabaseDataAdapter.works.update;
-  const folders = worksWriteBackend === 'google'
-    ? { ...supabaseDataAdapter.folders, fetch: googleDataAdapter.folders.fetch }
-    : ownerAuthBackend === 'vercel'
-      ? { ...supabaseDataAdapter.folders, fetch: async () => ({ data: [], error: 'Owner folders require the Google Works write Preview flag in Vercel Owner auth mode' }) }
-      : supabaseDataAdapter.folders;
+  const folderFetch = ownerAuthBackend === 'vercel' || worksWriteBackend === 'google'
+    ? googleDataAdapter.folders.fetch
+    : supabaseDataAdapter.folders.fetch;
+  const folders = folderFetch === supabaseDataAdapter.folders.fetch
+    ? supabaseDataAdapter.folders
+    : { ...supabaseDataAdapter.folders, fetch: folderFetch };
 
   const base = {
     ...supabaseDataAdapter,

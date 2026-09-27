@@ -83,7 +83,9 @@ function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 }
 function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, authMode: 'supabase' | 'vercel'): boolean {
-  if (action === 'folders.fetch') return args.length === 1 && (args[0] === undefined || args[0] === ownerId || (authMode === 'vercel' && typeof args[0] === 'string'));
+  if (action === 'folders.fetch') return authMode === 'vercel'
+    ? args.length === 0
+    : args.length === 1 && (args[0] === undefined || args[0] === ownerId);
   if (action === 'works.create') return args.length === 2 && record(args[0]) && record(args[1]) && validRequestId(args[1].requestId);
   if (action === 'works.update') return args.length === 3 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0])
     && record(args[1]) && record(args[2]) && validRequestId(args[2].requestId)
@@ -164,7 +166,7 @@ export default async function handler(req: Request, res: Response) {
     const secret = process.env.CXL_API_SHARED_SECRET;
     if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
     try {
-      const ownerArgs = action === 'folders.fetch' ? [authenticatedOwnerId]
+      const ownerArgs = action === 'folders.fetch' ? []
         : action === 'works.create' && authMode === 'vercel'
           ? [{ ...(body.args[0] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[1]]
           : action === 'works.update' && authMode === 'vercel'

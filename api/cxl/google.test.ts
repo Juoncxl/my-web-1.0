@@ -110,7 +110,29 @@ describe('Vercel Google Works read proxy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'works.create' });
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'works.update' });
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'folders.fetch' });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'folders.fetch', args: [] });
+  });
+
+  it('uses the verified Vercel Owner session for folders.fetch and sends no browser identity to GAS', async () => {
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}`;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [{ id: 'folder-1', name: 'Owner folder' }] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await invoke({ action: 'folders.fetch', args: [] })).statusCode).toBe(401);
+    const spoofed = await invoke({ action: 'folders.fetch', args: ['attacker-controlled-id'] }, undefined, 'POST', { cookie });
+    expect(spoofed.statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const result = await invoke({ action: 'folders.fetch', args: [] }, undefined, 'POST', { cookie });
+    expect(result.statusCode).toBe(200);
+    expect(result.json.data).toEqual([{ id: 'folder-1', name: 'Owner folder' }]);
+    const gasRequest = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(gasRequest).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'folders.fetch', args: [] });
+    expect(JSON.stringify(gasRequest)).not.toContain('attacker-controlled-id');
   });
 
   it('rejects unauthenticated, non-owner, malformed, and out-of-scope mutation requests before GAS', async () => {
