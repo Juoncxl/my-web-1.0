@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler from './media';
+import handler from '../../../api/cxl/media';
 
 function invoke(url: string, method = 'GET', headers: Record<string, string> = {}) {
   const response = { statusCode: 200, headers: {} as Record<string, string>, body: Buffer.alloc(0),

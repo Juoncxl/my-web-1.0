@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler, { mediaPocLimits } from './media';
-import { createOwnerSessionToken } from '../../src/server/cxlOwnerAuth';
+import handler, { mediaPocLimits } from '../../../api/cxl/media';
+import { createOwnerSessionToken } from '../../../src/server/cxlOwnerAuth';
 
 const SECRET = 'server-only-cxl-shared-secret';
 const SESSION_SECRET = 'owner-session-secret-that-is-long-enough-for-preview';

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler from './google';
-import { createOwnerSessionToken } from '../../src/server/cxlOwnerAuth';
+import handler from '../../../api/cxl/google';
+import { createOwnerSessionToken } from '../../../src/server/cxlOwnerAuth';
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ auth: { getUser: async (token: string) => token === 'owner-session'

@@ -1,10 +1,10 @@
 import { generateKeyPairSync, sign as signBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import login from './login';
-import callback from './callback';
-import session from './session';
-import logout from './logout';
-import { OWNER_OIDC_TRANSACTION_COOKIE, verifyOidcTransactionToken, createOwnerSessionToken } from '../../../src/server/cxlOwnerAuth';
+import login from '../../../../api/cxl/auth/login';
+import callback from '../../../../api/cxl/auth/callback';
+import session from '../../../../api/cxl/auth/session';
+import logout from '../../../../api/cxl/auth/logout';
+import { OWNER_OIDC_TRANSACTION_COOKIE, verifyOidcTransactionToken, createOwnerSessionToken } from '../../../../src/server/cxlOwnerAuth';
 
 const secret = 'session-secret-that-is-at-least-32-characters-long';
 const allowedSub = 'google-owner-subject-123456789';
