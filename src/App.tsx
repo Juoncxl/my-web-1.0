@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import type { Asset, AssetCategory, AssetStatus } from './types';
@@ -17,6 +17,7 @@ import confetti from 'canvas-confetti';
 
 const brandMicroMarkUrl = new URL('./assets/brand/brand-micro-mark.svg', import.meta.url).href;
 import { useAssetData } from './hooks/useAssetData';
+import { isCurrentDetailOpen } from './hooks/assetDetailRead';
 import { useFolderData } from './hooks/useFolderData';
 import { useEngagementData } from './hooks/useEngagementData';
 import { useRecentlyViewed } from './hooks/useRecentlyViewed';
@@ -128,6 +129,10 @@ function MainApp() {
     ? { ...assetLoadOptions, search: debouncedSearchQuery.trim() || undefined }
     : assetLoadOptions,
   [assetLoadOptions, debouncedSearchQuery, indexedOwnerSearch]);
+  const detailOpenScopeKey = JSON.stringify([currentUser?.id || '', effectiveAssetLoadOptions]);
+  const latestDetailOpenScopeKey = useRef(detailOpenScopeKey);
+  const detailOpenSequence = useRef(0);
+  latestDetailOpenScopeKey.current = detailOpenScopeKey;
 
   const assetLoadingEnabled = !creatorSlug || !authLoading;
 
@@ -211,7 +216,12 @@ function MainApp() {
 
   // Track recently viewed items while keeping the selected asset canonical.
   const handleOpenAssetView = useCallback(async (asset: Asset) => {
+    const request = {
+      sequence: ++detailOpenSequence.current,
+      scopeKey: latestDetailOpenScopeKey.current
+    };
     await loadAssetDetail(asset.id);
+    if (!isCurrentDetailOpen(request, detailOpenSequence.current, latestDetailOpenScopeKey.current)) return;
     openAssetView(asset.id);
     trackRecentlyViewed(asset.id);
   }, [loadAssetDetail, openAssetView, trackRecentlyViewed]);

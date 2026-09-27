@@ -4,6 +4,7 @@ import { cxlDataService, type FetchAssetsOptions, type WorkCreateOptions, type W
 import { ScopedReadLifecycle } from './scopedReadLifecycle';
 import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 import { readWithBoundedRetry } from './boundedReadRetry';
+import { loadAssetDetailWithBoundedRetry, shouldRetryOwnerDetailRead } from './assetDetailRead';
 
 type ReportError = (message: string | null) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
@@ -21,6 +22,7 @@ export function useAssetData(
   // public rows twice during application boot.
   const loadIdentityUserId = loadOptions.publicOnly ? undefined : currentUser?.id;
   const requestSequence = useRef(0);
+  const detailRequestSequence = useRef(0);
   const readLifecycle = useRef(new ScopedReadLifecycle());
   const loadScopeKey = [
     loadOptions.assetId || '',
@@ -123,23 +125,32 @@ export function useAssetData(
   }, [currentUser]);
 
   const loadAssetDetail = useCallback(async (assetId: string): Promise<Asset | null> => {
-    const result = await cxlDataService.works.fetch({
-      assetId,
-      currentUserId: currentUser?.id,
-      detail: 'full',
-      limit: 1
+    const ticket = readLifecycle.current.capture(requestScopeKey);
+    return loadAssetDetailWithBoundedRetry<Asset>({
+      sequence: detailRequestSequence,
+      isScopeCurrent: () => Boolean(ticket && readLifecycle.current.isCurrent(ticket)),
+      retryOwnerTransient: shouldRetryOwnerDetailRead({
+        vercelOwnerAuth: isVercelOwnerAuth,
+        currentUserId: currentUser?.id,
+        publicOnly: loadOptions.publicOnly,
+        creatorSlug: loadOptions.creatorSlug,
+        scopedUserId: loadOptions.userId
+      }),
+      read: () => cxlDataService.works.fetch({
+        assetId,
+        currentUserId: currentUser?.id,
+        detail: 'full',
+        limit: 1
+      }),
+      reportError,
+      commit: (detailedAsset, isCurrent) => setAssets(previous => {
+        if (!isCurrent()) return previous;
+        return previous.some(asset => asset.id === detailedAsset.id)
+          ? previous.map(asset => asset.id === detailedAsset.id ? detailedAsset : asset)
+          : [detailedAsset, ...previous];
+      })
     });
-    if (result.error || !result.data[0]) {
-      if (result.error) reportError(result.error);
-      return null;
-    }
-    const detailedAsset = result.data[0];
-    setAssets(previous => previous.some(asset => asset.id === detailedAsset.id)
-      ? previous.map(asset => asset.id === detailedAsset.id ? detailedAsset : asset)
-      : [detailedAsset, ...previous]
-    );
-    return detailedAsset;
-  }, [currentUser?.id, reportError]);
+  }, [currentUser?.id, loadOptions.publicOnly, reportError, requestScopeKey]);
 
   const updateAsset = useCallback(async (id: string, updates: Partial<Asset>, options?: WorkUpdateOptions) => {
     if (!currentUser) return { data: null, error: 'กรุณาเข้าสู่ระบบก่อนทำการบันทึกผลงาน' };
