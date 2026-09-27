@@ -71,6 +71,7 @@ function makeBridge(secret = SECRET) {
   const folders: Record<string, MemoryFolder> = { [canonical.id]: canonical, [staging.id]: staging };
   const driveRangeCalls: Array<{ url: string; options: Record<string, any> }> = [];
   let driveFetchOverride: ((url: string, options: Record<string, any>) => any) | undefined;
+  let oauthTokenOverride: (() => string) | undefined;
   const context: Record<string, any> = {
     __properties: properties,
     __canonical: canonical,
@@ -89,7 +90,7 @@ function makeBridge(secret = SECRET) {
       getFolderById: (id: string) => { if (!folders[id]) throw new Error('missing folder'); return folders[id]; },
       getFileById: (id: string) => [...canonical.files, ...staging.files].find(file => file.id === id && !file.trashed) || null
     },
-    ScriptApp: { getOAuthToken: () => 'test-only-google-oauth-token' },
+    ScriptApp: { getOAuthToken: () => oauthTokenOverride ? oauthTokenOverride() : 'test-only-google-oauth-token' },
     UrlFetchApp: { fetch: (url: string, options: Record<string, any>) => {
       driveRangeCalls.push({ url, options });
       if (driveFetchOverride) return driveFetchOverride(url, options);
@@ -115,6 +116,7 @@ function makeBridge(secret = SECRET) {
   };
   runInNewContext(source, context);
   context.__setDriveFetch = (override: typeof driveFetchOverride) => { driveFetchOverride = override; };
+  context.__setOAuthToken = (override: typeof oauthTokenOverride) => { oauthTokenOverride = override; };
   context.__wrongSecret = secret;
   return context;
 }
@@ -356,7 +358,7 @@ describe('API-only Owner isolated Media POC', () => {
 
     const logs = parsedReadLogs(context);
     expect(logs.map(log => log.phase)).toEqual(expect.arrayContaining([
-      'request_received', 'manifest_validated', 'drive_fetch_started', 'drive_fetch_completed',
+      'request_received', 'manifest_validated', 'oauth_token_started', 'oauth_token_acquired', 'drive_fetch_started', 'drive_fetch_completed',
       'drive_range_validated', 'response_constructed'
     ]));
     expect(logs.find(log => log.phase === 'drive_fetch_completed')).toMatchObject({
@@ -452,6 +454,24 @@ describe('API-only Owner isolated Media POC', () => {
     expect(serialized).not.toContain(digest(bytes));
   });
 
+  it('distinguishes OAuth token acquisition failures without exposing exception details', () => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    const fixture = seedReadMedia(context, bytes);
+    const sensitiveFailure = 'Bearer secret-token https://drive.example/private/file-id';
+    context.__setOAuthToken(() => { throw new Error(sensitiveFailure); });
+
+    const response = post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]);
+    expect(response).toMatchObject({ ok: false, code: 'MEDIA_POC_MEDIA_READ_FAILED' });
+    expect(context.__driveRangeCalls).toHaveLength(0);
+    const diagnostic = persistedReadDiagnostic(context);
+    expect(diagnostic.phases.map((phase: any) => phase.phase)).toEqual([
+      'request_received', 'manifest_validated', 'oauth_token_started', 'oauth_token_failed', 'read_failed'
+    ]);
+    expect(JSON.stringify(diagnostic)).not.toContain(sensitiveFailure);
+    expect(JSON.stringify(parsedReadLogs(context))).not.toContain(sensitiveFailure);
+  });
+
   it('starts a fresh diagnostic for each read instead of mixing prior phases or status', () => {
     const context = makeBridge();
     const bytes = liveTestPng68();
@@ -464,7 +484,8 @@ describe('API-only Owner isolated Media POC', () => {
     const latest = persistedReadDiagnostic(context);
     expect(latest.action).toBe('ownerChunk');
     expect(latest.phases.map((phase: any) => phase.phase)).toEqual([
-      'request_received', 'manifest_validated', 'drive_fetch_started', 'read_failed'
+      'request_received', 'manifest_validated', 'oauth_token_started', 'oauth_token_acquired',
+      'drive_fetch_started', 'drive_fetch_failed', 'read_failed'
     ]);
     expect(latest.phases.some((phase: any) => 'httpStatus' in phase)).toBe(false);
     expect(latest.phases.some((phase: any) => phase.phase === 'response_constructed')).toBe(false);

@@ -49,8 +49,8 @@ const READ_VALIDATION_CODES = new Set([
   'MEDIA_POC_READ_FULL_CHECKSUM'
 ]);
 const READ_DIAGNOSTIC_PHASES = new Set([
-  'request_received', 'manifest_validated', 'drive_fetch_started', 'drive_fetch_completed',
-  'drive_range_validated', 'response_constructed', 'read_failed'
+  'request_received', 'manifest_validated', 'oauth_token_started', 'oauth_token_acquired', 'oauth_token_failed',
+  'drive_fetch_started', 'drive_fetch_failed', 'drive_fetch_completed', 'drive_range_validated', 'response_constructed', 'read_failed'
 ]);
 const READ_DIAGNOSTIC_CODES = new Set([
   'INVALID_MEDIA_POC_REQUEST', 'MEDIA_POC_STATE_INVALID', 'MEDIA_POC_MEDIA_NOT_FOUND',

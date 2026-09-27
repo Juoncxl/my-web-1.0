@@ -28,7 +28,8 @@ var MEDIA_POC_LAST_READ_DIAGNOSTIC_PROPERTY_ = 'CXL_MEDIA_POC_LAST_READ_DIAGNOST
 var MEDIA_POC_READ_DIAGNOSTIC_MAX_CHARS_ = 2048;
 var MEDIA_POC_ALLOWED_MIME_ = ['image/jpeg','image/png','image/webp','image/gif'];
 var MEDIA_POC_READ_ACTIONS_ = ['media.poc.ownerChunk','media.poc.publicChunk'];
-var MEDIA_POC_READ_PHASES_ = ['request_received','manifest_validated','drive_fetch_started','drive_fetch_completed','drive_range_validated','response_constructed','read_failed'];
+var MEDIA_POC_READ_PHASES_ = ['request_received','manifest_validated','oauth_token_started','oauth_token_acquired','oauth_token_failed',
+  'drive_fetch_started','drive_fetch_failed','drive_fetch_completed','drive_range_validated','response_constructed','read_failed'];
 var MEDIA_POC_READ_ERROR_CODES_ = ['INVALID_MEDIA_POC_REQUEST','MEDIA_POC_STATE_INVALID','MEDIA_POC_MEDIA_NOT_FOUND',
   'MEDIA_POC_MEDIA_NOT_PUBLIC','MEDIA_POC_MEDIA_INVALID','MEDIA_POC_MEDIA_READ_FAILED'];
 var MEDIA_POC_READ_TRACE_ = null;
@@ -367,10 +368,17 @@ function mediaPocSetPublic_(input,ownerUserId) {
 }
 function mediaPocDriveChunk_(fileId,start,expectedLength,totalSize,action,chunkIndex) {
   var end=start+expectedLength-1,url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media';
-  var response,fetchStarted=Date.now();
-  mediaPocReadLog_(action,'drive_fetch_started',{expectedBytes:expectedLength,chunkIndex:chunkIndex});
-  try{response=UrlFetchApp.fetch(url,{method:'get',headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken(),Range:'bytes='+start+'-'+end},muteHttpExceptions:true});}
-  catch(_error){mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_READ_FAILED',expectedBytes:expectedLength,durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
+  var response,readStarted=Date.now(),tokenStarted=Date.now();
+  mediaPocReadLog_(action,'oauth_token_started',{chunkIndex:chunkIndex});
+  var accessToken;
+  try{accessToken=ScriptApp.getOAuthToken();}
+  catch(_tokenError){mediaPocReadLog_(action,'oauth_token_failed',{expectedBytes:expectedLength,durationMs:Date.now()-tokenStarted,chunkIndex:chunkIndex});
+    mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_READ_FAILED',expectedBytes:expectedLength,durationMs:Date.now()-readStarted,chunkIndex:chunkIndex});apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
+  mediaPocReadLog_(action,'oauth_token_acquired',{durationMs:Date.now()-tokenStarted,chunkIndex:chunkIndex});
+  var fetchStarted=Date.now();mediaPocReadLog_(action,'drive_fetch_started',{expectedBytes:expectedLength,chunkIndex:chunkIndex});
+  try{response=UrlFetchApp.fetch(url,{method:'get',headers:{Authorization:'Bearer '+accessToken,Range:'bytes='+start+'-'+end},muteHttpExceptions:true});}
+  catch(_fetchError){mediaPocReadLog_(action,'drive_fetch_failed',{expectedBytes:expectedLength,durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});
+    mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_READ_FAILED',expectedBytes:expectedLength,durationMs:Date.now()-readStarted,chunkIndex:chunkIndex});apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
   var status=response.getResponseCode(),content=response.getContent();
   mediaPocReadLog_(action,'drive_fetch_completed',{httpStatus:status,expectedBytes:expectedLength,actualBytes:content.length,
     durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});

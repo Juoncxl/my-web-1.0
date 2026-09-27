@@ -194,6 +194,10 @@ describe('isolated Preview media POC route', () => {
 
     const diagnostic = { action: 'ownerChunk', phases: [
       { phase: 'request_received', chunkIndex: 0, durationMs: 1 },
+      { phase: 'manifest_validated', chunkIndex: 0, expectedBytes: 68 },
+      { phase: 'oauth_token_started', chunkIndex: 0 },
+      { phase: 'oauth_token_acquired', chunkIndex: 0, durationMs: 1 },
+      { phase: 'drive_fetch_started', chunkIndex: 0, expectedBytes: 68 },
       { phase: 'drive_fetch_completed', httpStatus: 206, expectedBytes: 68, actualBytes: 68, durationMs: 4, chunkIndex: 0 },
       { phase: 'response_constructed', durationMs: 7, chunkIndex: 0 }
     ] };
@@ -207,6 +211,36 @@ describe('isolated Preview media POC route', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json).toEqual({ ok: true, data: diagnostic });
     expect(JSON.stringify(response.json)).not.toMatch(/private-owner-key|script\.google|PRIVATE_DRIVE_ID|fileId|secret|https?:|checksum|base64/i);
+  });
+
+  it.each([
+    ['OAuth token failure', [
+      { phase: 'request_received', chunkIndex: 0 },
+      { phase: 'manifest_validated', expectedBytes: 68, chunkIndex: 0 },
+      { phase: 'oauth_token_started', chunkIndex: 0 },
+      { phase: 'oauth_token_failed', durationMs: 3, chunkIndex: 0 },
+      { phase: 'read_failed', code: 'MEDIA_POC_MEDIA_READ_FAILED', durationMs: 4, chunkIndex: 0 }
+    ]],
+    ['Drive fetch failure', [
+      { phase: 'request_received', chunkIndex: 0 },
+      { phase: 'manifest_validated', expectedBytes: 68, chunkIndex: 0 },
+      { phase: 'oauth_token_started', chunkIndex: 0 },
+      { phase: 'oauth_token_acquired', durationMs: 1, chunkIndex: 0 },
+      { phase: 'drive_fetch_started', expectedBytes: 68, chunkIndex: 0 },
+      { phase: 'drive_fetch_failed', expectedBytes: 68, durationMs: 610, chunkIndex: 0 },
+      { phase: 'read_failed', code: 'MEDIA_POC_MEDIA_READ_FAILED', durationMs: 611, chunkIndex: 0 }
+    ]]
+  ])('accepts the safe %s read trace', async (_label, phases) => {
+    const diagnostic = { action: 'ownerChunk', phases };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: diagnostic })
+    }));
+
+    const response = await invoke({ action: 'readDiagnostics' }, {
+      cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token'
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json).toEqual({ ok: true, data: diagnostic });
   });
 
   it('does not expose invalid raw GAS diagnostic properties and accepts no stored trace as null', async () => {
