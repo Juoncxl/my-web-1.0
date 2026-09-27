@@ -49,6 +49,21 @@ describe('Work media preparation', () => {
     expect(() => assertNoInlineWorkMedia(prepared.asset)).not.toThrow();
   });
 
+  it('still uploads local Supabase media while preserving its stable Composer media ID', async () => {
+    const asset = createAsset();
+    const mediaId = '123e4567-e89b-42d3-a456-426614174010';
+    asset.category = 'prompts';
+    asset.collaboration = null;
+    asset.publicCollaboration = null;
+    asset.icon = { type: 'image', value: 'data:image/png;base64,aGVsbG8=', mediaId };
+
+    const prepared = await prepareAssetMedia(asset, '11111111-1111-4111-8111-111111111111');
+
+    expect(prepared.pending).toHaveLength(1);
+    expect(prepared.pending[0].record.id).toBe(mediaId);
+    expect(prepared.asset.icon.value).toBe(`media:${mediaId}`);
+  });
+
   it('rejects inline media that reaches a cloud payload', () => {
     expect(() => assertNoInlineMedia({ nested: { src: 'blob:https://example.test/1' } })).toThrow(/ยังไม่ได้อัปโหลด/);
   });

@@ -93,6 +93,8 @@ export interface AssetMediaRecord {
   fileSize: number;
   sortOrder: number;
   isCover: boolean;
+  /** Google Drive media marked for Vercel proxy delivery; the Drive file stays private. */
+  delivery?: 'vercel_proxy';
   naturalWidth?: number;
   naturalHeight?: number;
   /** Short-lived display URL. It is never persisted back to the database. */

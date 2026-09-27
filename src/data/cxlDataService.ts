@@ -4,8 +4,8 @@ import type { Asset } from '../types';
 
 /** Structural contract derived from the CXL operations implemented by adapters. */
 type BaseCxlDataService = typeof supabaseDataAdapter;
-export type WorkCreateOptions = { requestId?: string };
-export type WorkUpdateOptions = { requestId?: string; expectedRevision?: number };
+export type WorkCreateOptions = { requestId?: string; mediaIds?: string[] };
+export type WorkUpdateOptions = { requestId?: string; expectedRevision?: number; mediaIds?: string[] };
 export type CxlDataService = Omit<BaseCxlDataService, 'works' | 'folders'> & {
   works: Omit<BaseCxlDataService['works'], 'create' | 'update'> & {
     create: (asset: Parameters<BaseCxlDataService['works']['create']>[0], options?: WorkCreateOptions) => ReturnType<BaseCxlDataService['works']['create']>;

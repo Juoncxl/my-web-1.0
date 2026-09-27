@@ -73,7 +73,9 @@ describe('CreatorContentCanvas dynamic draft model', () => {
     const withToolModel = updateImagePromptToolModel(original, 'TensorArt — Z-Image Turbo');
     const withImages = updateImagePromptExamples(withToolModel, ['data:image/png;base64,one']);
     expect(original.imagePrompt.toolModel).toBe('');
-    expect(withImages.imagePrompt).toEqual({ toolModel: 'TensorArt — Z-Image Turbo', prompt: '', exampleImages: ['data:image/png;base64,one'] });
+    expect(withImages.imagePrompt).toMatchObject({ toolModel: 'TensorArt — Z-Image Turbo', prompt: '', exampleImages: ['data:image/png;base64,one'] });
+    expect(withImages.imagePrompt.exampleImageMediaIds).toHaveLength(1);
+    expect(withImages.imagePrompt.exampleImageMediaIds?.[0]).toMatch(/^[a-f0-9-]{36}$/i);
     expect(canvasSource).toContain('เครื่องมือ / โมเดลที่ใช้');
     expect(canvasSource).toContain('TensorArt — Z-Image Turbo, ChatGPT, Gemini');
     expect(canvasSource).not.toContain('แอปที่ใช้');

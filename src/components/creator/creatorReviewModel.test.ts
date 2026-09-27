@@ -98,4 +98,15 @@ describe('Creator Review draft-to-presentation adapter', () => {
     expect(getCreatorReviewMissingNotices({ title: '', coverImage: '' })).toEqual(['ยังไม่ได้ตั้งชื่อผลงาน', 'ยังไม่ได้เลือกภาพปก']);
     expect(getCreatorReviewMissingNotices({ title: 'Ready', coverImage: 'cover-image' })).toEqual([]);
   });
+
+  it('keeps a content image media identity on its generated Work block', () => {
+    const canvas = createBlankContentCanvasDraft();
+    canvas.imagePrompt.exampleImages = ['blob:content-image'];
+    canvas.imagePrompt.exampleImageMediaIds = ['123e4567-e89b-42d3-a456-426614174001'];
+    const asset = createCreatorReviewAsset({ ...reviewInput(), contentTypes: ['image_prompt'], contentCanvas: canvas });
+
+    expect(asset.contentBlocks.find(block => block.type === 'Image')).toMatchObject({
+      body: 'blob:content-image', mediaId: '123e4567-e89b-42d3-a456-426614174001'
+    });
+  });
 });

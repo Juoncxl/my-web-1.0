@@ -34,6 +34,15 @@ describe('Creator Composer unified media draft', () => {
     expect(source).toContain('เพิ่มรูปเพื่อใช้เป็นภาพปกหรือแกลเลอรีของผลงาน');
   });
 
+  it('keeps identities for canonical refs, creates them for local media, and leaves remote URLs alone', () => {
+    const draft = createMediaDraftFromLegacy({ previewImages: [
+      'media:123e4567-e89b-42d3-a456-426614174001', 'blob:local-image', 'https://cdn.example.test/legacy.png'
+    ] });
+    expect(draft.items[0].mediaId).toBe('123e4567-e89b-42d3-a456-426614174001');
+    expect(draft.items[1].mediaId).toMatch(/^[a-f0-9-]{36}$/i);
+    expect(draft.items[2].mediaId).toBeUndefined();
+  });
+
   it('accepts static images for new global media while preserving legacy GIF records', () => {
     const image = createMediaItem('data:image/png;base64,image', 'image/png', 'one');
     const gif = createMediaItem('data:image/gif;base64,gif', 'image/gif', 'two');

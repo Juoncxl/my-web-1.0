@@ -374,4 +374,58 @@ describe('Vercel Google Works read proxy', () => {
       timeoutSpy.mockRestore();
     }
   });
+
+  it('allows standard Work media upload actions only from a CSRF-protected Owner session in Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: {
+      uploadId: '123e4567-e89b-42d3-a456-426614174099', mediaId: '123e4567-e89b-42d3-a456-426614174010', finalized: false
+    } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const begin = {
+      uploadId: '123e4567-e89b-42d3-a456-426614174000', mediaId: '123e4567-e89b-42d3-a456-426614174010',
+      workId: 'asset_1234567890abcdef1234567890abcdef', totalFileSize: 68, rawChunkSize: 2 * 1024 * 1024,
+      totalChunks: 1, mimeType: 'image/png', sha256: 'a'.repeat(64), purpose: 'gallery', contextId: null,
+      sortOrder: 0, isCover: true
+    };
+    const headers = { cookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' };
+
+    const missingCsrf = await invoke({ action: 'media.upload.begin', args: [begin] }, undefined, 'POST', { cookie, origin: 'https://cxl.example' });
+    const invalid = await invoke({ action: 'media.upload.begin', args: [{ ...begin, driveId: 'must-not-pass' }] }, undefined, 'POST', headers);
+    const accepted = await invoke({ action: 'media.upload.begin', args: [begin] }, undefined, 'POST', headers);
+    const workMediaId = begin.mediaId;
+    const commit = await invoke({ action: 'works.create', args: [{
+      title: 'Media Work', category: 'prompts', content: '', contentBlocks: [],
+      previewImage: `media:${workMediaId}`, previewImages: [`media:${workMediaId}`]
+    }, { requestId: '123e4567-e89b-42d3-a456-426614174011', mediaIds: [workMediaId] }] }, undefined, 'POST', headers);
+
+    expect([missingCsrf.statusCode, invalid.statusCode, accepted.statusCode, commit.statusCode]).toEqual([403, 400, 200, 200]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const gasRequest = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(gasRequest).toMatchObject({ authorization: 'server-only-secret', ownerUserId: 'owner-1', action: 'media.upload.begin', args: [begin] });
+    expect(JSON.stringify(gasRequest)).not.toMatch(/cookie|csrf-token|google-owner-subject/);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ action: 'works.create', args: [expect.objectContaining({ previewImage: `media:${workMediaId}` }), { mediaIds: [workMediaId] }] });
+  });
+
+  it('blocks new Work media uploads and media-bearing Work commits outside Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const mediaId = '123e4567-e89b-42d3-a456-426614174010';
+    const begin = { uploadId: '123e4567-e89b-42d3-a456-426614174000', mediaId,
+      workId: 'asset_1234567890abcdef1234567890abcdef', totalFileSize: 68, rawChunkSize: 2 * 1024 * 1024,
+      totalChunks: 1, mimeType: 'image/png', sha256: 'a'.repeat(64), purpose: 'gallery', contextId: null, sortOrder: 0, isCover: true };
+    const create = { title: 'Work', category: 'prompts', content: '', contentBlocks: [], previewImage: `media:${mediaId}`, previewImages: [`media:${mediaId}`] };
+
+    const upload = await invoke({ action: 'media.upload.begin', args: [begin] }, 'Bearer owner-session');
+    const commit = await invoke({ action: 'works.create', args: [create, { requestId: '123e4567-e89b-42d3-a456-426614174001', mediaIds: [mediaId] }] }, 'Bearer owner-session');
+
+    expect([upload.statusCode, commit.statusCode]).toEqual([404, 404]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

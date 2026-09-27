@@ -45,6 +45,8 @@ export interface CreatorContentCanvasDraft {
     /** D.3.0 in-session compatibility; never rendered as a separate model field. */
     model?: string;
     exampleImages: string[];
+    /** Parallel stable IDs used only for standard Work media uploads. */
+    exampleImageMediaIds?: Array<string | undefined>;
   };
   uiCode: string;
   botPrompt: CreatorLegacyBotPromptFields & {
@@ -108,7 +110,10 @@ export function cloneContentCanvasDraft(draft: CreatorContentCanvasDraft): Creat
     imagePrompt: {
       prompt: draft.imagePrompt.prompt,
       toolModel: draft.imagePrompt.toolModel ?? draft.imagePrompt.model ?? '',
-      exampleImages: [...draft.imagePrompt.exampleImages]
+      exampleImages: [...draft.imagePrompt.exampleImages],
+      ...(draft.imagePrompt.exampleImageMediaIds
+        ? { exampleImageMediaIds: [...draft.imagePrompt.exampleImageMediaIds] }
+        : {})
     },
     uiCode: draft.uiCode,
     botPrompt: {
@@ -230,7 +235,7 @@ export function getSelectedContentTypes(values: readonly CreatorContentType[]): 
 export function createContentCanvasDraftFromLegacy(input: {
   category: string;
   content?: string;
-  contentBlocks?: Array<{ id?: string; type: string; title?: string; body: string }>;
+  contentBlocks?: Array<{ id?: string; type: string; title?: string; body: string; mediaId?: string }>;
   uiCodeSnippet?: string;
 }): CreatorContentCanvasDraft {
   const draft = createBlankContentCanvasDraft();
@@ -256,7 +261,12 @@ export function createContentCanvasDraftFromLegacy(input: {
     else if (block.id === 'creator-story' || knownTitles[title] === 'story') { draft.story = body; appendDerived('story'); }
     else if (block.id === 'creator-image-prompt' || title === 'คำสั่งเจนรูป') { draft.imagePrompt.prompt = body; appendDerived('image-prompt'); }
     else if (block.id === 'creator-image-tool-model' || title === 'เครื่องมือ / โมเดลที่ใช้') { draft.imagePrompt.toolModel = body; appendDerived('image-prompt'); }
-    else if (block.type === 'Image' || block.id?.startsWith('creator-image-example-')) { draft.imagePrompt.exampleImages.push(body); appendDerived('image-prompt'); }
+    else if (block.type === 'Image' || block.id?.startsWith('creator-image-example-')) {
+      draft.imagePrompt.exampleImages.push(body);
+      draft.imagePrompt.exampleImageMediaIds ||= [];
+      draft.imagePrompt.exampleImageMediaIds.push(block.mediaId || mediaIdFromReference_(body) || (isLocalImageSource_(body) ? createStableMediaId_() : undefined));
+      appendDerived('image-prompt');
+    }
     else if (block.id?.startsWith('creator-bot-')) {
       const field = { id: block.id.slice('creator-bot-'.length) || `legacy-custom-${index}`, title: title || 'ช่องข้อมูล', value: body };
       if (!customFields.some(item => item.title === field.title && item.value === body)) customFields.push(field);
@@ -351,7 +361,33 @@ export function updateImagePromptToolModel(draft: CreatorContentCanvasDraft, too
 export function updateImagePromptExamples(draft: CreatorContentCanvasDraft, images: string[]): CreatorContentCanvasDraft {
   const next = cloneContentCanvasDraft(draft);
   next.imagePrompt.exampleImages = [...images].slice(-6);
+  const previousIds = draft.imagePrompt.exampleImageMediaIds || [];
+  const used = new Set<number>();
+  next.imagePrompt.exampleImageMediaIds = next.imagePrompt.exampleImages.map(image => {
+    const previousIndex = draft.imagePrompt.exampleImages.findIndex((candidate, index) => candidate === image && !used.has(index));
+    if (previousIndex >= 0) {
+      used.add(previousIndex);
+      return previousIds[previousIndex] || mediaIdFromReference_(image) || (isLocalImageSource_(image) ? createStableMediaId_() : undefined);
+    }
+    return mediaIdFromReference_(image) || (isLocalImageSource_(image) ? createStableMediaId_() : undefined);
+  });
   return next;
+}
+
+function isLocalImageSource_(value: string): boolean {
+  return /^data:image\//i.test(value) || /^blob:/i.test(value);
+}
+
+function mediaIdFromReference_(value: string): string | null {
+  return value.startsWith('media:') ? value.slice('media:'.length) || null : null;
+}
+
+function createStableMediaId_(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, token => {
+    const value = Math.floor(Math.random() * 16);
+    return (token === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+  });
 }
 
 export function addBotCustomField(

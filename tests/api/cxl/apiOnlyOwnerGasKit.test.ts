@@ -119,7 +119,10 @@ describe('API-only Owner GAS package isolation', () => {
     ['works.fetch', [{}], 'fetchCxlWorks_'],
     ['folders.fetch', [], 'cxlOwnerFolders_'],
     ['works.create', [{ title: 'New' }, { requestId: 'request' }], 'saveCxlWorkApi_'],
-    ['works.update', ['work-id', { title: 'Update' }, { requestId: 'request', expectedRevision: 1 }], 'saveCxlWorkApi_']
+    ['works.update', ['work-id', { title: 'Update' }, { requestId: 'request', expectedRevision: 1 }], 'saveCxlWorkApi_'],
+    ['media.upload.begin', [{ mediaId: '123e4567-e89b-42d3-a456-426614174000' }], 'mediaWorkUploadDispatch_'],
+    ['media.upload.chunk', [{ uploadId: '123e4567-e89b-42d3-a456-426614174001' }], 'mediaWorkUploadDispatch_'],
+    ['media.upload.finalize', [{ uploadId: '123e4567-e89b-42d3-a456-426614174001' }], 'mediaWorkUploadDispatch_']
   ])('dispatches allowlisted %s only after shared-secret validation', (action, args, helper) => {
     const context = makeBridge();
     const spy = vi.fn().mockReturnValue({ data: 'ok' });
@@ -135,6 +138,8 @@ describe('API-only Owner GAS package isolation', () => {
       .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_COLLAB_DRAFT' }));
     expect(() => context.rejectUnsupportedWorkMedia_({ previewImage: 'data:image/png;base64,AA==' }, null))
       .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
+    expect(() => context.rejectUnsupportedWorkMedia_({ category: 'collab' }, null, ['123e4567-e89b-42d3-a456-426614174000']))
+      .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_COLLAB_DRAFT' }));
   });
 
   it('reuses the canonical post-write record instead of rereading it for the response', () => {

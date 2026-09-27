@@ -9,7 +9,8 @@ type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
 const ALLOWED_OPTIONS = new Set(['userId','currentUserId','creatorSlug','assetId','category','folderId','search','includeDeleted','onlyDeleted','publicOnly','limit','detail']);
 const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','settings.readCreatorSpace']);
-const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch']);
+const MEDIA_UPLOAD_ACTIONS = new Set(['media.upload.begin','media.upload.chunk','media.upload.finalize']);
+const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch', ...MEDIA_UPLOAD_ACTIONS]);
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update']);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
@@ -101,14 +102,58 @@ function validPublicActionArgs(action: string, args: unknown[]): boolean {
 function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 }
+function validMediaIds(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.length <= 20
+    && value.every(id => validRequestId(id)) && new Set(value).size === value.length);
+}
+function validMediaUploadArgs(action: string, args: unknown[]): boolean {
+  if (action === 'media.upload.begin') {
+    if (args.length !== 1 || !record(args[0])) return false;
+    const input = args[0];
+    const allowed = new Set(['uploadId','mediaId','workId','totalFileSize','rawChunkSize','totalChunks','mimeType','sha256','purpose','contextId','sortOrder','isCover']);
+    return Object.keys(input).every(key => allowed.has(key))
+      && validRequestId(input.uploadId) && validRequestId(input.mediaId)
+      && typeof input.workId === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(input.workId)
+      && Number.isInteger(input.totalFileSize) && Number(input.totalFileSize) >= 1 && Number(input.totalFileSize) <= 10 * 1024 * 1024
+      && input.rawChunkSize === 2 * 1024 * 1024
+      && Number.isInteger(input.totalChunks) && Number(input.totalChunks) === Math.ceil(Number(input.totalFileSize) / (2 * 1024 * 1024))
+      && Number(input.totalChunks) >= 1 && Number(input.totalChunks) <= 5
+      && ['image/jpeg','image/png','image/webp','image/gif'].includes(String(input.mimeType))
+      && typeof input.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.sha256)
+      && ['icon','gallery','prompt_example'].includes(String(input.purpose))
+      && (input.contextId === undefined || input.contextId === null || (typeof input.contextId === 'string' && input.contextId.length <= 128))
+      && Number.isInteger(input.sortOrder) && Number(input.sortOrder) >= 0 && Number(input.sortOrder) <= 20
+      && typeof input.isCover === 'boolean';
+  }
+  if (action === 'media.upload.chunk') {
+    if (args.length !== 1 || !record(args[0])) return false;
+    const input = args[0];
+    const maxBase64Length = 4 * Math.ceil((2 * 1024 * 1024) / 3);
+    return Object.keys(input).every(key => ['uploadId','chunkIndex','base64','sha256'].includes(key))
+      && validRequestId(input.uploadId) && Number.isInteger(input.chunkIndex)
+      && Number(input.chunkIndex) >= 0 && Number(input.chunkIndex) <= 4
+      && typeof input.base64 === 'string' && input.base64.length > 0 && input.base64.length <= maxBase64Length
+      && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.base64)
+      && typeof input.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.sha256);
+  }
+  if (action === 'media.upload.finalize') return args.length === 1 && record(args[0])
+    && Object.keys(args[0]).length === 1 && validRequestId(args[0].uploadId);
+  return false;
+}
+function validWorkWriteOptions(action: string, value: unknown): boolean {
+  if (!record(value) || !validRequestId(value.requestId) || !validMediaIds(value.mediaIds)) return false;
+  const allowed = new Set(action === 'works.create' ? ['requestId','mediaIds'] : ['requestId','expectedRevision','mediaIds']);
+  return Object.keys(value).every(key => allowed.has(key))
+    && (action !== 'works.update' || (Number.isInteger(value.expectedRevision) && Number(value.expectedRevision) >= 1));
+}
 function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, authMode: 'supabase' | 'vercel'): boolean {
   if (action === 'folders.fetch') return authMode === 'vercel'
     ? args.length === 0
     : args.length === 1 && (args[0] === undefined || args[0] === ownerId);
-  if (action === 'works.create') return args.length === 2 && record(args[0]) && record(args[1]) && validRequestId(args[1].requestId);
+  if (action === 'works.create') return args.length === 2 && record(args[0]) && validWorkWriteOptions(action, args[1]);
   if (action === 'works.update') return args.length === 3 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0])
-    && record(args[1]) && record(args[2]) && validRequestId(args[2].requestId)
-    && Number.isInteger(args[2].expectedRevision) && Number(args[2].expectedRevision) >= 1;
+    && record(args[1]) && validWorkWriteOptions(action, args[2]);
+  if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
 }
 function ownerErrorStatus(code: unknown): number {
@@ -120,6 +165,10 @@ function ownerErrorStatus(code: unknown): number {
   if (code === 'UNSUPPORTED_MEDIA_MUTATION' || code === 'UNSUPPORTED_COLLAB_DRAFT') return 422;
   if (code === 'CREATOR_MAPPING_MISSING' || code === 'CREATOR_MAPPING_AMBIGUOUS' || code === 'FOLDER_SCHEMA_INVALID') return 503;
   if (code === 'OWNER_REQUIRED') return 401;
+  if (code === 'MEDIA_UPLOAD_NOT_CONFIGURED' || code === 'MEDIA_UPLOAD_FOLDER_NOT_PRIVATE') return 503;
+  if (code === 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' || code === 'MEDIA_UPLOAD_SESSION_EXPIRED' || code === 'MEDIA_UPLOAD_SESSION_CLOSED') return 409;
+  if (code === 'MEDIA_UPLOAD_CHUNK_CHECKSUM' || code === 'MEDIA_UPLOAD_CHUNK_CONFLICT' || code === 'MEDIA_UPLOAD_FINAL_CHECKSUM' || code === 'MEDIA_UPLOAD_MIME_MISMATCH') return 422;
+  if (typeof code === 'string' && code.startsWith('INVALID_MEDIA_UPLOAD')) return 400;
   if (code === 'INVALID_FOLDER' || code === 'INVALID_WORK' || code === 'INVALID_REQUEST_ID' || code === 'REVISION_REQUIRED') return 400;
   return 502;
 }
@@ -160,6 +209,12 @@ export default async function handler(req: Request, res: Response) {
     }
   }
   if (OWNER_ACTIONS.has(action)) {
+    if ((MEDIA_UPLOAD_ACTIONS.has(action) || ((action === 'works.create' || action === 'works.update')
+      && record(body.args[action === 'works.create' ? 1 : 2]) && Array.isArray((body.args[action === 'works.create' ? 1 : 2] as Record<string, unknown>).mediaIds)
+      && ((body.args[action === 'works.create' ? 1 : 2] as Record<string, unknown>).mediaIds as unknown[]).length > 0))
+      && process.env.VERCEL_ENV !== 'preview') {
+      return send(res, 404, { ok: false, error: 'Google Work media writes are available only in Preview' });
+    }
     const authMode = selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND);
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -177,7 +232,7 @@ export default async function handler(req: Request, res: Response) {
     if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
     if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
-    if ((action === 'works.create' || action === 'works.update') && authMode === 'vercel'
+    if ((action === 'works.create' || action === 'works.update' || MEDIA_UPLOAD_ACTIONS.has(action)) && authMode === 'vercel'
       && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
       return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
     }

@@ -9,6 +9,8 @@ import type {
   WorkContentBlock
 } from '../../types';
 import { CREATOR_CONTENT_TYPE_META } from './creatorContentModel';
+import type { CreatorMediaDraft } from './creatorMediaModel';
+import type { StandardWorkMediaDraft } from '../../lib/workMedia';
 import {
   cloneCreatorCollaborationDraft,
   createPublicCollaborationSnapshot,
@@ -39,6 +41,11 @@ export interface SerializableCreatorWorkDraft {
   imagePromptToolModel: string;
   collaboration: CreatorCollaborationDraft;
   collaborationAssetId: string | null;
+  mediaDraft?: CreatorMediaDraft;
+}
+
+function isLocalMediaSource(value: string): boolean {
+  return /^data:image\//i.test(value) || /^blob:/i.test(value);
 }
 
 export type CreatorWorkAssetFields = Pick<Asset,
@@ -73,13 +80,32 @@ function contentTypesToCategory(values: AssetContentType[]): Asset['category'] {
 }
 
 /** The single serializer used by Composer Review, local persistence, and Supabase persistence. */
-export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): CreatorWorkAssetFields {
+export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): CreatorWorkAssetFields & { workMediaDraft: StandardWorkMediaDraft[] } {
   const isCollaboration = draft.workMode === 'collab';
   const title = isCollaboration ? draft.collaboration.name.trim() : draft.title.trim();
   const contentTypes = [...draft.contentTypes];
   const regularBlocks = draft.contentBlocks
     .filter(block => !isPublicCollabContentBlock(block))
     .map(block => ({ ...block }));
+  const workMediaDraft: StandardWorkMediaDraft[] = [];
+  if (!isCollaboration) {
+    if (draft.icon.type === 'image' && isLocalMediaSource(draft.icon.value) && draft.icon.mediaId) {
+      workMediaDraft.push({ mediaId: draft.icon.mediaId, source: draft.icon.value, purpose: 'icon', sortOrder: 0, isCover: false, mimeType: draft.icon.mimeType });
+    }
+    draft.mediaDraft?.items.forEach((item, sortOrder) => {
+      if (isLocalMediaSource(item.src) && item.mediaId) {
+        workMediaDraft.push({
+          mediaId: item.mediaId, source: item.src, purpose: 'gallery', sortOrder,
+          isCover: item.id === draft.mediaDraft.coverId, mimeType: item.mimeType
+        });
+      }
+    });
+    regularBlocks.forEach((block, sortOrder) => {
+      if (block.type === 'Image' && isLocalMediaSource(block.body) && block.mediaId) {
+        workMediaDraft.push({ mediaId: block.mediaId, source: block.body, purpose: 'prompt_example', contextId: block.id, sortOrder, isCover: false });
+      }
+    });
+  }
 
   return {
     title,
@@ -109,7 +135,8 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
     isPublic: draft.visibility === 'public',
     visibility: draft.visibility,
     status: draft.status,
-    tags: [...draft.tags]
+    tags: [...draft.tags],
+    workMediaDraft
   };
 }
 

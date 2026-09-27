@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Asset } from '../../../types';
 import { googleDataAdapter } from './googleDataAdapter';
 import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
@@ -23,6 +23,7 @@ const hydratedAsset = {
 } as unknown as Asset;
 
 describe('Google Work update write DTO', () => {
+  afterEach(() => vi.unstubAllGlobals());
   it('converts a full hydrated Asset to writable fields and keeps id/revision in their dedicated arguments', () => {
     const options = { requestId: '123e4567-e89b-42d3-a456-426614174000' };
     const [id, updates, writeOptions] = toGoogleWorkUpdateRequest(hydratedAsset.id, hydratedAsset, options);
@@ -77,5 +78,30 @@ describe('Google Work update write DTO', () => {
     await googleDataAdapter.works.create(create, options);
 
     expect(transport).toHaveBeenCalledWith('works.create', [create, options]);
+  });
+
+  it('uploads local media with its independent mediaId before committing a create with the same requestId', async () => {
+    const transport = vi.mocked(callGoogleBackend);
+    transport.mockClear();
+    transport.mockImplementation(async (action: string) => (action === 'media.upload.begin'
+      ? { uploadId: '123e4567-e89b-42d3-a456-426614174099', finalized: false }
+      : { data: { id: 'asset_created' }, error: null }) as any);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: 'image/png' }) })));
+    const mediaId = '123e4567-e89b-42d3-a456-426614174010';
+    const requestId = '123e4567-e89b-42d3-a456-426614174000';
+
+    await googleDataAdapter.works.create({
+      title: 'New Work', category: 'character',
+      icon: { type: 'image', value: 'blob:icon', mediaId, mimeType: 'image/png' },
+      workMediaDraft: [{ mediaId, source: 'blob:icon', purpose: 'icon', sortOrder: 0, isCover: false, mimeType: 'image/png' }]
+    } as any, { requestId });
+
+    expect(transport.mock.calls.map(([action]) => action)).toEqual([
+      'media.upload.begin', 'media.upload.chunk', 'media.upload.finalize', 'works.create'
+    ]);
+    expect(transport.mock.calls[0][1][0]).toMatchObject({ mediaId, workId: `asset_${requestId.replace(/-/g, '')}` });
+    expect(transport.mock.calls[0][1][0]).not.toMatchObject({ mediaId: requestId });
+    expect(transport.mock.calls[3][1][1]).toEqual({ requestId, mediaIds: [mediaId] });
+    expect(transport.mock.calls[3][1][0]).toMatchObject({ icon: { value: `media:${mediaId}` } });
   });
 });

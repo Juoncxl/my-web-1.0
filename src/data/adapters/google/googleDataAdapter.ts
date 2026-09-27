@@ -11,34 +11,45 @@ import {
 } from '../../../lib/workMedia';
 import { callGoogleBackend } from './googleTransport';
 import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
+import { prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
 
 type Operation = (...args: any[]) => any;
 const remote = <T extends Operation>(action: string): T =>
   ((...args: Parameters<T>) => callGoogleBackend<Awaited<ReturnType<T>>>(action, args)) as T;
 
-async function googleWriteResult<T>(action: string, args: unknown[]): Promise<{ data: T | null; error: string | null }> {
-  try { return await callGoogleBackend<{ data: T | null; error: string | null }>(action, args); }
-  catch (error) { return { data: null, error: error instanceof Error ? error.message : `Google ${action} failed` }; }
-}
-
-async function uploadGooglePrepared(prepared: Parameters<CxlDataService['media']['uploadPrepared']>[0]): Promise<Awaited<ReturnType<CxlDataService['media']['uploadPrepared']>>> {
-  const pending = await Promise.all(prepared.pending.map(async item => {
-    const bytes = new Uint8Array(await item.blob.arrayBuffer());
-    let binary = '';
-    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+async function saveGoogleWork<T>(action: 'works.create' | 'works.update', idOrAsset: string | GoogleWorkAssetInput, updateOrOptions?: Partial<GoogleWorkAssetInput> | { requestId?: string; expectedRevision?: number }, maybeOptions?: { requestId?: string; expectedRevision?: number }) {
+  try {
+    const isUpdate = action === 'works.update';
+    const rawAsset = (isUpdate ? updateOrOptions : idOrAsset) as GoogleWorkAssetInput;
+    const options = (isUpdate ? maybeOptions : updateOrOptions) as { requestId?: string; expectedRevision?: number; mediaIds?: string[] } | undefined;
+    const requestId = options?.requestId;
+    const targetWorkId = isUpdate
+      ? String(idOrAsset)
+      : requestId && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(requestId)
+        ? `asset_${requestId.replace(/-/g, '').toLowerCase()}`
+        : '';
+    const prepared = await prepareGoogleWorkMedia(rawAsset);
+    let mediaIds = options?.mediaIds || [];
+    if (prepared.pending.length) {
+      if (!requestId || !targetWorkId) throw new Error('A stable Work request ID is required before uploading media');
+      mediaIds = await uploadGoogleWorkMedia(prepared.pending, { workId: targetWorkId });
     }
-    return { record: item.record, base64: btoa(binary) };
-  }));
-  return callGoogleBackend('media.uploadPrepared', [{ asset: prepared.asset, pending }]);
+    if (isUpdate) {
+      const [id, updates, writeOptions] = toGoogleWorkUpdateRequest(String(idOrAsset), prepared.asset, options);
+      return await callGoogleBackend<T>(action, [id, updates, { ...writeOptions, ...(mediaIds.length ? { mediaIds } : {}) }]);
+    }
+    return await callGoogleBackend<T>(action, [prepared.asset, { ...options, ...(mediaIds.length ? { mediaIds } : {}) }]);
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error.message : `Google ${action} failed` };
+  }
 }
 
 /** Inactive Google implementation of the current CXL data contract. */
 export const googleDataAdapter = {
   works: {
     fetch: remote<CxlDataService['works']['fetch']>('works.fetch'),
-    create: ((asset, options) => googleWriteResult('works.create', [asset, options])) as CxlDataService['works']['create'],
-    update: ((id, updates, options) => googleWriteResult('works.update', toGoogleWorkUpdateRequest(id, updates, options))) as CxlDataService['works']['update'],
+    create: ((asset, options) => saveGoogleWork('works.create', asset as GoogleWorkAssetInput, options)) as CxlDataService['works']['create'],
+    update: ((id, updates, options) => saveGoogleWork('works.update', id, updates, options)) as CxlDataService['works']['update'],
     softDelete: remote<CxlDataService['works']['softDelete']>('works.softDelete'),
     restore: remote<CxlDataService['works']['restore']>('works.restore'),
     permanentDelete: remote<CxlDataService['works']['permanentDelete']>('works.permanentDelete'),
@@ -66,7 +77,7 @@ export const googleDataAdapter = {
   },
   media: {
     prepare: prepareAssetMedia,
-    uploadPrepared: uploadGooglePrepared,
+    uploadPrepared: async () => { throw new Error('Google media uploads are available only through standard Work create/update'); },
     cleanupNew: remote<CxlDataService['media']['cleanupNew']>('media.cleanupNew'),
     listForDeletion: remote<CxlDataService['media']['listForDeletion']>('media.listForDeletion'),
     removeObjects: remote<CxlDataService['media']['removeObjects']>('media.removeObjects'),

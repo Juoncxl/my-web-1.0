@@ -13,6 +13,16 @@ type PendingMedia = {
   record: AssetMediaRecord;
 };
 
+export interface StandardWorkMediaDraft {
+  mediaId: string;
+  source: string;
+  purpose: 'icon' | 'gallery' | 'prompt_example';
+  contextId?: string | null;
+  sortOrder: number;
+  isCover: boolean;
+  mimeType?: string;
+}
+
 export type PreparedAssetMedia = {
   asset: Asset;
   pending: PendingMedia[];
@@ -111,6 +121,9 @@ function manifestPayload(record: AssetMediaRecord) {
 
 export async function prepareAssetMedia(asset: Asset, userId: string): Promise<PreparedAssetMedia> {
   const next = cloneAsset(asset);
+  // Google-only Composer upload descriptors are transport metadata and must
+  // never enter Supabase JSON, validation, or persisted Work fields.
+  delete (next as Asset & { workMediaDraft?: unknown }).workMediaDraft;
   // Creator avatars are hydrated from the canonical public profile resolver.
   // The local profile image store may expose that avatar as an origin-bound
   // blob URL, but it is not Work media and must never block or enter a Work
@@ -131,7 +144,8 @@ export async function prepareAssetMedia(asset: Asset, userId: string): Promise<P
     naturalWidth?: number;
     naturalHeight?: number;
   }): Promise<{ ref: string; mediaId?: string }> => {
-    const referenceId = input.mediaId || mediaIdFromReference(input.source);
+    const isLocalSource = isInlineMediaUrl(input.source);
+    const referenceId = mediaIdFromReference(input.source) || (!isLocalSource ? input.mediaId : undefined);
     if (referenceId) return { ref: mediaReference(referenceId), mediaId: referenceId };
 
     const matching = existing.find(item => item.signedUrl === input.source) || existing.find(item =>
@@ -153,7 +167,7 @@ export async function prepareAssetMedia(asset: Asset, userId: string): Promise<P
     const mimeType = (blob.type || input.mimeType || 'image/png').toLowerCase();
     if (!SUPPORTED_TYPES.has(mimeType)) throw new Error(`ไม่รองรับไฟล์ชนิด ${mimeType}`);
     if (blob.size <= 0 || blob.size > 10 * 1024 * 1024) throw new Error('รูปต้องมีขนาดไม่เกิน 10MB ต่อไฟล์');
-    const id = createMediaId();
+    const id = input.mediaId || createMediaId();
     const storagePath = `${userId}/${asset.id}/${id}.${extensionForMimeType(mimeType)}`;
     const item: PendingMedia = {
       blob,
