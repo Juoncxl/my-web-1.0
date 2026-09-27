@@ -271,7 +271,14 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const activeTab = resolvedView.activeTab;
   const isEditing = isOwner && !resolvedView.isPublicView;
   const canManageFreeLayout = !isVercelOwnerAuth && shouldShowFreePlacementControls(isOwner, resolvedView.isPublicView, isCustomizeOpen);
-  const presentationProfile = isOwner && currentUser ? currentUser : profile;
+  const presentationProfile = isOwner && currentUser ? {
+    ...currentUser,
+    displayName: profile?.displayName || currentUser.displayName,
+    bio: profile?.bio ?? currentUser.bio,
+    avatarUrl: profile?.avatarUrl || currentUser.avatarUrl,
+    coverUrl: profile?.coverUrl || currentUser.coverUrl,
+    socialLinks: profile?.socialLinks ?? currentUser.socialLinks
+  } : profile;
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   useEffect(() => {

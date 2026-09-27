@@ -31,7 +31,8 @@ Configure these only in the Vercel Preview environment. Never prefix a secret wi
 | `CXL_OWNER_APP_ORIGIN` | Exact HTTPS Preview origin; no path/query |
 | `CXL_OWNER_USER_ID` | Existing legacy Owner record key used by server-side GAS mapping |
 | `CXL_OWNER_PUBLIC_CREATOR_ID` | Existing opaque public creator ID for safe profile hydration |
-| `CXL_GAS_PUBLIC_URL` | Existing Public GAS `/exec` URL used for the public profile projection |
+| `CXL_OWNER_PROFILE_SLUG` | Optional canonical Owner route slug for session bootstrap; defaults to `juoncxl` and is not an authorization input |
+| `CXL_GAS_PUBLIC_URL` | Existing Public GAS `/exec` URL used by public profile reads, not Owner session verification |
 | `CXL_GAS_OWNER_URL` | Existing Owner GAS `/exec` URL |
 | `CXL_API_SHARED_SECRET` | Existing server-to-Owner-GAS secret; separate from the session secret |
 

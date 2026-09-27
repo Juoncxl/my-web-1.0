@@ -39,7 +39,7 @@ describe('Vercel Owner auth handlers', () => {
     vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
     vi.stubEnv('CXL_OWNER_USER_ID', legacyOwnerId);
     vi.stubEnv('CXL_OWNER_PUBLIC_CREATOR_ID', publicCreatorId);
-    vi.stubEnv('CXL_GAS_PUBLIC_URL', 'https://script.google.com/macros/s/public/exec');
+    vi.stubEnv('CXL_OWNER_PROFILE_SLUG', 'juoncxl');
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
@@ -110,21 +110,28 @@ describe('Vercel Owner auth handlers', () => {
     expect(cookies.some(value => value.startsWith('__Host-cxl_owner='))).toBe(false);
   });
 
-  it('restores valid sessions through public profile projection and logout clears cookies with CSRF', async () => {
+  it('restores stable Owner identity without waiting for Public GAS profile enrichment', async () => {
     const token = createOwnerSessionToken(allowedSub, 'owner@example.invalid', secret).token;
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, data: { data: [
-      { publicCreatorId, displayName: 'Owner', username: 'owner', bio: 'Public bio', avatarUrl: 'data:image/png;base64,private-binary', internalProfileId: 'must-not-be-returned' }
-    ] } }), { status: 200 }));
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Public GAS unavailable'));
     vi.stubGlobal('fetch', fetchMock);
     const res = response();
     await session({ method: 'GET', headers: { cookie: `__Host-cxl_owner=${token}` } } as any, res as any);
     const payload = JSON.parse(res.body);
-    expect(payload).toMatchObject({ ok: true, authenticated: true, user: { id: legacyOwnerId, publicCreatorId, displayName: 'Owner' } });
+    expect(payload).toMatchObject({ ok: true, authenticated: true, user: {
+      id: legacyOwnerId, publicCreatorId, displayName: 'Juon', username: 'juoncxl', provider: 'google'
+    } });
     expect(payload.user.internalProfileId).toBeUndefined();
     expect(payload.user.email).toBeUndefined();
     expect(payload.user.avatarUrl).toBeUndefined();
     expect(payload.user.socialLinks).toBeUndefined();
-    expect(fetchMock.mock.calls[0][0].toString()).toContain('profiles.getPublic');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const profileSuccessFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', profileSuccessFetch);
+    const profileAvailable = response();
+    await session({ method: 'GET', headers: { cookie: `__Host-cxl_owner=${token}` } } as any, profileAvailable as any);
+    expect(JSON.parse(profileAvailable.body).user).toMatchObject({ username: 'juoncxl', displayName: 'Juon' });
+    expect(profileSuccessFetch).not.toHaveBeenCalled();
 
     const denied = response();
     logout({ method: 'POST', headers: { origin: 'https://evil.example', cookie: '__Host-cxl_csrf=csrf' } } as any, denied as any);
@@ -133,5 +140,14 @@ describe('Vercel Owner auth handlers', () => {
     logout({ method: 'POST', headers: { origin: 'https://cxl.example', cookie: '__Host-cxl_csrf=csrf', 'x-cxl-csrf': 'csrf' } } as any, loggedOut as any);
     expect(loggedOut.statusCode).toBe(200);
     expect(String(loggedOut.headers['Set-Cookie'])).toContain('Max-Age=0');
+  });
+
+  it('keeps unauthenticated visitors anonymous without a profile lookup', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const res = response();
+    await session({ method: 'GET', headers: { cookie: '' } } as any, res as any);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, authenticated: false, user: null });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

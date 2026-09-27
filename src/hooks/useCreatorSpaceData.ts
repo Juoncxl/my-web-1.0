@@ -55,20 +55,22 @@ export function selectCreatorSavedAssets(
   );
 }
 
+export function resolveOwnerProfileEnrichmentFailure(ownerFallback: User | null): {
+  profile: User | null;
+  error: string | null;
+  isNotFound: boolean;
+} {
+  return ownerFallback
+    ? { profile: ownerFallback, error: null, isNotFound: false }
+    : { profile: null, error: 'โหลดโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', isNotFound: false };
+}
+
 export function useCreatorSpaceData(
   slug: string,
   currentUserId: string | undefined,
   ownerFallback: User | null | undefined,
   sources: CreatorSpaceSources
 ): CreatorSpaceData {
-  const [profile, setProfile] = useState<User | null>(() => cxlDataService.profiles.getCreatorSnapshot(slug));
-  const [isProfileLoading, setIsProfileLoading] = useState(true);
-  const [isNotFound, setIsNotFound] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const requestSequence = useRef(0);
-  const initializedSlug = useRef<string | null>(null);
-  const blockingLoadActive = useRef(false);
-
   const decodedSlug = (() => {
     try {
       return decodeURIComponent(slug).trim();
@@ -76,13 +78,21 @@ export function useCreatorSpaceData(
       return '';
     }
   })();
+  const normalizedSlug = decodedSlug.trim().replace(/^@+/, '').toLowerCase();
   const isOwnerSlug = Boolean(
     currentUserId && (
-      decodedSlug === currentUserId ||
-      (ownerFallback?.id === currentUserId && ownerFallback.username === decodedSlug)
+      decodedSlug.toLowerCase() === currentUserId.trim().toLowerCase() ||
+      (ownerFallback?.id === currentUserId && ownerFallback.username?.trim().replace(/^@+/, '').toLowerCase() === normalizedSlug)
     )
   );
   const ownerProfileFallback = isOwnerSlug && ownerFallback?.id === currentUserId ? ownerFallback : null;
+  const [profile, setProfile] = useState<User | null>(() => cxlDataService.profiles.getCreatorSnapshot(slug) || ownerProfileFallback);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [isNotFound, setIsNotFound] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
+  const initializedSlug = useRef<string | null>(null);
+  const blockingLoadActive = useRef(false);
 
   const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     const background = options.background === true;
@@ -124,18 +134,21 @@ export function useCreatorSpaceData(
       }
 
       setIsNotFound(false);
+      if (ownerProfileFallback) setError(null);
       setProfile(resolvedProfile);
     } catch (caughtError) {
       if (requestId !== requestSequence.current) return;
-      console.error('Creator profile load error:', caughtError);
       setIsNotFound(false);
       if (ownerProfileFallback) {
-        setProfile(ownerProfileFallback);
-        setError('โหลดโปรไฟล์ของคุณไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        const fallbackResult = resolveOwnerProfileEnrichmentFailure(ownerProfileFallback);
+        setProfile(current => current || fallbackResult.profile);
+        setError(fallbackResult.error);
       } else if (!background) {
+        console.error('Creator profile load error:', caughtError);
         setProfile(null);
-        setError('โหลดโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        setError(resolveOwnerProfileEnrichmentFailure(null).error);
       } else {
+        console.error('Creator profile refresh error:', caughtError);
         setError('อัปเดตข้อมูลโปรไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
       }
     } finally {

@@ -23,8 +23,8 @@ import { useRecentlyViewed } from './hooks/useRecentlyViewed';
 import { useAssetFilters } from './hooks/useAssetFilters';
 import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
-import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
-import { getCanonicalProfilePath, getCanonicalProfileSlug } from './lib/profileIdentity';
+import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileWorksReadScope } from './lib/profileRouting';
+import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 import { isGoogleWorksReadBackend } from './data/cxlDataService';
@@ -101,19 +101,11 @@ function MainApp() {
       // columns. Opening or editing a Work hydrates that one full row on
       // demand, so an owner profile with legacy long-form payloads does not
       // download every payload during its initial render.
-      let decodedSlug = creatorSlug;
-      try { decodedSlug = decodeURIComponent(creatorSlug).trim(); } catch { /* use the raw route value */ }
-      const isOwnerRoute = Boolean(
-        currentUser
-        && (
-          decodedSlug === currentUser.id
-          || decodedSlug.toLowerCase() === getCanonicalProfileSlug(currentUser).toLowerCase()
-        )
-      );
+      const profileWorksScope = resolveProfileWorksReadScope(creatorSlug, currentUser);
       const includeDeleted = profileRoute?.requestedTab === 'trash';
-      return isOwnerRoute
-        ? { userId: currentUser!.id, includeDeleted, detail: 'summary', limit: 100 } as const
-        : { creatorSlug, includeDeleted: false, detail: 'summary', limit: 100 } as const;
+      return profileWorksScope.type === 'owner'
+        ? { userId: profileWorksScope.userId, includeDeleted, detail: 'summary', limit: 100 } as const
+        : { creatorSlug: profileWorksScope.creatorSlug, includeDeleted: false, detail: 'summary', limit: 100 } as const;
     }
     if (workRoute?.[1]) {
       let assetId = workRoute[1];

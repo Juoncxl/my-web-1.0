@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Asset, Folder } from '../types';
-import { selectCreatorAssets, selectCreatorFolders, selectCreatorSavedAssets } from './useCreatorSpaceData';
+import type { Asset, Folder, User } from '../types';
+import { resolveOwnerProfileEnrichmentFailure, selectCreatorAssets, selectCreatorFolders, selectCreatorSavedAssets } from './useCreatorSpaceData';
 
 function makeAsset(id: string, userId: string, visibility: Asset['visibility']): Asset {
   const now = '2026-01-01T00:00:00.000Z';
@@ -42,6 +42,21 @@ describe('Creator Space shared data selection', () => {
     Object.assign(unknownWork, { userId: undefined, publicCreatorId: undefined });
 
     expect(selectCreatorAssets([unknownWork], 'cxlc_0123456789abcdef0123456789abcdef', false)).toEqual([]);
+  });
+
+  it('keeps Owner profile and route state when optional profile enrichment fails', () => {
+    const owner: User = {
+      id: 'private-owner-key', publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef',
+      displayName: 'Juon', username: 'juoncxl', createdAt: '2026-01-01T00:00:00.000Z', provider: 'google'
+    };
+    expect(resolveOwnerProfileEnrichmentFailure(owner)).toEqual({ profile: owner, error: null, isNotFound: false });
+    expect(resolveOwnerProfileEnrichmentFailure(null)).toMatchObject({ profile: null, error: expect.any(String), isNotFound: false });
+
+    const ownWork = makeAsset('owner-work', owner.id, 'private');
+    const publicWork = makeAsset('public-work', 'another-owner', 'public');
+    const ownFolder: Folder = { id: 'owner-folder', userId: owner.id, name: 'Owner folder', createdAt: owner.createdAt, updatedAt: owner.createdAt };
+    expect(selectCreatorAssets([ownWork, publicWork], owner.id, true)).toEqual([ownWork]);
+    expect(selectCreatorFolders([ownFolder], owner.id, true)).toEqual([ownFolder]);
   });
 
   it('exposes folders only to the matching owner from the shared folder source', () => {

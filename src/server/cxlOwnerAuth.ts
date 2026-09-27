@@ -27,7 +27,7 @@ export interface OwnerAuthConfig {
   appOrigin: string;
   legacyOwnerId: string;
   publicCreatorId: string;
-  publicGasUrl: string;
+  ownerProfileSlug: string;
 }
 
 export interface OwnerSessionClaims {
@@ -72,20 +72,25 @@ export function getOwnerAuthConfig(env: OwnerAuthEnvironment = process.env): Own
   const appOrigin = env.CXL_OWNER_APP_ORIGIN?.trim() || '';
   const legacyOwnerId = env.CXL_OWNER_USER_ID?.trim() || '';
   const publicCreatorId = env.CXL_OWNER_PUBLIC_CREATOR_ID?.trim() || '';
-  const publicGasUrl = env.CXL_GAS_PUBLIC_URL?.trim() || '';
+  // This is a public route identity, not an authorization input. Keep a
+  // configured override while preserving the established canonical route
+  // when older Preview environments have not set the optional variable yet.
+  const rawOwnerProfileSlug = env.CXL_OWNER_PROFILE_SLUG;
+  const ownerProfileSlug = rawOwnerProfileSlug === undefined || rawOwnerProfileSlug.trim() === ''
+    ? 'juoncxl'
+    : rawOwnerProfileSlug.trim().replace(/^@+/, '').toLowerCase();
 
   if (!clientId || !clientSecret || !/^[A-Za-z0-9_-]{20,}$/.test(allowedSub) || sessionSecret.length < 32
-    || !legacyOwnerId || !/^cxlc_[a-f0-9]{32}$/i.test(publicCreatorId)) return null;
+    || !legacyOwnerId || !/^cxlc_[a-f0-9]{32}$/i.test(publicCreatorId)
+    || !/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(ownerProfileSlug)) return null;
   try {
     const app = new URL(appOrigin);
     const callback = new URL(redirectUri);
-    const gas = new URL(publicGasUrl);
     if (app.protocol !== 'https:' || app.origin !== appOrigin || app.pathname !== '/' || app.search || app.hash) return null;
     if (callback.protocol !== 'https:' || callback.origin !== app.origin || callback.pathname !== '/api/cxl/auth/callback' || callback.search || callback.hash) return null;
-    if (gas.protocol !== 'https:' || gas.hostname !== 'script.google.com' || !/^\/macros\/s\/[^/]+\/exec\/?$/.test(gas.pathname)) return null;
   } catch { return null; }
 
-  return { clientId, clientSecret, allowedSub, sessionSecret, redirectUri, appOrigin, legacyOwnerId, publicCreatorId, publicGasUrl };
+  return { clientId, clientSecret, allowedSub, sessionSecret, redirectUri, appOrigin, legacyOwnerId, publicCreatorId, ownerProfileSlug };
 }
 
 function base64url(value: Buffer | string): string {

@@ -2,7 +2,7 @@ import { generateKeyPairSync, sign as signBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   createOidcTransactionToken, createOwnerSessionToken, createPkceChallenge, makeSecureCookie,
-  OWNER_SESSION_TTL_SECONDS, verifyCsrfRequest, verifyOidcTransactionToken,
+  getOwnerAuthConfig, OWNER_SESSION_TTL_SECONDS, verifyCsrfRequest, verifyOidcTransactionToken,
   verifyOwnerSessionToken, validateGoogleIdToken
 } from './cxlOwnerAuth';
 
@@ -26,6 +26,20 @@ const jwksFetch = async () => new Response(JSON.stringify({ keys: [{ ...publicJw
 });
 
 describe('CXL Vercel Owner auth primitives', () => {
+  it('provides a stable canonical Owner slug without requiring Public GAS for authentication', () => {
+    const base = {
+      GOOGLE_OIDC_CLIENT_ID: 'google-client-id', GOOGLE_OIDC_CLIENT_SECRET: 'server-only-google-client-secret',
+      CXL_OWNER_GOOGLE_SUB: allowedSub, CXL_OWNER_SESSION_SECRET: secret,
+      CXL_OWNER_OIDC_REDIRECT_URI: 'https://cxl.example/api/cxl/auth/callback', CXL_OWNER_APP_ORIGIN: 'https://cxl.example',
+      CXL_OWNER_USER_ID: 'legacy-owner-key', CXL_OWNER_PUBLIC_CREATOR_ID: 'cxlc_0123456789abcdef0123456789abcdef'
+    };
+    const config = getOwnerAuthConfig(base);
+    expect(config?.ownerProfileSlug).toBe('juoncxl');
+    expect(config).not.toHaveProperty('publicGasUrl');
+    expect(getOwnerAuthConfig({ ...base, CXL_OWNER_PROFILE_SLUG: 'bad slug' })).toBeNull();
+    expect(getOwnerAuthConfig({ ...base, CXL_OWNER_PROFILE_SLUG: '@JuonCXL' })?.ownerProfileSlug).toBe('juoncxl');
+  });
+
   it('uses signed, absolute-expiry sessions and rejects expired or tampered cookies', () => {
     const now = Math.floor(Date.now() / 1000);
     const { token, claims } = createOwnerSessionToken(allowedSub, 'owner@example.invalid', secret, now);
