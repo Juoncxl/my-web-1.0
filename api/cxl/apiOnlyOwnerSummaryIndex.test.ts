@@ -43,14 +43,31 @@ function indexed(work: ReturnType<typeof asset>, ctx = bridge()) {
 
 class MemorySheet {
   rows: unknown[][];
+  valueReads: number[][] = [];
   constructor(headers: string[], data: unknown[][] = []) { this.rows = [headers, ...data]; }
   getLastColumn() { return this.rows[0]?.length || 1; }
   getLastRow() { return this.rows.length; }
   getRange(row: number, column: number, height = 1, width = 1) {
     const sheet = this;
     return {
-      getValues() { return Array.from({ length: height }, (_, r) => Array.from({ length: width }, (_, c) => sheet.rows[row - 1 + r]?.[column - 1 + c] ?? '')); },
+      getValues() { sheet.valueReads.push([row, column, height, width]); return Array.from({ length: height }, (_, r) => Array.from({ length: width }, (_, c) => sheet.rows[row - 1 + r]?.[column - 1 + c] ?? '')); },
       getValue() { return sheet.rows[row - 1]?.[column - 1] ?? ''; },
+      createTextFinder(text: string) {
+        let entire = false;
+        return {
+          matchEntireCell(value: boolean) { entire = value; return this; },
+          matchCase() { return this; },
+          useRegularExpression() { return this; },
+          findAll() {
+            const matches: { getRow: () => number }[] = [];
+            for (let index = row - 1; index < Math.min(sheet.rows.length, row - 1 + height); index++) {
+              const cell = String(sheet.rows[index]?.[column - 1] ?? '');
+              if (entire ? cell === text : cell.includes(text)) matches.push({ getRow: () => index + 1 });
+            }
+            return matches;
+          }
+        };
+      },
       setValues(values: unknown[][]) {
         values.forEach((valuesRow, r) => {
           const rowNumber = row - 1 + r;
@@ -241,17 +258,51 @@ describe('API-only Owner chunked search index', () => {
     expect(JSON.stringify(sheet.rows)).not.toContain('stale-only-term');
   });
 
-  it('cleans stale search chunks by reading only the two lookup columns and deleting contiguous ranges', () => {
+  it('cleans stale search chunks using exact Work matches and reads only matching token ranges', () => {
     const context = bridge();
     const old = indexed(asset('cleanup-work', { content: `${'old '.repeat(12_000)}stale-only-term` }), context);
     const next = indexed(asset('cleanup-work', { content: 'short new revision' }), context);
     const sheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_, [...old.chunks, ...next.chunks].map((chunk: any) => context.OWNER_SEARCH_HEADERS_.map((key: string) => chunk[key])));
-    const getRange = vi.spyOn(sheet, 'getRange');
-
     context.removeStaleOwnerSearchChunks_(sheet, 'cleanup-work', next.artifacts.token);
 
-    expect(getRange.mock.calls.map(call => call.slice(2))).toEqual([[1, context.OWNER_SEARCH_HEADERS_.length], [old.chunks.length + next.chunks.length, 1], [old.chunks.length + next.chunks.length, 1]]);
+    expect(sheet.valueReads).toEqual([
+      [1, 1, 1, context.OWNER_SEARCH_HEADERS_.length],
+      [2, context.OWNER_SEARCH_HEADERS_.indexOf('index_token') + 1, old.chunks.length + next.chunks.length, 1]
+    ]);
     expect(sheet.getLastRow() - 1).toBe(next.chunks.length);
+  });
+
+  it('uses an exact ID-column lookup instead of projecting every Private Index row', () => {
+    const context = bridge();
+    const sheet = new MemorySheet(['id', 'title', 'file_id'], [
+      ['work-a', 'A', 'file-a'], ['work-b', 'B', 'file-b'], ['work-c', 'C', 'file-c']
+    ]);
+    const projectRows = vi.spyOn(context, 'objectRows_').mockImplementation(() => { throw new Error('full index projection is not allowed'); });
+
+    expect(context.rowById_(sheet, 'work-b')).toMatchObject({ id: 'work-b', title: 'B', file_id: 'file-b', _sheetRow: 3 });
+    expect(context.rowById_(sheet, 'missing')).toBeNull();
+    expect(projectRows).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate exact index IDs instead of selecting an ambiguous canonical file', () => {
+    const context = bridge();
+    const sheet = new MemorySheet(['id', 'file_id'], [['duplicate', 'first'], ['duplicate', 'second']]);
+    expect(() => context.rowById_(sheet, 'duplicate')).toThrow(expect.objectContaining({ apiCode: 'INDEX_ROW_AMBIGUOUS' }));
+  });
+
+  it('selects public projection work only for transitions that need an active public row', () => {
+    const context = bridge();
+    expect(context.publicProjectionAction_(false, false)).toBe('none'); // private -> private
+    expect(context.publicProjectionAction_(true, false)).toBe('deactivate'); // public -> private
+    expect(context.publicProjectionAction_(false, true)).toBe('upsert'); // private -> public
+    expect(context.publicProjectionAction_(true, true)).toBe('upsert'); // public -> public
+
+    const privateRecord = { row: { id: 'private-work', visibility: 'private', is_public: false, deleted_at: '' } };
+    context.upsertWorkCreatorMap_ = vi.fn();
+    context.syncPublic_ = vi.fn();
+    expect(() => context.finishCxlPublicProjection_(privateRecord, 'owner')).not.toThrow();
+    expect(context.upsertWorkCreatorMap_).not.toHaveBeenCalled();
+    expect(context.syncPublic_).not.toHaveBeenCalled();
   });
 
   it('refreshes the Private summary and active search generation on create/update writes', () => {
