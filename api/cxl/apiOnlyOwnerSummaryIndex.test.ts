@@ -99,6 +99,33 @@ function legacyPrivateRows(count: number, ctx: Record<string, any>) {
   return new MemorySheet(headers, rows);
 }
 
+function writableBridge() {
+  const context = bridge();
+  const privateSheet = new MemorySheet(context.PRIVATE_HEADERS);
+  const searchSheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_);
+  const files = new Map<string, any>();
+  let onLock: (() => void) | undefined;
+  context.config_ = () => ({ privateSheetId: 'private', privateId: 'drive' });
+  context.sheet_ = () => privateSheet;
+  context.ownerSearchSheet_ = () => searchSheet;
+  context.LockService = { getScriptLock: () => ({ waitLock: () => onLock?.(), releaseLock: vi.fn() }) };
+  context.shareRecordMedia_ = vi.fn();
+  context.validateOwnerFolder_ = vi.fn();
+  context.writeFingerprint_ = () => 'matching-fingerprint';
+  context.parse_ = vi.fn((fileId: string) => structuredClone(files.get(fileId)));
+  context.putJsonRevision_ = vi.fn((_folder: string, _name: string, record: any) => {
+    const fileId = `file-${record.revision}`;
+    files.set(fileId, structuredClone(record));
+    return fileId;
+  });
+  context.putJson_ = context.putJsonRevision_;
+  const original = asset('write-work', { content: 'first indexed revision' });
+  context.saveOwnerWork_({ id: original.id, ownerUserId: 'owner-1', title: original.title, category: 'character', status: 'draft', visibility: 'private', tags: [], cxlAsset: original, content: original.content }, { idempotent: true, deferPublicSync: true });
+  context.parse_.mockClear();
+  context.putJsonRevision_.mockClear();
+  return { context, privateSheet, searchSheet, files, setOnLock: (callback: () => void) => { onLock = callback; } };
+}
+
 describe('API-only Owner chunked search index', () => {
   it('chunks searchable corpora larger than one cell and finds terms in later chunks', () => {
     const context = bridge();
@@ -329,11 +356,147 @@ describe('API-only Owner chunked search index', () => {
     const chunks = context.objectRows_(searchSheet);
     expect(updatedIndex.search_index_token).not.toBe(firstToken);
     expect(updatedIndex.revision).toBe(2);
-    expect(chunks.every((row: any) => row.index_token === updatedIndex.search_index_token)).toBe(true);
-    expect(chunks.map((row: any) => row.search_text).join('')).toContain('replacement indexed revision');
-    expect(chunks.map((row: any) => row.search_text).join('')).not.toContain('first indexed revision');
+    expect(chunks.some((row: any) => row.index_token === firstToken)).toBe(true);
+    expect(chunks.some((row: any) => row.index_token === updatedIndex.search_index_token)).toBe(true);
+    expect(context.ownerSearchMatches_([updatedIndex], chunks, 'replacement indexed revision')['write-work']).toBe(true);
+    expect(context.ownerSearchMatches_([updatedIndex], chunks, 'first indexed revision')['write-work']).toBeUndefined();
+    expect(context.ownerSearchReadiness_([updatedIndex], chunks)).toMatchObject({ validWorks: 1, staleExtraChunks: 1 });
+    expect(context.verifyOwnerSummaryReadiness_()).toMatchObject({ ready: true, validSearchWorks: 1, staleExtraChunks: 1 });
     expect(updatedIndex).not.toHaveProperty('search_text');
     expect(context.parse_).toHaveBeenCalledOnce();
     expect(canonical.cxlAsset.content).toBe('replacement indexed revision');
+  });
+
+  it('compacts stale search generations in bounded manual batches without touching active search rows', () => {
+    const context = bridge();
+    const current = indexed(asset('work-a', { content: 'current searchable content' }), context);
+    const stale = [
+      { ...current.chunks[0], index_token: 'old-a', search_text: 'obsolete a' },
+      { ...current.chunks[0], work_id: 'orphan', index_token: 'old-orphan', search_text: 'orphan content' },
+      { ...current.chunks[0], index_token: 'older-a', search_text: 'obsolete b' }
+    ];
+    const privateSheet = new MemorySheet(['id', 'search_index_token'], [['work-a', current.artifacts.token]]);
+    const searchSheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_, [...stale, ...current.chunks].map((row: any) => context.OWNER_SEARCH_HEADERS_.map((key: string) => row[key])));
+    context.config_ = () => ({ privateSheetId: 'private' });
+    context.sheet_ = () => privateSheet;
+    context.ownerSearchSheet_ = () => searchSheet;
+    context.LockService = { getScriptLock: () => ({ waitLock: vi.fn(), releaseLock: vi.fn() }) };
+
+    expect(context.compactOwnerSearchIndex_(2)).toMatchObject({ deleted: 2, remaining: 1, batchLimit: 2 });
+    expect(context.compactOwnerSearchIndex_(2)).toMatchObject({ deleted: 1, remaining: 0 });
+    expect(context.compactOwnerSearchIndex_()).toMatchObject({ deleted: 0, remaining: 0, batchLimit: 20 });
+    expect(context.objectRows_(searchSheet)).toHaveLength(current.chunks.length);
+    expect(context.objectRows_(searchSheet)[0].index_token).toBe(current.artifacts.token);
+  });
+
+  it('reuses the preloaded canonical Work after a locked row check and writes through the known index row', () => {
+    const { context, privateSheet } = writableBridge();
+    const rowById = vi.fn(context.rowById_);
+    const rowAtNumber = vi.fn(context.rowAtSheetNumber_);
+    const setIndex = vi.fn(context.setPrivateIndexRow_);
+    context.rowById_ = rowById;
+    context.rowAtSheetNumber_ = rowAtNumber;
+    context.setPrivateIndexRow_ = setIndex;
+
+    const result = context.saveCxlWorkApi_('update', { id: 'write-work', updates: { title: 'Updated title' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1
+    }, 'owner-1');
+
+    expect(result.data).toMatchObject({ id: 'write-work', title: 'Updated title', revision: 2 });
+    expect(context.parse_).toHaveBeenCalledOnce();
+    expect(rowById).toHaveBeenCalledOnce();
+    expect(rowAtNumber).toHaveBeenCalledOnce();
+    expect(setIndex).toHaveBeenCalledWith(privateSheet, expect.objectContaining({ id: 'write-work' }), 2, expect.objectContaining({ id: 'write-work', revision: 1, file_id: 'file-1' }));
+    expect(context.putJsonRevision_).toHaveBeenCalledOnce();
+  });
+
+  it('finds the Work again under the lock if its preloaded row number moved', () => {
+    const { context, privateSheet, setOnLock } = writableBridge();
+    setOnLock(() => {
+      const headers = privateSheet.rows[0] as string[];
+      privateSheet.rows.splice(1, 0, headers.map(header => header === 'id' ? 'unrelated-work' : ''));
+    });
+    const result = context.saveCxlWorkApi_('update', { id: 'write-work', updates: { title: 'Moved row update' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1
+    }, 'owner-1');
+    expect(result.data).toMatchObject({ title: 'Moved row update', revision: 2 });
+    expect(context.rowById_(privateSheet, 'write-work')).toMatchObject({ _sheetRow: 3, revision: 2 });
+    expect(context.parse_).toHaveBeenCalledOnce();
+  });
+
+  it('does not recreate a Work removed between preload and the locked check', () => {
+    const { context, privateSheet, setOnLock } = writableBridge();
+    setOnLock(() => { privateSheet.rows.splice(1, 1); });
+    expect(() => context.saveCxlWorkApi_('update', { id: 'write-work', updates: { title: 'Must not recreate' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1
+    }, 'owner-1')).toThrow(expect.objectContaining({ apiCode: 'REVISION_CONFLICT' }));
+    expect(context.putJsonRevision_).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Work whose canonical Owner changes while waiting for the lock', () => {
+    const { context, privateSheet, files, setOnLock } = writableBridge();
+    setOnLock(() => {
+      const index = context.rowById_(privateSheet, 'write-work');
+      const columns = privateSheet.rows[0] as string[];
+      privateSheet.rows[index._sheetRow - 1][columns.indexOf('file_id')] = 'other-owner-file';
+      const changed = structuredClone(files.get('file-1'));
+      changed.row.user_id = 'different-owner';
+      files.set('other-owner-file', changed);
+    });
+    expect(() => context.saveCxlWorkApi_('update', { id: 'write-work', updates: { title: 'Must not save' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1
+    }, 'owner-1')).toThrow(expect.objectContaining({ apiCode: 'WORK_NOT_OWNED' }));
+    expect(context.putJsonRevision_).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['revision changes', 2],
+    ['file changes without a revision increment', 1]
+  ])('rejects a concurrent update when the locked %s', (_label, nextRevision) => {
+    const { context, privateSheet, files, setOnLock } = writableBridge();
+    setOnLock(() => {
+      const index = context.rowById_(privateSheet, 'write-work');
+      const columns = privateSheet.rows[0] as string[];
+      const row = privateSheet.rows[index._sheetRow - 1];
+      row[columns.indexOf('revision')] = nextRevision;
+      row[columns.indexOf('file_id')] = 'concurrent-file';
+      const concurrent = structuredClone(files.get('file-1'));
+      concurrent.revision = nextRevision;
+      concurrent.row.title = 'Concurrent update';
+      files.set('concurrent-file', concurrent);
+    });
+
+    expect(() => context.saveCxlWorkApi_('update', { id: 'write-work', updates: { title: 'My update' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1
+    }, 'owner-1')).toThrow(expect.objectContaining({ apiCode: 'REVISION_CONFLICT' }));
+    expect(context.parse_).toHaveBeenCalledTimes(2);
+    expect(context.putJsonRevision_).not.toHaveBeenCalled();
+    expect(context.rowById_(privateSheet, 'write-work').file_id).toBe('concurrent-file');
+  });
+
+  it('recognizes the same request completed while waiting for the lock without writing twice', () => {
+    const { context, privateSheet, files, setOnLock } = writableBridge();
+    const requestId = '123e4567-e89b-42d3-a456-426614174000';
+    setOnLock(() => {
+      const index = context.rowById_(privateSheet, 'write-work');
+      const columns = privateSheet.rows[0] as string[];
+      const row = privateSheet.rows[index._sheetRow - 1];
+      row[columns.indexOf('revision')] = 2;
+      row[columns.indexOf('file_id')] = 'completed-file';
+      const completed = structuredClone(files.get('file-1'));
+      completed.revision = 2;
+      completed.row.title = 'Updated title';
+      completed.lastWriteRequestId = requestId;
+      completed.lastWriteFingerprint = 'matching-fingerprint';
+      completed.cxlAsset.title = 'Updated title';
+      files.set('completed-file', completed);
+    });
+
+    const result = context.saveCxlWorkApi_('update', { id: 'write-work', updates: { title: 'Updated title' } }, {
+      requestId, expectedRevision: 1
+    }, 'owner-1');
+    expect(result.data).toMatchObject({ id: 'write-work', title: 'Updated title', revision: 2 });
+    expect(context.parse_).toHaveBeenCalledTimes(2);
+    expect(context.putJsonRevision_).not.toHaveBeenCalled();
   });
 });
