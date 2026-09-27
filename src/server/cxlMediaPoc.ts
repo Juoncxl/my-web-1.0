@@ -23,7 +23,7 @@ const CHUNK_BYTES = 2 * 1024 * 1024;
 const GAS_TIMEOUT_MS = 30_000;
 const GAS_POST_CHAR_LIMIT = 4_900_000;
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const ACTIONS = new Set(['begin', 'chunk', 'finalize', 'setPublic', 'cleanup']);
+const ACTIONS = new Set(['begin', 'chunk', 'finalize', 'setPublic', 'cleanup', 'readDiagnostics']);
 const SAFE_GAS_CODES = new Set([
   'INVALID_MEDIA_POC_REQUEST', 'INVALID_MEDIA_POC_CHUNK', 'MEDIA_POC_NOT_CONFIGURED',
   'MEDIA_POC_FOLDER_NOT_PRIVATE', 'MEDIA_POC_IDEMPOTENCY_CONFLICT', 'MEDIA_POC_SESSION_NOT_FOUND',
@@ -48,6 +48,15 @@ const READ_VALIDATION_CODES = new Set([
   'MEDIA_POC_READ_CHUNK_CHECKSUM', 'MEDIA_POC_READ_METADATA_MISMATCH', 'MEDIA_POC_READ_SIGNATURE',
   'MEDIA_POC_READ_FULL_CHECKSUM'
 ]);
+const READ_DIAGNOSTIC_PHASES = new Set([
+  'request_received', 'manifest_validated', 'drive_fetch_started', 'drive_fetch_completed',
+  'drive_range_validated', 'response_constructed', 'read_failed'
+]);
+const READ_DIAGNOSTIC_CODES = new Set([
+  'INVALID_MEDIA_POC_REQUEST', 'MEDIA_POC_STATE_INVALID', 'MEDIA_POC_MEDIA_NOT_FOUND',
+  'MEDIA_POC_MEDIA_NOT_PUBLIC', 'MEDIA_POC_MEDIA_INVALID', 'MEDIA_POC_MEDIA_READ_FAILED'
+]);
+const READ_DIAGNOSTIC_PHASE_KEYS = new Set(['phase', 'code', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
 
 type MediaPocReadFailureCode =
   | 'MEDIA_POC_READ_RESPONSE_INVALID'
@@ -209,6 +218,25 @@ function hasOnlyKeys(body: JsonRecord, keys: string[]) {
   return Object.keys(body).every(key => keys.includes(key));
 }
 
+function isSafeReadDiagnostic(value: unknown): value is JsonRecord {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['action', 'phases'])
+    || (value.action !== 'ownerChunk' && value.action !== 'publicChunk')
+    || !Array.isArray(value.phases) || value.phases.length < 1 || value.phases.length > READ_DIAGNOSTIC_PHASES.size) return false;
+  const seen = new Set<string>();
+  for (const phase of value.phases) {
+    if (!isRecord(phase) || !hasOnlyKeys(phase, [...READ_DIAGNOSTIC_PHASE_KEYS])
+      || typeof phase.phase !== 'string' || !READ_DIAGNOSTIC_PHASES.has(phase.phase) || seen.has(phase.phase)) return false;
+    seen.add(phase.phase);
+    if ('code' in phase && (typeof phase.code !== 'string' || !READ_DIAGNOSTIC_CODES.has(phase.code))) return false;
+    if ('httpStatus' in phase && (typeof phase.httpStatus !== 'number' || !Number.isInteger(phase.httpStatus) || phase.httpStatus < 100 || phase.httpStatus > 599)) return false;
+    if ('expectedBytes' in phase && (typeof phase.expectedBytes !== 'number' || !Number.isInteger(phase.expectedBytes) || phase.expectedBytes < 0 || phase.expectedBytes > CHUNK_BYTES)) return false;
+    if ('actualBytes' in phase && (typeof phase.actualBytes !== 'number' || !Number.isInteger(phase.actualBytes) || phase.actualBytes < 0 || phase.actualBytes > MAX_FILE_BYTES)) return false;
+    if ('durationMs' in phase && (typeof phase.durationMs !== 'number' || !Number.isInteger(phase.durationMs) || phase.durationMs < 0 || phase.durationMs > 600_000)) return false;
+    if ('chunkIndex' in phase && (typeof phase.chunkIndex !== 'number' || !Number.isInteger(phase.chunkIndex) || phase.chunkIndex < 0 || phase.chunkIndex > 4)) return false;
+  }
+  return value.phases[0].phase === 'request_received';
+}
+
 async function postAction(req: Request, res: Response, body: JsonRecord, startedAt: number) {
   const action = body.action;
   if (typeof action !== 'string' || !ACTIONS.has(action)) return sendJson(res, 400, { ok: false, error: 'Invalid media proof-of-concept request' });
@@ -243,11 +271,17 @@ async function postAction(req: Request, res: Response, body: JsonRecord, started
       if (!hasOnlyKeys(body, ['action', 'mediaId', 'workNonce', 'isPublic'])
         || !validUuid(body.mediaId) || !validUuid(body.workNonce) || typeof body.isPublic !== 'boolean') return sendJson(res, 400, { ok: false, error: 'Invalid test media visibility request' });
       args = [{ mediaId: body.mediaId, workNonce: body.workNonce, isPublic: body.isPublic }];
+    } else if (action === 'readDiagnostics') {
+      if (!hasOnlyKeys(body, ['action'])) return sendJson(res, 400, { ok: false, error: 'Invalid read diagnostics request' });
+      args = [];
     } else {
       if (!hasOnlyKeys(body, ['action'])) return sendJson(res, 400, { ok: false, error: 'Invalid cleanup request' });
       args = [];
     }
     const result = await callGas(action, args, true);
+    if (action === 'readDiagnostics' && result.data !== null && !isSafeReadDiagnostic(result.data)) {
+      return sendJson(res, 502, { ok: false, error: 'Media read diagnostics response was invalid' });
+    }
     if (isRecord(result.data) && isRecord(result.data.timing) && isRecord(result.data.timing.phases)) {
       for (const [phase, duration] of Object.entries(result.data.timing.phases)) {
         if (TIMING_PHASES.has(phase) && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0) phases[phase] = duration;

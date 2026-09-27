@@ -15,7 +15,7 @@ var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDe
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
 var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update',
   'media.poc.begin','media.poc.chunk','media.poc.finalize','media.poc.setPublic',
-  'media.poc.ownerChunk','media.poc.publicChunk','media.poc.cleanup'];
+  'media.poc.ownerChunk','media.poc.publicChunk','media.poc.readDiagnostics','media.poc.cleanup'];
 var API_MAX_POST_CHARS_ = 5000000;
 var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','total'];
 var API_TIMING_CONTEXT_ = null;
@@ -24,17 +24,21 @@ var MEDIA_POC_MAX_BYTES_ = 10 * 1024 * 1024;
 var MEDIA_POC_MAX_CLEANUP_SESSIONS_ = 5;
 var MEDIA_POC_SESSION_PREFIX_ = 'CXL_MEDIA_POC_SESSION_';
 var MEDIA_POC_MANIFEST_PREFIX_ = 'CXL_MEDIA_POC_MEDIA_';
+var MEDIA_POC_LAST_READ_DIAGNOSTIC_PROPERTY_ = 'CXL_MEDIA_POC_LAST_READ_DIAGNOSTIC';
+var MEDIA_POC_READ_DIAGNOSTIC_MAX_CHARS_ = 2048;
 var MEDIA_POC_ALLOWED_MIME_ = ['image/jpeg','image/png','image/webp','image/gif'];
 var MEDIA_POC_READ_ACTIONS_ = ['media.poc.ownerChunk','media.poc.publicChunk'];
 var MEDIA_POC_READ_PHASES_ = ['request_received','manifest_validated','drive_fetch_started','drive_fetch_completed','drive_range_validated','response_constructed','read_failed'];
 var MEDIA_POC_READ_ERROR_CODES_ = ['INVALID_MEDIA_POC_REQUEST','MEDIA_POC_STATE_INVALID','MEDIA_POC_MEDIA_NOT_FOUND',
   'MEDIA_POC_MEDIA_NOT_PUBLIC','MEDIA_POC_MEDIA_INVALID','MEDIA_POC_MEDIA_READ_FAILED'];
+var MEDIA_POC_READ_TRACE_ = null;
 
 function doGet() {
   return apiJson_({ok:false,error:'Method not allowed',code:'METHOD_NOT_ALLOWED',httpStatus:405});
 }
 function doPost(e) {
   API_TIMING_CONTEXT_=null;
+  MEDIA_POC_READ_TRACE_=null;
   var requestStarted=Date.now();
   var raw=e&&e.postData&&typeof e.postData.contents==='string'?e.postData.contents:'';
   var body;
@@ -56,6 +60,7 @@ function doPost(e) {
 
   if(body.includeTiming===true)API_TIMING_CONTEXT_={action:body.action,startedAt:requestStarted,phases:{}};
   ownerTimingPhase_('auth_request_validation',Date.now()-requestStarted);
+  if(mediaPocIsReadAction_(body.action))mediaPocReadTraceStart_(body.action);
 
   try {
     var args=body.args;
@@ -124,6 +129,49 @@ function mediaPocSafeReadCode_(error) {
   var code=error&&typeof error.apiCode==='string'?error.apiCode:'';
   return MEDIA_POC_READ_ERROR_CODES_.indexOf(code)>=0?code:'MEDIA_POC_MEDIA_READ_FAILED';
 }
+function mediaPocReadTraceAction_(action) { return action==='media.poc.publicChunk'?'publicChunk':'ownerChunk'; }
+function mediaPocReadTraceStart_(action) {
+  MEDIA_POC_READ_TRACE_={action:mediaPocReadTraceAction_(action),phases:[]};
+  mediaPocPersistReadTrace_();
+}
+function mediaPocDiagnosticPhase_(phase,details) {
+  if(MEDIA_POC_READ_PHASES_.indexOf(phase)<0)return null;
+  var data=details||{},record={phase:phase};
+  var code=typeof data.code==='string'&&MEDIA_POC_READ_ERROR_CODES_.indexOf(data.code)>=0?data.code:'';
+  var status=Number(data.httpStatus),expected=Number(data.expectedBytes),actual=Number(data.actualBytes),duration=Number(data.durationMs),chunkIndex=Number(data.chunkIndex);
+  if(code)record.code=code;
+  if(Number.isInteger(status)&&status>=100&&status<=599)record.httpStatus=status;
+  if(Number.isInteger(expected)&&expected>=0&&expected<=MEDIA_POC_MAX_BYTES_)record.expectedBytes=expected;
+  if(Number.isInteger(actual)&&actual>=0&&actual<=MEDIA_POC_MAX_BYTES_)record.actualBytes=actual;
+  if(Number.isInteger(duration)&&duration>=0&&duration<=600000)record.durationMs=duration;
+  if(Number.isInteger(chunkIndex)&&chunkIndex>=0&&chunkIndex<=4)record.chunkIndex=chunkIndex;
+  return record;
+}
+function mediaPocPersistReadTrace_() {
+  if(!MEDIA_POC_READ_TRACE_)return;
+  try {
+    var serialized=JSON.stringify(MEDIA_POC_READ_TRACE_);
+    if(serialized.length<=MEDIA_POC_READ_DIAGNOSTIC_MAX_CHARS_)
+      mediaPocProps_().setProperty(MEDIA_POC_LAST_READ_DIAGNOSTIC_PROPERTY_,serialized);
+  } catch(_error) {}
+}
+function mediaPocReadDiagnostics_() {
+  var raw=mediaPocProps_().getProperty(MEDIA_POC_LAST_READ_DIAGNOSTIC_PROPERTY_)||'';
+  if(!raw||raw.length>MEDIA_POC_READ_DIAGNOSTIC_MAX_CHARS_)return null;
+  var stored;try{stored=JSON.parse(raw);}catch(_error){return null;}
+  if(!stored||typeof stored!=='object'||Array.isArray(stored)
+    ||(stored.action!=='ownerChunk'&&stored.action!=='publicChunk')||!Array.isArray(stored.phases)||stored.phases.length>MEDIA_POC_READ_PHASES_.length)return null;
+  var safe={action:stored.action,phases:[]},seen={};
+  for(var i=0;i<stored.phases.length;i++){
+    var item=stored.phases[i];if(!item||typeof item!=='object'||Array.isArray(item))return null;
+    var phase=mediaPocDiagnosticPhase_(item.phase,item);
+    if(!phase||seen[phase.phase])return null;
+    seen[phase.phase]=true;safe.phases.push(phase);
+  }
+  if(!safe.phases.length||safe.phases[0].phase!=='request_received')return null;
+  var sanitized=JSON.stringify(safe);
+  return sanitized.length<=MEDIA_POC_READ_DIAGNOSTIC_MAX_CHARS_?safe:null;
+}
 function mediaPocReadLog_(action,phase,details) {
   if(!mediaPocIsReadAction_(action)||MEDIA_POC_READ_PHASES_.indexOf(phase)<0)return;
   var record={event:'media_poc_read',action:action,phase:phase},data=details||{};
@@ -139,6 +187,13 @@ function mediaPocReadLog_(action,phase,details) {
     var line=JSON.stringify(record);
     if(phase==='read_failed')console.warn(line);else console.log(line);
   } catch(_error) {}
+  if(MEDIA_POC_READ_TRACE_&&MEDIA_POC_READ_TRACE_.action===mediaPocReadTraceAction_(action)){
+    var diagnosticPhase=mediaPocDiagnosticPhase_(phase,data),existing=-1;
+    for(var i=0;i<MEDIA_POC_READ_TRACE_.phases.length;i++)if(MEDIA_POC_READ_TRACE_.phases[i].phase===phase){existing=i;break;}
+    if(existing>=0)MEDIA_POC_READ_TRACE_.phases[existing]=diagnosticPhase;
+    else if(MEDIA_POC_READ_TRACE_.phases.length<MEDIA_POC_READ_PHASES_.length)MEDIA_POC_READ_TRACE_.phases.push(diagnosticPhase);
+    mediaPocPersistReadTrace_();
+  }
 }
 
 function mediaPocDispatch_(action,args,ownerUserId) {
@@ -149,10 +204,11 @@ function mediaPocDispatch_(action,args,ownerUserId) {
     if(action==='media.poc.setPublic'&&args.length===1)return mediaPocSetPublic_(args[0],ownerUserId);
     if(action==='media.poc.ownerChunk'&&args.length===1)return mediaPocReadChunk_(args[0],ownerUserId,false);
     if(action==='media.poc.publicChunk'&&args.length===1)return mediaPocReadChunk_(args[0],ownerUserId,true);
+    if(action==='media.poc.readDiagnostics'&&args.length===0)return mediaPocReadDiagnostics_();
     if(action==='media.poc.cleanup'&&args.length===0)return mediaPocCleanup_();
     apiFail_('INVALID_MEDIA_POC_REQUEST','Invalid isolated media proof-of-concept request');
   };
-  if(action==='media.poc.ownerChunk'||action==='media.poc.publicChunk')return operation();
+  if(action==='media.poc.ownerChunk'||action==='media.poc.publicChunk'||action==='media.poc.readDiagnostics')return operation();
   var lock=LockService.getScriptLock();lock.waitLock(30000);
   try{return operation();}finally{lock.releaseLock();}
 }

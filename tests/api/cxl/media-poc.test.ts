@@ -185,6 +185,60 @@ describe('isolated Preview media POC route', () => {
     expect(response.headers['Server-Timing']).not.toMatch(/private_owner_id|server-only|fileId/i);
   });
 
+  it('requires Owner session and CSRF for readDiagnostics and forwards no browser-supplied identity', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const noSession = await invoke({ action: 'readDiagnostics' }, { origin: APP_ORIGIN, csrf: 'csrf-token' });
+    const noCsrf = await invoke({ action: 'readDiagnostics' }, { cookie: OWNER_COOKIE, origin: APP_ORIGIN });
+    expect([noSession.statusCode, noCsrf.statusCode]).toEqual([401, 403]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const diagnostic = { action: 'ownerChunk', phases: [
+      { phase: 'request_received', chunkIndex: 0, durationMs: 1 },
+      { phase: 'drive_fetch_completed', httpStatus: 206, expectedBytes: 68, actualBytes: 68, durationMs: 4, chunkIndex: 0 },
+      { phase: 'response_constructed', durationMs: 7, chunkIndex: 0 }
+    ] };
+    fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body));
+      expect(request).toMatchObject({ action: 'media.poc.readDiagnostics', args: [], authorization: SECRET });
+      expect(request.ownerUserId).toBe('private-owner-key');
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: diagnostic }) };
+    });
+    const response = await invoke({ action: 'readDiagnostics' }, { cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json).toEqual({ ok: true, data: diagnostic });
+    expect(JSON.stringify(response.json)).not.toMatch(/private-owner-key|script\.google|PRIVATE_DRIVE_ID|fileId|secret|https?:|checksum|base64/i);
+  });
+
+  it('does not expose invalid raw GAS diagnostic properties and accepts no stored trace as null', async () => {
+    const privateValue = 'PRIVATE_DRIVE_ID https://drive.example secret-token';
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: {
+      action: 'ownerChunk', phases: [{ phase: 'request_received' }, { phase: 'drive_fetch_completed', driveFileId: privateValue }]
+    } }) }).mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: null }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const invalid = await invoke({ action: 'readDiagnostics' }, { cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token' });
+    expect(invalid.statusCode).toBe(502);
+    expect(JSON.stringify(invalid.json)).not.toContain(privateValue);
+    expect(invalid.json.error).toBe('Media read diagnostics response was invalid');
+
+    const empty = await invoke({ action: 'readDiagnostics' }, { cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token' });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json).toEqual({ ok: true, data: null });
+  });
+
+  it('keeps readDiagnostics Preview-gated to the exact POC route and does not add it to the normal media route', async () => {
+    vi.stubEnv('CXL_MEDIA_POC_ENABLED', '0');
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const disabled = await invoke({ action: 'readDiagnostics' }, { cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token' });
+    expect(disabled.statusCode).toBe(404);
+
+    const normal = await invoke({ action: 'readDiagnostics' }, {
+      url: '/api/cxl/media', cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token'
+    });
+    expect(normal.statusCode).toBe(405);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('streams a complete 10 MiB Owner-private binary over five bounded GAS read responses', async () => {
     const bytes = Buffer.alloc(mediaPocLimits.maxFileBytes, 0x6a);
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);

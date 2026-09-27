@@ -158,6 +158,10 @@ function parsedReadLogs(context: Record<string, any>) {
   return [...context.console.log.mock.calls, ...context.console.warn.mock.calls].map(([line]: [string]) => JSON.parse(line));
 }
 
+function persistedReadDiagnostic(context: Record<string, any>) {
+  return JSON.parse(context.__properties.CXL_MEDIA_POC_LAST_READ_DIAGNOSTIC || 'null');
+}
+
 function begin(context: Record<string, any>, bytes: Buffer, extras: Record<string, unknown> = {}) {
   const ids = { uploadId: randomUUID(), mediaId: randomUUID(), workNonce: randomUUID() };
   const response = post(context, 'media.poc.begin', [{ ...ids, totalFileSize: bytes.length, rawChunkSize: CHUNK_BYTES,
@@ -371,6 +375,18 @@ describe('API-only Owner isolated Media POC', () => {
       expect(serialized).not.toContain(sensitive);
     }
     expect(serialized).not.toMatch(/https?:\/\//i);
+
+    const diagnostic = persistedReadDiagnostic(context);
+    expect(diagnostic.action).toBe('ownerChunk');
+    expect(Object.keys(diagnostic).sort()).toEqual(['action', 'phases']);
+    const allowedDiagnosticPhaseKeys = new Set(['phase', 'code', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
+    for (const phase of diagnostic.phases) expect(Object.keys(phase).every((key: string) => allowedDiagnosticPhaseKeys.has(key))).toBe(true);
+    expect(diagnostic.phases.at(-1).phase).toBe('response_constructed');
+    expect(diagnostic.phases.find((phase: any) => phase.phase === 'drive_fetch_completed')).toMatchObject({
+      httpStatus: 206, expectedBytes: bytes.length, actualBytes: bytes.length
+    });
+    expect(context.__properties.CXL_MEDIA_POC_LAST_READ_DIAGNOSTIC.length).toBeLessThan(2048);
+    expect(post(context, 'media.poc.readDiagnostics', [])).toEqual({ ok: true, data: diagnostic });
   });
 
   it('supports Drive HTTP 200 full-body fallback and logs only status and byte counts', () => {
@@ -389,6 +405,10 @@ describe('API-only Owner isolated Media POC', () => {
     expect(logs.find(log => log.phase === 'drive_range_validated')).toMatchObject({
       httpStatus: 200, expectedBytes: 23, actualBytes: 23
     });
+    const diagnostic = persistedReadDiagnostic(context);
+    expect(diagnostic.phases.find((phase: any) => phase.phase === 'drive_fetch_completed')).toMatchObject({
+      httpStatus: 200, expectedBytes: 23, actualBytes: bytes.length
+    });
   });
 
   it('logs non-range Drive status and throws a safe failure code', () => {
@@ -405,6 +425,9 @@ describe('API-only Owner isolated Media POC', () => {
     });
     expect(logs.filter(log => log.phase === 'read_failed').at(-1)).toMatchObject({
       code: 'MEDIA_POC_MEDIA_READ_FAILED', action: 'media.poc.ownerChunk'
+    });
+    expect(persistedReadDiagnostic(context).phases.at(-1)).toMatchObject({
+      phase: 'read_failed', code: 'MEDIA_POC_MEDIA_READ_FAILED'
     });
   });
 
@@ -427,6 +450,41 @@ describe('API-only Owner isolated Media POC', () => {
     expect(serialized).not.toContain(fixture.ids.workNonce);
     expect(serialized).not.toContain(fixture.file.id);
     expect(serialized).not.toContain(digest(bytes));
+  });
+
+  it('starts a fresh diagnostic for each read instead of mixing prior phases or status', () => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    const fixture = seedReadMedia(context, bytes);
+    expect(post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]).ok).toBe(true);
+    expect(persistedReadDiagnostic(context).phases.some((phase: any) => phase.phase === 'response_constructed')).toBe(true);
+
+    context.__setDriveFetch(() => { throw new Error('drive fetch failed'); });
+    expect(post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]).code).toBe('MEDIA_POC_MEDIA_READ_FAILED');
+    const latest = persistedReadDiagnostic(context);
+    expect(latest.action).toBe('ownerChunk');
+    expect(latest.phases.map((phase: any) => phase.phase)).toEqual([
+      'request_received', 'manifest_validated', 'drive_fetch_started', 'read_failed'
+    ]);
+    expect(latest.phases.some((phase: any) => 'httpStatus' in phase)).toBe(false);
+    expect(latest.phases.some((phase: any) => phase.phase === 'response_constructed')).toBe(false);
+  });
+
+  it('protects readDiagnostics with the existing GAS shared-secret and configured Owner checks and sanitizes stored data', () => {
+    const context = makeBridge();
+    context.__properties.CXL_MEDIA_POC_LAST_READ_DIAGNOSTIC = JSON.stringify({
+      action: 'ownerChunk',
+      ownerId: 'private-owner-value',
+      fileId: 'private-drive-id',
+      phases: [{ phase: 'request_received', url: 'https://private.example', authorization: 'secret-token', checksum: 'a'.repeat(64) }]
+    });
+    expect(post(context, 'media.poc.readDiagnostics', [], '', OWNER_ID).code).toBe('OWNER_API_UNAUTHORIZED');
+    expect(post(context, 'media.poc.readDiagnostics', [], SECRET, 'spoofed-owner').code).toBe('OWNER_API_UNAUTHORIZED');
+
+    const response = post(context, 'media.poc.readDiagnostics', []);
+    expect(response).toEqual({ ok: true, data: { action: 'ownerChunk', phases: [{ phase: 'request_received' }] } });
+    expect(JSON.stringify(response)).not.toMatch(/private-owner-value|private-drive-id|https?:|secret-token|checksum/i);
+    expect(post(context, 'media.poc.readDiagnostics', [{}]).code).toBe('INVALID_MEDIA_POC_REQUEST');
   });
 
   it('cleans only a bounded number of expired POC staging sessions and never touches canonical media', () => {
