@@ -56,7 +56,11 @@ const READ_DIAGNOSTIC_CODES = new Set([
   'INVALID_MEDIA_POC_REQUEST', 'MEDIA_POC_STATE_INVALID', 'MEDIA_POC_MEDIA_NOT_FOUND',
   'MEDIA_POC_MEDIA_NOT_PUBLIC', 'MEDIA_POC_MEDIA_INVALID', 'MEDIA_POC_MEDIA_READ_FAILED'
 ]);
-const READ_DIAGNOSTIC_PHASE_KEYS = new Set(['phase', 'code', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
+const READ_DIAGNOSTIC_FAILURE_CLASSES = new Set([
+  'authorization_required', 'external_request_permission', 'invalid_request_options',
+  'url_fetch_runtime_failure', 'unknown_fetch_exception'
+]);
+const READ_DIAGNOSTIC_PHASE_KEYS = new Set(['phase', 'code', 'failureClass', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
 
 type MediaPocReadFailureCode =
   | 'MEDIA_POC_READ_RESPONSE_INVALID'
@@ -228,6 +232,8 @@ function isSafeReadDiagnostic(value: unknown): value is JsonRecord {
       || typeof phase.phase !== 'string' || !READ_DIAGNOSTIC_PHASES.has(phase.phase) || seen.has(phase.phase)) return false;
     seen.add(phase.phase);
     if ('code' in phase && (typeof phase.code !== 'string' || !READ_DIAGNOSTIC_CODES.has(phase.code))) return false;
+    if ('failureClass' in phase && (phase.phase !== 'drive_fetch_failed'
+      || typeof phase.failureClass !== 'string' || !READ_DIAGNOSTIC_FAILURE_CLASSES.has(phase.failureClass))) return false;
     if ('httpStatus' in phase && (typeof phase.httpStatus !== 'number' || !Number.isInteger(phase.httpStatus) || phase.httpStatus < 100 || phase.httpStatus > 599)) return false;
     if ('expectedBytes' in phase && (typeof phase.expectedBytes !== 'number' || !Number.isInteger(phase.expectedBytes) || phase.expectedBytes < 0 || phase.expectedBytes > CHUNK_BYTES)) return false;
     if ('actualBytes' in phase && (typeof phase.actualBytes !== 'number' || !Number.isInteger(phase.actualBytes) || phase.actualBytes < 0 || phase.actualBytes > MAX_FILE_BYTES)) return false;

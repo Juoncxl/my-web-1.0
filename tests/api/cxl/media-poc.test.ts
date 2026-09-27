@@ -227,7 +227,7 @@ describe('isolated Preview media POC route', () => {
       { phase: 'oauth_token_started', chunkIndex: 0 },
       { phase: 'oauth_token_acquired', durationMs: 1, chunkIndex: 0 },
       { phase: 'drive_fetch_started', expectedBytes: 68, chunkIndex: 0 },
-      { phase: 'drive_fetch_failed', expectedBytes: 68, durationMs: 610, chunkIndex: 0 },
+      { phase: 'drive_fetch_failed', failureClass: 'external_request_permission', expectedBytes: 68, durationMs: 610, chunkIndex: 0 },
       { phase: 'read_failed', code: 'MEDIA_POC_MEDIA_READ_FAILED', durationMs: 611, chunkIndex: 0 }
     ]]
   ])('accepts the safe %s read trace', async (_label, phases) => {
@@ -246,7 +246,7 @@ describe('isolated Preview media POC route', () => {
   it('does not expose invalid raw GAS diagnostic properties and accepts no stored trace as null', async () => {
     const privateValue = 'PRIVATE_DRIVE_ID https://drive.example secret-token';
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: {
-      action: 'ownerChunk', phases: [{ phase: 'request_received' }, { phase: 'drive_fetch_completed', driveFileId: privateValue }]
+      action: 'ownerChunk', phases: [{ phase: 'request_received' }, { phase: 'drive_fetch_failed', failureClass: privateValue }]
     } }) }).mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: null }) });
     vi.stubGlobal('fetch', fetchMock);
 

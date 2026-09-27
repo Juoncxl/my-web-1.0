@@ -365,7 +365,7 @@ describe('API-only Owner isolated Media POC', () => {
       event: 'media_poc_read', action: 'media.poc.ownerChunk', httpStatus: 206,
       expectedBytes: bytes.length, actualBytes: bytes.length
     });
-    const allowedKeys = new Set(['event', 'action', 'phase', 'code', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
+    const allowedKeys = new Set(['event', 'action', 'phase', 'code', 'failureClass', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
     for (const log of logs) {
       expect(Object.keys(log).every(key => allowedKeys.has(key))).toBe(true);
       expect(log.chunkIndex).toBe(0);
@@ -381,7 +381,7 @@ describe('API-only Owner isolated Media POC', () => {
     const diagnostic = persistedReadDiagnostic(context);
     expect(diagnostic.action).toBe('ownerChunk');
     expect(Object.keys(diagnostic).sort()).toEqual(['action', 'phases']);
-    const allowedDiagnosticPhaseKeys = new Set(['phase', 'code', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
+    const allowedDiagnosticPhaseKeys = new Set(['phase', 'code', 'failureClass', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
     for (const phase of diagnostic.phases) expect(Object.keys(phase).every((key: string) => allowedDiagnosticPhaseKeys.has(key))).toBe(true);
     expect(diagnostic.phases.at(-1).phase).toBe('response_constructed');
     expect(diagnostic.phases.find((phase: any) => phase.phase === 'drive_fetch_completed')).toMatchObject({
@@ -446,12 +446,36 @@ describe('API-only Owner isolated Media POC', () => {
     expect(logs.filter(log => log.phase === 'read_failed').at(-1)).toMatchObject({
       code: 'MEDIA_POC_MEDIA_READ_FAILED', action: 'media.poc.ownerChunk'
     });
+    expect(persistedReadDiagnostic(context).phases.find((phase: any) => phase.phase === 'drive_fetch_failed')).toMatchObject({
+      failureClass: 'unknown_fetch_exception'
+    });
     const serialized = JSON.stringify(logs);
     expect(serialized).not.toContain(sensitiveFailure);
     expect(serialized).not.toContain(fixture.ids.mediaId);
     expect(serialized).not.toContain(fixture.ids.workNonce);
     expect(serialized).not.toContain(fixture.file.id);
     expect(serialized).not.toContain(digest(bytes));
+  });
+
+  it.each([
+    ['external request permission', 'You do not have permission to call UrlFetchApp.fetch. Required permissions: https://www.googleapis.com/auth/script.external_request', 'external_request_permission'],
+    ['authorization required', 'Authorization is required to perform that action.', 'authorization_required'],
+    ['invalid request options', 'Invalid argument: URL', 'invalid_request_options'],
+    ['UrlFetch runtime failure', 'Service invoked too many times for one day: urlfetch', 'url_fetch_runtime_failure']
+  ])('classifies %s using only a safe allowlisted category', (_label, exceptionMessage, expectedClass) => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    const fixture = seedReadMedia(context, bytes);
+    const sensitiveFailure = `${exceptionMessage} Bearer secret-token ${fixture.file.id} ${bytes.toString('base64')}`;
+    context.__setDriveFetch(() => { throw new Error(sensitiveFailure); });
+
+    expect(post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]).code).toBe('MEDIA_POC_MEDIA_READ_FAILED');
+    const diagnostic = persistedReadDiagnostic(context);
+    expect(diagnostic.phases.find((phase: any) => phase.phase === 'drive_fetch_failed')).toMatchObject({ failureClass: expectedClass });
+    const serialized = JSON.stringify(diagnostic) + JSON.stringify(parsedReadLogs(context));
+    for (const sensitive of [exceptionMessage, 'Bearer secret-token', fixture.ids.mediaId, fixture.file.id, bytes.toString('base64')]) {
+      expect(serialized).not.toContain(sensitive);
+    }
   });
 
   it('distinguishes OAuth token acquisition failures without exposing exception details', () => {

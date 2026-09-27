@@ -30,6 +30,8 @@ var MEDIA_POC_ALLOWED_MIME_ = ['image/jpeg','image/png','image/webp','image/gif'
 var MEDIA_POC_READ_ACTIONS_ = ['media.poc.ownerChunk','media.poc.publicChunk'];
 var MEDIA_POC_READ_PHASES_ = ['request_received','manifest_validated','oauth_token_started','oauth_token_acquired','oauth_token_failed',
   'drive_fetch_started','drive_fetch_failed','drive_fetch_completed','drive_range_validated','response_constructed','read_failed'];
+var MEDIA_POC_READ_FAILURE_CLASSES_ = ['authorization_required','external_request_permission','invalid_request_options',
+  'url_fetch_runtime_failure','unknown_fetch_exception'];
 var MEDIA_POC_READ_ERROR_CODES_ = ['INVALID_MEDIA_POC_REQUEST','MEDIA_POC_STATE_INVALID','MEDIA_POC_MEDIA_NOT_FOUND',
   'MEDIA_POC_MEDIA_NOT_PUBLIC','MEDIA_POC_MEDIA_INVALID','MEDIA_POC_MEDIA_READ_FAILED'];
 var MEDIA_POC_READ_TRACE_ = null;
@@ -130,6 +132,23 @@ function mediaPocSafeReadCode_(error) {
   var code=error&&typeof error.apiCode==='string'?error.apiCode:'';
   return MEDIA_POC_READ_ERROR_CODES_.indexOf(code)>=0?code:'MEDIA_POC_MEDIA_READ_FAILED';
 }
+function mediaPocSafeFetchFailureClass_(error) {
+  var message='';
+  try {
+    if(error&&typeof error.message==='string')message=error.message;
+    else if(typeof error==='string')message=error;
+  } catch(_error) { return 'unknown_fetch_exception'; }
+  var normalized=message.slice(0,4096).toLowerCase().replace(/\s+/g,' ');
+  if(/script\.external_request|external request permission|permission to call urlfetchapp|urlfetchapp.{0,80}permission|permission.{0,80}urlfetchapp/.test(normalized))
+    return 'external_request_permission';
+  if(/authorization (?:is )?required|authentication required|not authorized|insufficient authentication scope/.test(normalized))
+    return 'authorization_required';
+  if(/invalid (?:argument|parameter|option|url|request)|(?:argument|parameter|option|url).{0,40}invalid|unsupported (?:method|protocol|header)|request options/.test(normalized))
+    return 'invalid_request_options';
+  if(/timed? ?out|timeout|service invoked too many times|quota|network|connection|dns|unreachable|temporary failure|service unavailable|internal error|backend error/.test(normalized))
+    return 'url_fetch_runtime_failure';
+  return 'unknown_fetch_exception';
+}
 function mediaPocReadTraceAction_(action) { return action==='media.poc.publicChunk'?'publicChunk':'ownerChunk'; }
 function mediaPocReadTraceStart_(action) {
   MEDIA_POC_READ_TRACE_={action:mediaPocReadTraceAction_(action),phases:[]};
@@ -139,8 +158,11 @@ function mediaPocDiagnosticPhase_(phase,details) {
   if(MEDIA_POC_READ_PHASES_.indexOf(phase)<0)return null;
   var data=details||{},record={phase:phase};
   var code=typeof data.code==='string'&&MEDIA_POC_READ_ERROR_CODES_.indexOf(data.code)>=0?data.code:'';
+  var failureClass=phase==='drive_fetch_failed'&&typeof data.failureClass==='string'
+    &&MEDIA_POC_READ_FAILURE_CLASSES_.indexOf(data.failureClass)>=0?data.failureClass:'';
   var status=Number(data.httpStatus),expected=Number(data.expectedBytes),actual=Number(data.actualBytes),duration=Number(data.durationMs),chunkIndex=Number(data.chunkIndex);
   if(code)record.code=code;
+  if(failureClass)record.failureClass=failureClass;
   if(Number.isInteger(status)&&status>=100&&status<=599)record.httpStatus=status;
   if(Number.isInteger(expected)&&expected>=0&&expected<=MEDIA_POC_MAX_BYTES_)record.expectedBytes=expected;
   if(Number.isInteger(actual)&&actual>=0&&actual<=MEDIA_POC_MAX_BYTES_)record.actualBytes=actual;
@@ -177,8 +199,11 @@ function mediaPocReadLog_(action,phase,details) {
   if(!mediaPocIsReadAction_(action)||MEDIA_POC_READ_PHASES_.indexOf(phase)<0)return;
   var record={event:'media_poc_read',action:action,phase:phase},data=details||{};
   var code=typeof data.code==='string'&&MEDIA_POC_READ_ERROR_CODES_.indexOf(data.code)>=0?data.code:'';
+  var failureClass=phase==='drive_fetch_failed'&&typeof data.failureClass==='string'
+    &&MEDIA_POC_READ_FAILURE_CLASSES_.indexOf(data.failureClass)>=0?data.failureClass:'';
   var status=Number(data.httpStatus),expected=Number(data.expectedBytes),actual=Number(data.actualBytes),duration=Number(data.durationMs),chunkIndex=Number(data.chunkIndex);
   if(code)record.code=code;
+  if(failureClass)record.failureClass=failureClass;
   if(Number.isInteger(status)&&status>=100&&status<=599)record.httpStatus=status;
   if(Number.isFinite(expected)&&expected>=0)record.expectedBytes=expected;
   if(Number.isFinite(actual)&&actual>=0)record.actualBytes=actual;
@@ -377,7 +402,8 @@ function mediaPocDriveChunk_(fileId,start,expectedLength,totalSize,action,chunkI
   mediaPocReadLog_(action,'oauth_token_acquired',{durationMs:Date.now()-tokenStarted,chunkIndex:chunkIndex});
   var fetchStarted=Date.now();mediaPocReadLog_(action,'drive_fetch_started',{expectedBytes:expectedLength,chunkIndex:chunkIndex});
   try{response=UrlFetchApp.fetch(url,{method:'get',headers:{Authorization:'Bearer '+accessToken,Range:'bytes='+start+'-'+end},muteHttpExceptions:true});}
-  catch(_fetchError){mediaPocReadLog_(action,'drive_fetch_failed',{expectedBytes:expectedLength,durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});
+  catch(fetchError){mediaPocReadLog_(action,'drive_fetch_failed',{failureClass:mediaPocSafeFetchFailureClass_(fetchError),expectedBytes:expectedLength,
+      durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});
     mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_READ_FAILED',expectedBytes:expectedLength,durationMs:Date.now()-readStarted,chunkIndex:chunkIndex});apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
   var status=response.getResponseCode(),content=response.getContent();
   mediaPocReadLog_(action,'drive_fetch_completed',{httpStatus:status,expectedBytes:expectedLength,actualBytes:content.length,
