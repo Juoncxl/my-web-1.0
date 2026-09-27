@@ -127,11 +127,15 @@ describe('Owner scoped read lifecycle', () => {
     expect(assetHookSource).toContain('readLifecycle.current.claimAutomaticLoad(requestScopeKey)');
     expect(assetHookSource).toContain('cxlDataService.works.fetch');
     expect(assetHookSource).toContain('readLifecycle.current.isCurrent(ticket)');
+    expect(assetHookSource).toContain('readWithBoundedRetry');
+    expect(assetHookSource).toContain('isInitialLoad && isVercelOwnerAuth');
 
     expect(folderHookSource).toContain('useLayoutEffect(() => {');
     expect(folderHookSource).toContain('readLifecycle.current.transition(requestScopeKey)');
     expect(folderHookSource).toContain('readLifecycle.current.claimAutomaticLoad(requestScopeKey)');
     expect(folderHookSource).toContain('cxlDataService.folders.fetch(currentUserId)');
     expect(folderHookSource).toContain('readLifecycle.current.isCurrent(ticket)');
+    expect(folderHookSource).toContain('readWithBoundedRetry');
+    expect(folderHookSource).toContain('isInitialLoad && isVercelOwnerAuth');
   });
 });

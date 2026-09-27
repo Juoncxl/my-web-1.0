@@ -9,6 +9,7 @@ function bridge() {
   const context: Record<string, any> = {};
   let id = 0;
   context.Utilities = { getUuid: () => `token-${++id}` };
+  context.console = { log: vi.fn() };
   runInNewContext(source, context);
   return context;
 }
@@ -62,6 +63,7 @@ class MemorySheet {
   }
   appendRow(values: unknown[]) { this.rows.push(values); }
   deleteRow(row: number) { this.rows.splice(row - 1, 1); }
+  deleteRows(row: number, count: number) { this.rows.splice(row - 1, count); }
   deleteColumn(column: number) { this.rows.forEach(row => row.splice(column - 1, 1)); }
 }
 
@@ -133,6 +135,18 @@ describe('API-only Owner chunked search index', () => {
     expect(context.fetchCxlWorks_({ detail: 'summary' }).data[0].id).toBe('list-only');
     expect(context.listOwnerSearchIndex_).not.toHaveBeenCalled();
     expect(context.getOwnerWork_).not.toHaveBeenCalled();
+  });
+
+  it('logs read phase timings without including work identifiers or search content', () => {
+    const context = bridge();
+    const { row } = indexed(asset('private-work-id', { title: 'private search phrase' }), context);
+    context.listOwnerIndex_ = () => [row];
+    context.fetchCxlWorks_({ detail: 'summary' });
+    const logs = context.console.log.mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
+    expect(logs).toContain('cxl_owner_timing');
+    expect(logs).toContain('indexReadMs');
+    expect(logs).not.toContain('private-work-id');
+    expect(logs).not.toContain('private search phrase');
   });
 
   it('reads only the selected canonical Work JSON for detail and rejects full-list detail', () => {
@@ -227,6 +241,19 @@ describe('API-only Owner chunked search index', () => {
     expect(JSON.stringify(sheet.rows)).not.toContain('stale-only-term');
   });
 
+  it('cleans stale search chunks by reading only the two lookup columns and deleting contiguous ranges', () => {
+    const context = bridge();
+    const old = indexed(asset('cleanup-work', { content: `${'old '.repeat(12_000)}stale-only-term` }), context);
+    const next = indexed(asset('cleanup-work', { content: 'short new revision' }), context);
+    const sheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_, [...old.chunks, ...next.chunks].map((chunk: any) => context.OWNER_SEARCH_HEADERS_.map((key: string) => chunk[key])));
+    const getRange = vi.spyOn(sheet, 'getRange');
+
+    context.removeStaleOwnerSearchChunks_(sheet, 'cleanup-work', next.artifacts.token);
+
+    expect(getRange.mock.calls.map(call => call.slice(2))).toEqual([[1, context.OWNER_SEARCH_HEADERS_.length], [old.chunks.length + next.chunks.length, 1], [old.chunks.length + next.chunks.length, 1]]);
+    expect(sheet.getLastRow() - 1).toBe(next.chunks.length);
+  });
+
   it('refreshes the Private summary and active search generation on create/update writes', () => {
     const context = bridge();
     const privateSheet = new MemorySheet(context.PRIVATE_HEADERS_ || context.PRIVATE_HEADERS);
@@ -237,7 +264,7 @@ describe('API-only Owner chunked search index', () => {
     context.ownerSearchSheet_ = () => searchSheet;
     context.LockService = { getScriptLock: () => ({ waitLock: vi.fn(), releaseLock: vi.fn() }) };
     context.shareRecordMedia_ = vi.fn();
-    context.parse_ = () => canonical;
+    context.parse_ = vi.fn(() => canonical);
     context.putJsonRevision_ = vi.fn((_folder: string, _name: string, record: any) => { canonical = record; return `file-${record.revision}`; });
     context.putJson_ = vi.fn((_folder: string, _name: string, record: any) => { canonical = record; return `file-${record.revision}`; });
     const original = asset('write-work', { content: 'first indexed revision' });
@@ -255,5 +282,7 @@ describe('API-only Owner chunked search index', () => {
     expect(chunks.map((row: any) => row.search_text).join('')).toContain('replacement indexed revision');
     expect(chunks.map((row: any) => row.search_text).join('')).not.toContain('first indexed revision');
     expect(updatedIndex).not.toHaveProperty('search_text');
+    expect(context.parse_).toHaveBeenCalledOnce();
+    expect(canonical.cxlAsset.content).toBe('replacement indexed revision');
   });
 });

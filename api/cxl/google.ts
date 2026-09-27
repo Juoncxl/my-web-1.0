@@ -50,13 +50,19 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
     return !error && data.user?.id === ownerId ? data.user.id : null;
   } catch { return null; }
 }
-async function gasJson(url: string, init: RequestInit) {
-  const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS) });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Google Apps Script responded with HTTP ${response.status}`);
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { throw new Error('Google Apps Script returned malformed JSON'); }
-  return parsed;
+async function gasJson(url: string, init: RequestInit, action: string) {
+  const started = Date.now();
+  try {
+    const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS) });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Google Apps Script responded with HTTP ${response.status}`);
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { throw new Error('Google Apps Script returned malformed JSON'); }
+    return parsed;
+  } finally {
+    // Runtime diagnostics deliberately omit endpoint URLs, payloads, IDs, and credentials.
+    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started }));
+  }
 }
 function publicGasUrl(action: string, params: Record<string, string>): URL | null {
   const endpoint = gasEndpoint(process.env.CXL_GAS_PUBLIC_URL);
@@ -67,7 +73,7 @@ function publicGasUrl(action: string, params: Record<string, string>): URL | nul
   return url;
 }
 async function publicGasData(url: URL): Promise<unknown> {
-  const raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
+  const raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } }, url.searchParams.get('cxlApi') || 'public.read');
   if (!record(raw) || raw.ok !== true) throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed');
   return raw.data;
 }
@@ -173,7 +179,7 @@ export default async function handler(req: Request, res: Response) {
             ? body.args
             : body.args;
       const raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs }) });
+        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs }) }, action);
       if (!record(raw) || raw.ok !== true) {
         const code = record(raw) ? raw.code : undefined;
         const message = record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed';
@@ -248,7 +254,7 @@ export default async function handler(req: Request, res: Response) {
       if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
       raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: ownerId, action: 'works.fetch', args: [{ ...options,
-          ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId }] }) });
+          ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId }] }) }, 'works.fetch');
       if (!record(raw) || raw.ok !== true || !record(raw.data) || !Array.isArray(raw.data.data)) {
         const error = new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed') as Error & { apiCode?: unknown };
         if (record(raw)) error.apiCode = raw.code;

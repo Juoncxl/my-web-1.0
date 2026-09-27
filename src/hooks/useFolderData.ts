@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Folder } from '../types';
 import { cxlDataService } from '../data/cxlDataService';
 import { ScopedReadLifecycle } from './scopedReadLifecycle';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
+import { readWithBoundedRetry } from './boundedReadRetry';
 
 type ReportError = (message: string) => void;
 
@@ -23,7 +25,11 @@ export function useFolderData(currentUserId: string | undefined, reportError: Re
     const isInitialLoad = !hasLoadedFolders.current;
     if (isInitialLoad) setIsLoadingFolders(true);
     try {
-      const res = await cxlDataService.folders.fetch(currentUserId);
+      const res = await readWithBoundedRetry<Awaited<ReturnType<typeof cxlDataService.folders.fetch>>>(() => cxlDataService.folders.fetch(currentUserId), {
+        enabled: isInitialLoad && isVercelOwnerAuth,
+        isCurrent: isCurrentRequest,
+        getError: value => value.error
+      });
       if (!isCurrentRequest()) return;
       if (res.error) {
         reportError(res.error);

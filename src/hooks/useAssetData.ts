@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { Asset, User } from '../types';
 import { cxlDataService, type FetchAssetsOptions, type WorkCreateOptions, type WorkUpdateOptions } from '../data/cxlDataService';
 import { ScopedReadLifecycle } from './scopedReadLifecycle';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
+import { readWithBoundedRetry } from './boundedReadRetry';
 
 type ReportError = (message: string | null) => void;
 type NewAssetData = Omit<Asset, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'authorName'>;
@@ -48,9 +50,14 @@ export function useAssetData(
     if (isInitialLoad) setIsLoadingAssets(true);
 
     try {
-      const res = await cxlDataService.works.fetch({
+      const res = await readWithBoundedRetry<Awaited<ReturnType<typeof cxlDataService.works.fetch>>>(() => cxlDataService.works.fetch({
         ...loadOptions,
         currentUserId: loadIdentityUserId,
+      }), {
+        enabled: isInitialLoad && isVercelOwnerAuth && Boolean(loadIdentityUserId) && !loadOptions.publicOnly,
+        isCurrent: isCurrentRequest,
+        getError: value => value.error,
+        onRetry: () => reportError(null)
       });
       if (!isCurrentRequest()) return;
       if (res.error) {

@@ -119,7 +119,7 @@ describe('API-only Owner GAS package isolation', () => {
     context.rowById_ = () => ({ id: 'asset_work', file_id: 'current-file' });
     context.parse_ = () => currentRecord;
     context.writeFingerprint_ = () => 'fingerprint';
-    context.saveOwnerWork_ = () => ({ id: 'asset_work', revision: 4, updatedAt: '2026-09-27T00:00:00.000Z' });
+    context.saveOwnerWork_ = () => ({ id: 'asset_work', revision: 4, updatedAt: '2026-09-27T00:00:00.000Z', record: savedRecord });
     context.getOwnerWork_ = getOwnerWork;
     context.finishCxlPublicProjection_ = vi.fn();
     context.cxlWriteResult_ = responseRecord;
@@ -128,7 +128,7 @@ describe('API-only Owner GAS package isolation', () => {
       requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 3
     }, 'test-owner');
 
-    expect(getOwnerWork).toHaveBeenCalledOnce();
+    expect(getOwnerWork).not.toHaveBeenCalled();
     expect(responseRecord).toHaveBeenCalledWith(savedRecord);
     expect(result).toBe(savedRecord);
   });

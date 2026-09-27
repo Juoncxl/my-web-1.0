@@ -95,10 +95,11 @@ function cxlAssetFromRecord_(record) {
 
 function cxlOwnerFolders_(ownerUserId) {
   if(!ownerUserId)apiFail_('OWNER_REQUIRED','Authenticated Owner is required');
-  return getFolders_().filter(function(folder){return folder&&String(folder.user_id||'')===String(ownerUserId);}).map(function(folder){
+  var started=Date.now(),folders=getFolders_().filter(function(folder){return folder&&String(folder.user_id||'')===String(ownerUserId);}).map(function(folder){
     if(!folder.id||!folder.name||!folder.created_at||!folder.updated_at)apiFail_('FOLDER_SCHEMA_INVALID','Folder source does not match the CXL Folder contract');
     return {id:String(folder.id),userId:String(ownerUserId),name:String(folder.name),icon:folder.icon||'📁',color:folder.color||'purple',createdAt:String(folder.created_at),updatedAt:String(folder.updated_at)};
   });
+  ownerTimingLog_('folders.fetch',{driveReadAndProjectionMs:Date.now()-started});return folders;
 }
 
 function cxlRowInput_(asset,ownerUserId,request) {
@@ -121,7 +122,7 @@ function fetchCxlWorks_(options) {
   options=options||{};
   if(options.assetId)return {data:[cxlAssetFromRecord_(getOwnerWork_(options.assetId))],error:null};
   if(options.detail==='full')apiFail_('FULL_LIST_NOT_SUPPORTED','Full Work reads require one assetId');
-  var index=listOwnerIndex_();
+  var totalStarted=Date.now(),phaseStarted=totalStarted,index=listOwnerIndex_(),indexReadMs=Date.now()-phaseStarted,searchReadMs=0,summaryMs=0;
   if(index.some(function(row){return !privateSummaryReady_(row);}))apiFail_('PRIVATE_SUMMARY_NOT_READY','Owner Work summary index is incomplete; run the controlled summary backfill');
   if(options.userId)index=index.filter(function(row){return row.userId===options.userId;});
   if(options.onlyDeleted&&options.currentUserId)index=index.filter(function(row){return row.userId===options.currentUserId;});
@@ -135,11 +136,16 @@ function fetchCxlWorks_(options) {
   if(options.search&&String(options.search).trim()){
     var q=normalizeOwnerSearch_(options.search);
     if(q.length>OWNER_SEARCH_MAX_QUERY_CHARS_)apiFail_('SEARCH_QUERY_TOO_LONG','Search query exceeds the supported length');
-    var searchRows=listOwnerSearchIndex_(),matching=ownerSearchMatches_(index,searchRows,q);
+    phaseStarted=Date.now();var searchRows=listOwnerSearchIndex_(),matching=ownerSearchMatches_(index,searchRows,q);searchReadMs=Date.now()-phaseStarted;
     index=index.filter(function(row){return !!matching[row.id];});
   }
-  var works=index.map(function(row){return privateSummaryAsset_(row);});
+  phaseStarted=Date.now();var works=index.map(function(row){return privateSummaryAsset_(row);});summaryMs=Date.now()-phaseStarted;
+  ownerTimingLog_('works.fetch',{indexReadMs:indexReadMs,searchReadMs:searchReadMs,summaryMs:summaryMs,totalMs:Date.now()-totalStarted});
   return {data:works,error:null};
+}
+
+function ownerTimingLog_(operation,phases) {
+  if(typeof console!=='undefined'&&console&&typeof console.log==='function')console.log(JSON.stringify({event:'cxl_owner_timing',operation:operation,phases:phases}));
 }
 
 function privateSummaryAsset_(row) {
@@ -312,8 +318,18 @@ function appendOwnerSearchChunks_(sh,workId,artifacts) {
 }
 
 function removeStaleOwnerSearchChunks_(sh,workId,keepToken) {
-  var rows=objectRows_(sh),numbers=rows.filter(function(row){return String(row.work_id||'')===String(workId)&&String(row.index_token||'')!==String(keepToken);}).map(function(row){return row._sheetRow;}).sort(function(a,b){return b-a;});
-  numbers.forEach(function(rowNumber){sh.deleteRow(rowNumber);});
+  var lastRow=sh.getLastRow(),lastColumn=sh.getLastColumn();if(lastRow<2||lastColumn<1)return;
+  var headers=sh.getRange(1,1,1,lastColumn).getValues()[0].map(String),workColumn=headers.indexOf('work_id')+1,tokenColumn=headers.indexOf('index_token')+1;
+  if(!workColumn||!tokenColumn)return;
+  var height=lastRow-1,workIds=sh.getRange(2,workColumn,height,1).getValues(),tokens=sh.getRange(2,tokenColumn,height,1).getValues(),stale=[];
+  for(var i=0;i<height;i++)if(String(workIds[i][0]||'')===String(workId)&&String(tokens[i][0]||'')!==String(keepToken))stale.push(i+2);
+  if(!stale.length)return;
+  stale.sort(function(a,b){return b-a;});var start=stale[0],count=1;
+  for(var j=1;j<stale.length;j++){
+    if(stale[j]===start-1){start=stale[j];count++;}
+    else {sh.deleteRows(start,count);start=stale[j];count=1;}
+  }
+  sh.deleteRows(start,count);
 }
 
 function hasLegacySearchText_(sh,row) {
@@ -488,6 +504,7 @@ function sanitizeCxlAsset_(asset) {
 }
 
 function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
+  var totalStarted=Date.now(),phaseStarted=totalStarted;
   if(!ownerUserId)apiFail_('OWNER_REQUIRED','Authenticated Owner is required');
   if(!options||!/^([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(String(options.requestId||'')))apiFail_('INVALID_REQUEST_ID','A stable requestId is required');
   var requestId=String(options.requestId).toLowerCase(),assetInput=operation==='create'?payload:payload&&payload.updates,id=operation==='create'?'asset_'+requestId.replace(/-/g,'' ):String(payload&&payload.id||'');
@@ -523,18 +540,21 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
   }
   validateOwnerFolder_(asset.folderId,ownerUserId);
   var request={operation:operation,requestId:requestId,fingerprint:fingerprint,revision:operation==='update'?Number(options.expectedRevision):0,createRequestId:operation==='create'?requestId:''};
-  var saved=saveOwnerWork_(cxlRowInput_(asset,ownerUserId,request),{deferPublicSync:true,idempotent:true});
-  record=getOwnerWork_(saved.id);finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(record);
+  var validationAndPreloadMs=Date.now()-phaseStarted;phaseStarted=Date.now();var saved=saveOwnerWork_(cxlRowInput_(asset,ownerUserId,request),{deferPublicSync:true,idempotent:true});
+  var saveMs=Date.now()-phaseStarted;record=saved.record;if(!record)apiFail_('OWNER_WRITE_STATE_INVALID','Saved Work response is unavailable');
+  phaseStarted=Date.now();finishCxlPublicProjection_(record,ownerUserId);var publicSyncMs=Date.now()-phaseStarted;
+  ownerTimingLog_('works.'+operation,{validationAndPreloadMs:validationAndPreloadMs,saveMs:saveMs,publicSyncMs:publicSyncMs,totalMs:Date.now()-totalStarted});
+  return cxlWriteResult_(record);
 }
 
 function saveOwnerWork_(input,options) {
-  options=options||{};
+  options=options||{};var totalStarted=Date.now(),phaseStarted;
   var lock=LockService.getScriptLock(); lock.waitLock(30000);
   try {
-    var c=config_(), sh=sheet_(c.privateSheetId), existing=input.id?rowById_(sh,input.id):null, record;
+    var lockWaitMs=Date.now()-totalStarted,setupStarted=Date.now(),c=config_(), sh=sheet_(c.privateSheetId), existing=input.id?rowById_(sh,input.id):null, record;
     if(existing){if(Number(input.revision)!==Number(existing.revision))fail_('งานถูกแก้ไขจากอีกหน้าต่าง กรุณาโหลดใหม่ก่อนบันทึก');record=parse_(existing.file_id);}
     else {var id=input.id||('asset_'+Date.now()+'_'+Utilities.getUuid().slice(0,6));record={schemaVersion:1,sourceSha256:null,revision:0,row:{id:id,user_id:input.ownerUserId||'google-temporary-owner',created_at:new Date().toISOString(),versions:[]},collaborationDraft:null,collaborationDraftMeta:null,mediaRecords:[]};}
-    var r=record.row, fields=['title','author_name','author_avatar','icon','category','content_type_labels','content_types','presentation_metadata','public_collaboration','content','ui_code_snippet','short_description','status','visibility','folder_id','tags','content_blocks','preview_image','preview_images','collaboration_asset_id','deleted_at'];
+    var wasPublic=!!existing&&isPublic_(record.row),loadAndValidateStarted=setupStarted,r=record.row, fields=['title','author_name','author_avatar','icon','category','content_type_labels','content_types','presentation_metadata','public_collaboration','content','ui_code_snippet','short_description','status','visibility','folder_id','tags','content_blocks','preview_image','preview_images','collaboration_asset_id','deleted_at'];
     fields.forEach(function(k){if(Object.prototype.hasOwnProperty.call(input,k))r[k]=input[k];});
     if(!String(r.title||'').trim())fail_('ต้องระบุชื่อผลงาน');
     if(['character','lore','ui_code','prompts','collab','app_data'].indexOf(r.category)<0)fail_('หมวดหมู่ไม่ถูกต้อง');
@@ -551,19 +571,23 @@ function saveOwnerWork_(input,options) {
     if(r.visibility==='public'&&(record.mediaRecords||[]).some(function(m){if(!m.drive_file_id)return false;if(m.purpose==='unassigned')return true;if(m.purpose!=='collab'&&m.purpose!=='collab_reference')return false;return !(record.collaborationDraft?.participants||[]).some(function(p){return (p.referenceImages||[]).some(function(x){return (typeof x==='string'?x:(x.src||x.storageKey||''))==='media:'+m.id;});});}))fail_('ยังมีรูปที่ไม่ได้ระบุว่าเป็นภาพรวมงานหรือของผู้เข้าร่วม');
     shareRecordMedia_(record,isPublic_(r));
     record.revision=(record.revision||0)+1;
-    if(existing&&isPublic_(parse_(existing.file_id).row)&&!isPublic_(r)){var pub=rowById_(sheet_(c.publicSheetId),r.id);if(pub){pub.active='false';setRow_(sheet_(c.publicSheetId),PUBLIC_HEADERS,pub);}}
+    if(wasPublic&&!isPublic_(r)){var publicSheet=sheet_(c.publicSheetId),pub=rowById_(publicSheet,r.id);if(pub){pub.active='false';setRow_(publicSheet,PUBLIC_HEADERS,pub,pub);}}
     ensurePrivateHeaders_(sh);
-    var artifacts=ownerSearchArtifacts_(cxlAssetFromRecord_(record)),metadata=privateMeta_(record,'',artifacts),searchSh=ownerSearchSheet_(true);
+    var loadAndValidateMs=Date.now()-loadAndValidateStarted;phaseStarted=Date.now();var artifacts=ownerSearchArtifacts_(cxlAssetFromRecord_(record)),metadata=privateMeta_(record,'',artifacts),searchSh=ownerSearchSheet_(true);
+    var searchPrepareMs=Date.now()-phaseStarted;phaseStarted=Date.now();
     appendOwnerSearchChunks_(searchSh,r.id,artifacts);
+    var searchChunkAppendMs=Date.now()-phaseStarted;phaseStarted=Date.now();
     var fileId=options.idempotent?putJsonRevision_(c.privateId,r.id+'__r'+record.revision+'.json',record):putJson_(c.privateId,r.id+'__r'+record.revision+'.json',record);
-    metadata.file_id=fileId;setPrivateIndexRow_(sh,metadata);
-    removeStaleOwnerSearchChunks_(searchSh,r.id,artifacts.token);
+    var driveRevisionWriteMs=Date.now()-phaseStarted;phaseStarted=Date.now();metadata.file_id=fileId;setPrivateIndexRow_(sh,metadata);
+    var privateIndexWriteMs=Date.now()-phaseStarted;phaseStarted=Date.now();removeStaleOwnerSearchChunks_(searchSh,r.id,artifacts.token);
+    var staleChunkCleanupMs=Date.now()-phaseStarted;
     if(!options.deferPublicSync)syncPublic_(record);
-    return {id:r.id,revision:record.revision,updatedAt:r.updated_at};
+    ownerTimingLog_('works.write.persistence',{lockWaitMs:lockWaitMs,loadAndValidateMs:loadAndValidateMs,searchPrepareMs:searchPrepareMs,searchChunkAppendMs:searchChunkAppendMs,driveRevisionWriteMs:driveRevisionWriteMs,privateIndexWriteMs:privateIndexWriteMs,staleChunkCleanupMs:staleChunkCleanupMs,totalMs:Date.now()-totalStarted});
+    return {id:r.id,revision:record.revision,updatedAt:r.updated_at,record:record};
   } finally {lock.releaseLock();}
 }
 
-function setRow_(sheet,headers,row) { ensureHeaders_(sheet,headers);var found=rowById_(sheet,row.id); var arr=headers.map(function(k){return row[k]===undefined||row[k]===null?'':row[k];}); if(found) sheet.getRange(found._sheetRow,1,1,headers.length).setValues([arr]); else sheet.appendRow(arr); }
+function setRow_(sheet,headers,row,knownRow) { ensureHeaders_(sheet,headers);var found=arguments.length>=4?knownRow:rowById_(sheet,row.id); var arr=headers.map(function(k){return row[k]===undefined||row[k]===null?'':row[k];}); if(found) sheet.getRange(found._sheetRow,1,1,headers.length).setValues([arr]); else sheet.appendRow(arr); }
 
 function shareRecordMedia_(record,publicAccess) {
   var refs=[record.row.preview_image].concat(record.row.preview_images||[]);
@@ -579,10 +603,10 @@ function summaryStrings_(value) { return summaryArray_(value).filter(function(x)
 
 function syncPublic_(record) {
   var c=config_(), sh=sheet_(c.publicSheetId), old=rowById_(sh,record.row.id), active=isPublic_(record.row);
-  if(!active){ if(old){old.active='false';setRow_(sh,PUBLIC_HEADERS,old);} return; }
+  if(!active){ if(old){old.active='false';setRow_(sh,PUBLIC_HEADERS,old,old);} return; }
   var pub=projection_(record);
   var fileId=putJson_(c.publicId,record.row.id+'__r'+record.revision+'.json',pub);
-  setRow_(sh,PUBLIC_HEADERS,{id:pub.id,title:pub.title,category:pub.category,status:pub.status,updated_at:pub.updated_at,tags:JSON.stringify(pub.tags),short_description:pub.short_description||'',file_id:fileId,active:'true',cover_ref:pub.preview_image||'',summary_json:publicSummaryJson_(pub)});
+  setRow_(sh,PUBLIC_HEADERS,{id:pub.id,title:pub.title,category:pub.category,status:pub.status,updated_at:pub.updated_at,tags:JSON.stringify(pub.tags),short_description:pub.short_description||'',file_id:fileId,active:'true',cover_ref:pub.preview_image||'',summary_json:publicSummaryJson_(pub)},old);
 }
 
 function upsertWorkCreatorMap_(workId,publicCreatorId) {

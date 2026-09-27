@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { callGoogleBackend, GoogleBackendUnavailableError } from './googleTransport';
+import { callGoogleBackend, GoogleBackendRequestError, GoogleBackendUnavailableError } from './googleTransport';
 import { googleDataAdapter } from './googleDataAdapter';
 
 vi.mock('../../../lib/supabaseClient', () => ({ getSupabaseClient: () => ({ auth: { getSession: async () => ({ data: { session: { access_token: 'user-session-token' } } }) } }) }));
@@ -68,5 +68,12 @@ describe('Google server transport boundary', () => {
   it('fails closed when browser fetch is unavailable', async () => {
     vi.stubGlobal('fetch', undefined);
     await expect(callGoogleBackend('works.fetch', [])).rejects.toBeInstanceOf(GoogleBackendUnavailableError);
+  });
+
+  it('preserves only the HTTP status/code needed to classify transient API failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 504, json: async () => ({ ok: false, code: 'UPSTREAM_TIMEOUT', error: 'Google request timed out' }) }));
+    await expect(callGoogleBackend('works.fetch', [{}], true)).rejects.toMatchObject({
+      name: 'GoogleBackendRequestError', status: 504, code: 'UPSTREAM_TIMEOUT'
+    } satisfies Partial<GoogleBackendRequestError>);
   });
 });

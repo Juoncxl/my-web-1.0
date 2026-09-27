@@ -10,6 +10,13 @@ export class GoogleBackendUnavailableError extends Error {
   }
 }
 
+export class GoogleBackendRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'GoogleBackendRequestError';
+  }
+}
+
 export async function callGoogleBackend<T>(action: string, args: unknown[], useVercelOwnerAuth = isVercelOwnerAuth): Promise<T> {
   const endpoint = '/api/cxl/google';
   // The server derives Owner scope from its verified HttpOnly session. Keep the
@@ -35,9 +42,9 @@ export async function callGoogleBackend<T>(action: string, args: unknown[], useV
     headers,
     body: JSON.stringify({ action, args: requestArgs } satisfies GoogleActionRequest)
   });
-  const result = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null;
+  const result = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string; code?: string } | null;
   if (!response.ok || !result?.ok) {
-    throw new Error(result?.error || `Google backend request failed (${response.status})`);
+    throw new GoogleBackendRequestError(result?.error || `Google backend request failed (${response.status})`, response.status, result?.code);
   }
   return result.data as T;
 }
