@@ -127,6 +127,10 @@ function png(size: number) {
   return bytes;
 }
 
+function liveTestPng68() {
+  return Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/7b8AAAAASUVORK5CYII=', 'base64');
+}
+
 function begin(context: Record<string, any>, bytes: Buffer, extras: Record<string, unknown> = {}) {
   const ids = { uploadId: randomUUID(), mediaId: randomUUID(), workNonce: randomUUID() };
   const response = post(context, 'media.poc.begin', [{ ...ids, totalFileSize: bytes.length, rawChunkSize: CHUNK_BYTES,
@@ -280,6 +284,33 @@ describe('API-only Owner isolated Media POC', () => {
     expect(post(context, 'media.poc.setPublic', [{ mediaId: ids.mediaId, workNonce: ids.workNonce, isPublic: false }]).ok).toBe(true);
     expect(post(context, 'media.poc.publicChunk', [readArgs]).code).toBe('MEDIA_POC_MEDIA_NOT_PUBLIC');
     expect(context.__canonical.files[0].sharing).toBe('PRIVATE');
+  });
+
+  it('returns the exact Owner read contract for a finalized 68-byte PNG', () => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    expect(bytes).toHaveLength(68);
+    const { ids } = begin(context, bytes);
+    expect(post(context, 'media.poc.chunk', [{ uploadId: ids.uploadId, chunkIndex: 0,
+      base64: bytes.toString('base64'), sha256: digest(bytes) }]).ok).toBe(true);
+    expect(post(context, 'media.poc.finalize', [{ uploadId: ids.uploadId }]).ok).toBe(true);
+
+    const response = post(context, 'media.poc.ownerChunk', [{
+      mediaId: ids.mediaId, workNonce: ids.workNonce, ref: `media:${ids.mediaId}`, chunkIndex: 0
+    }]);
+
+    expect(response).toMatchObject({ ok: true, data: {
+      workId: `asset_media_poc_${ids.workNonce}`,
+      mediaId: ids.mediaId,
+      ref: `media:${ids.mediaId}`,
+      mimeType: 'image/png',
+      totalFileSize: 68,
+      totalChunks: 1,
+      chunkIndex: 0,
+      sha256: digest(bytes),
+      chunkSha256: digest(bytes)
+    } });
+    expect(Buffer.from(response.data.base64, 'base64')).toEqual(bytes);
   });
 
   it('cleans only a bounded number of expired POC staging sessions and never touches canonical media', () => {

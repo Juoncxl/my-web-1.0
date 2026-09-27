@@ -12,7 +12,8 @@ type Request = IncomingMessage & { body?: unknown; url?: string };
 type Response = ServerResponse & {
   end: (data?: string | Buffer) => void;
   write: (chunk: Uint8Array) => boolean;
-  once: (event: 'drain', listener: () => void) => Response;
+  once: (event: 'drain' | 'error', listener: (...args: any[]) => void) => Response;
+  off: (event: 'drain' | 'error', listener: (...args: any[]) => void) => Response;
   destroy: (error?: Error) => void;
 };
 type JsonRecord = Record<string, unknown>;
@@ -36,6 +37,42 @@ const TIMING_PHASES = new Set([
   'binary_validation', 'canonical_drive_write', 'owner_media_read', 'public_media_authorization',
   'public_media_read', 'staging_cleanup', 'total'
 ]);
+const READ_FAILURE_CODES = new Set([
+  'MEDIA_POC_READ_RESPONSE_INVALID', 'MEDIA_POC_READ_METADATA_INVALID', 'MEDIA_POC_READ_CHUNK_SIZE',
+  'MEDIA_POC_READ_CHUNK_CHECKSUM', 'MEDIA_POC_READ_METADATA_MISMATCH', 'MEDIA_POC_READ_SIGNATURE',
+  'MEDIA_POC_READ_FULL_CHECKSUM', 'MEDIA_POC_READ_STREAM_FAILED', 'MEDIA_POC_READ_UPSTREAM_HTTP',
+  'MEDIA_POC_READ_UPSTREAM_RESPONSE_INVALID', 'MEDIA_POC_READ_UPSTREAM_TIMEOUT', 'MEDIA_POC_READ_UPSTREAM_FAILED'
+]);
+const READ_VALIDATION_CODES = new Set([
+  'MEDIA_POC_READ_RESPONSE_INVALID', 'MEDIA_POC_READ_METADATA_INVALID', 'MEDIA_POC_READ_CHUNK_SIZE',
+  'MEDIA_POC_READ_CHUNK_CHECKSUM', 'MEDIA_POC_READ_METADATA_MISMATCH', 'MEDIA_POC_READ_SIGNATURE',
+  'MEDIA_POC_READ_FULL_CHECKSUM'
+]);
+
+type MediaPocReadFailureCode =
+  | 'MEDIA_POC_READ_RESPONSE_INVALID'
+  | 'MEDIA_POC_READ_METADATA_INVALID'
+  | 'MEDIA_POC_READ_CHUNK_SIZE'
+  | 'MEDIA_POC_READ_CHUNK_CHECKSUM'
+  | 'MEDIA_POC_READ_METADATA_MISMATCH'
+  | 'MEDIA_POC_READ_SIGNATURE'
+  | 'MEDIA_POC_READ_FULL_CHECKSUM'
+  | 'MEDIA_POC_READ_STREAM_FAILED'
+  | 'MEDIA_POC_READ_UPSTREAM_HTTP'
+  | 'MEDIA_POC_READ_UPSTREAM_RESPONSE_INVALID'
+  | 'MEDIA_POC_READ_UPSTREAM_TIMEOUT'
+  | 'MEDIA_POC_READ_UPSTREAM_FAILED';
+
+class MediaPocReadError extends Error {
+  constructor(readonly diagnosticCode: MediaPocReadFailureCode, readonly statusCode = 502) {
+    super('Media proof-of-concept read failed');
+    this.name = 'MediaPocReadError';
+  }
+}
+
+function failRead(code: MediaPocReadFailureCode): never {
+  throw new MediaPocReadError(code, code === 'MEDIA_POC_READ_UPSTREAM_TIMEOUT' ? 504 : 502);
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -134,9 +171,16 @@ async function callGas(action: string, args: unknown[], includeTiming: boolean) 
     redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS)
   });
   const responseText = await response.text();
-  if (!response.ok) throw Object.assign(new Error('upstream error'), { statusCode: 502 });
+  if (!response.ok) {
+    if (action === 'ownerChunk' || action === 'publicChunk') failRead('MEDIA_POC_READ_UPSTREAM_HTTP');
+    throw Object.assign(new Error('upstream error'), { statusCode: 502 });
+  }
   let raw: unknown;
-  try { raw = JSON.parse(responseText); } catch { throw Object.assign(new Error('invalid upstream response'), { statusCode: 502 }); }
+  try { raw = JSON.parse(responseText); }
+  catch {
+    if (action === 'ownerChunk' || action === 'publicChunk') failRead('MEDIA_POC_READ_UPSTREAM_RESPONSE_INVALID');
+    throw Object.assign(new Error('invalid upstream response'), { statusCode: 502 });
+  }
   if (!isRecord(raw) || raw.ok !== true) throw Object.assign(new Error('upstream operation failed'), gasError(raw));
   return { data: raw.data, timing: raw.meta && isRecord(raw.meta) ? raw.meta.timing : undefined, elapsedMs: Date.now() - startedAt };
 }
@@ -237,7 +281,57 @@ function query(req: Request) {
 }
 
 async function waitForDrain(res: Response) {
-  await new Promise<void>(resolve => res.once('drain', resolve));
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      res.off('drain', onDrain);
+      res.off('error', onError);
+    };
+    const onDrain = () => { cleanup(); resolve(); };
+    const onError = (error?: Error) => { cleanup(); reject(error || new Error('stream failed')); };
+    res.once('drain', onDrain);
+    res.once('error', onError);
+  });
+}
+
+function readFailureCode(error: unknown): string {
+  if (error instanceof MediaPocReadError && READ_FAILURE_CODES.has(error.diagnosticCode)) return error.diagnosticCode;
+  if (isRecord(error) && typeof error.code === 'string' && SAFE_GAS_CODES.has(error.code)) return error.code;
+  if (error instanceof Error && (error.name === 'TimeoutError' || /time.?out/i.test(error.message))) {
+    return 'MEDIA_POC_READ_UPSTREAM_TIMEOUT';
+  }
+  return 'MEDIA_POC_READ_UPSTREAM_FAILED';
+}
+
+function logSafeReadFailure(action: string, code: string, chunkIndex: number, startedAt: number) {
+  if (process.env.VERCEL_ENV !== 'preview') return;
+  const safeCode = READ_FAILURE_CODES.has(code) || SAFE_GAS_CODES.has(code) ? code : 'MEDIA_POC_READ_UPSTREAM_FAILED';
+  const entry: Record<string, string | number> = {
+    action: action === 'publicChunk' ? 'media.poc.publicChunk' : 'media.poc.ownerChunk',
+    code: safeCode,
+    elapsedMs: Math.max(0, Date.now() - startedAt)
+  };
+  if (Number.isInteger(chunkIndex) && chunkIndex >= 0 && chunkIndex <= 4) entry.chunkIndex = chunkIndex;
+  console.warn(JSON.stringify(entry));
+}
+
+function readFailureStatus(error: unknown, code: string) {
+  if (error instanceof MediaPocReadError) return error.statusCode;
+  if (isRecord(error) && typeof error.status === 'number' && SAFE_GAS_CODES.has(String(error.code || ''))) return error.status;
+  if (code === 'MEDIA_POC_READ_UPSTREAM_TIMEOUT') return 504;
+  if (isRecord(error) && typeof error.statusCode === 'number') return error.statusCode;
+  return 502;
+}
+
+function sendReadFailure(res: Response, error: unknown, code: string) {
+  if (isRecord(error) && typeof error.status === 'number' && typeof error.code === 'string' && SAFE_GAS_CODES.has(error.code)) {
+    return controlledError(res, error);
+  }
+  const validationFailure = READ_VALIDATION_CODES.has(code);
+  return sendJson(res, readFailureStatus(error, code), {
+    ok: false,
+    error: validationFailure ? 'Media proof-of-concept read validation failed' : 'Media proof-of-concept read request failed',
+    code: READ_FAILURE_CODES.has(code) ? code : 'MEDIA_POC_READ_UPSTREAM_FAILED'
+  });
 }
 
 async function streamRead(req: Request, res: Response, startedAt: number) {
@@ -252,8 +346,10 @@ async function streamRead(req: Request, res: Response, startedAt: number) {
   const phases: Record<string, number> = {};
   const fullDigest = createHash('sha256');
   let metadata: JsonRecord | undefined;
+  let failedChunkIndex = 0;
   try {
     for (let chunkIndex = 0; ; chunkIndex++) {
+      failedChunkIndex = chunkIndex;
       const action = scope === 'owner' ? 'ownerChunk' : 'publicChunk';
       const result = await callGas(action, [{ workNonce, mediaId, ref, chunkIndex }], true);
       if (isRecord(result.timing) && isRecord(result.timing.phases)) {
@@ -264,23 +360,27 @@ async function streamRead(req: Request, res: Response, startedAt: number) {
         }
       }
       const data = result.data;
-      if (!isRecord(data) || data.workId !== `asset_media_poc_${workNonce}` || data.mediaId !== mediaId
-        || data.ref !== ref || typeof data.mimeType !== 'string' || !IMAGE_MIME_TYPES.has(data.mimeType)
-        || typeof data.totalFileSize !== 'number' || !Number.isInteger(data.totalFileSize) || data.totalFileSize < 1 || data.totalFileSize > MAX_FILE_BYTES
-        || !Number.isInteger(data.totalChunks) || data.totalChunks !== Math.ceil(data.totalFileSize / CHUNK_BYTES) || data.totalChunks > 5
-        || data.chunkIndex !== chunkIndex || typeof data.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(data.sha256)) {
-        throw new Error('invalid response');
+      if (!isRecord(data) || data.workId !== `asset_media_poc_${workNonce}` || data.mediaId !== mediaId || data.ref !== ref) {
+        failRead('MEDIA_POC_READ_RESPONSE_INVALID');
+      }
+      if (typeof data.mimeType !== 'string' || !IMAGE_MIME_TYPES.has(data.mimeType)
+        || typeof data.totalFileSize !== 'number' || !Number.isInteger(data.totalFileSize)
+        || data.totalFileSize < 1 || data.totalFileSize > MAX_FILE_BYTES
+        || !Number.isInteger(data.totalChunks) || data.totalChunks !== Math.ceil(data.totalFileSize / CHUNK_BYTES)
+        || data.totalChunks > 5 || data.chunkIndex !== chunkIndex
+        || typeof data.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(data.sha256)) {
+        failRead('MEDIA_POC_READ_METADATA_INVALID');
       }
       const bytes = strictBase64(data.base64);
       const expectedLength = Math.min(CHUNK_BYTES, data.totalFileSize - chunkIndex * CHUNK_BYTES);
-      if (!bytes || bytes.length !== expectedLength) throw new Error('invalid chunk');
+      if (!bytes || bytes.length !== expectedLength) failRead('MEDIA_POC_READ_CHUNK_SIZE');
       const checksum = createHash('sha256').update(bytes).digest('hex');
       if (typeof data.chunkSha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(data.chunkSha256)
-        || checksum !== data.chunkSha256.toLowerCase()) throw new Error('invalid chunk');
+        || checksum !== data.chunkSha256.toLowerCase()) failRead('MEDIA_POC_READ_CHUNK_CHECKSUM');
       if (metadata && (metadata.mimeType !== data.mimeType || metadata.totalFileSize !== data.totalFileSize
-        || metadata.totalChunks !== data.totalChunks || metadata.sha256 !== data.sha256)) throw new Error('inconsistent chunks');
+        || metadata.totalChunks !== data.totalChunks || metadata.sha256 !== data.sha256)) failRead('MEDIA_POC_READ_METADATA_MISMATCH');
       metadata ||= data;
-      if (chunkIndex === 0 && !supportedSignature(data.mimeType, bytes)) throw new Error('invalid image signature');
+      if (chunkIndex === 0 && !supportedSignature(data.mimeType, bytes)) failRead('MEDIA_POC_READ_SIGNATURE');
       fullDigest.update(bytes);
       phases[scope === 'owner' ? 'owner_media_read' : 'public_media_read'] = (phases[scope === 'owner' ? 'owner_media_read' : 'public_media_read'] || 0) + result.elapsedMs;
       if (chunkIndex === 0) {
@@ -290,16 +390,23 @@ async function streamRead(req: Request, res: Response, startedAt: number) {
         res.setHeader('Cache-Control', 'private, no-store');
         res.setHeader('X-Content-Type-Options', 'nosniff');
       }
-      if (!res.write(bytes)) await waitForDrain(res);
+      let accepted: boolean;
+      try { accepted = res.write(bytes); }
+      catch { failRead('MEDIA_POC_READ_STREAM_FAILED'); }
+      if (!accepted) {
+        try { await waitForDrain(res); }
+        catch { failRead('MEDIA_POC_READ_STREAM_FAILED'); }
+      }
       if (chunkIndex + 1 === data.totalChunks) break;
     }
-    if (!metadata || fullDigest.digest('hex') !== String(metadata.sha256).toLowerCase()) throw new Error('invalid full checksum');
+    if (!metadata || fullDigest.digest('hex') !== String(metadata.sha256).toLowerCase()) failRead('MEDIA_POC_READ_FULL_CHECKSUM');
     logSafeTiming(scope === 'owner' ? 'media.poc.ownerChunk' : 'media.poc.publicChunk', phases, startedAt);
     return res.end();
   } catch (error) {
-    logSafeTiming(scope === 'owner' ? 'media.poc.ownerChunk' : 'media.poc.publicChunk', phases, startedAt);
+    const code = readFailureCode(error);
+    logSafeReadFailure(scope === 'public' ? 'publicChunk' : 'ownerChunk', code, failedChunkIndex, startedAt);
     if (res.headersSent) return res.destroy(new Error('Media proof-of-concept stream failed'));
-    return controlledError(res, error);
+    return sendReadFailure(res, error, code);
   }
 }
 
