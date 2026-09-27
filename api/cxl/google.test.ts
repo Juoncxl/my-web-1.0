@@ -121,6 +121,15 @@ describe('Vercel Google Works read proxy', () => {
     expect(result.json).toMatchObject({ code: 'PUBLIC_SYNC_PENDING', privateSaved: true, workId: 'asset_created' });
   });
 
+  it('maps the API-only GAS unauthorized envelope to HTTP 401', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({
+      ok: false, code: 'OWNER_API_UNAUTHORIZED', error: 'Unauthorized', httpStatus: 401
+    }) }));
+    const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1', currentUserId: 'owner-1' }] }, 'Bearer owner-session');
+    expect(result.statusCode).toBe(401);
+    expect(result.json.code).toBe('OWNER_API_UNAUTHORIZED');
+  });
+
   it('rejects owner requests clearly when owner identity configuration is missing', async () => {
     vi.stubEnv('CXL_OWNER_USER_ID', '');
     const fetchMock = vi.fn();

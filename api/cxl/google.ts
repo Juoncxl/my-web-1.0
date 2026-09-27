@@ -91,6 +91,8 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   return false;
 }
 function ownerErrorStatus(code: unknown): number {
+  if (code === 'OWNER_API_UNAUTHORIZED') return 401;
+  if (code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'UNSUPPORTED_ACTION') return 400;
   if (code === 'REVISION_CONFLICT' || code === 'PUBLIC_SYNC_PENDING' || code === 'IDEMPOTENCY_KEY_REUSED' || code === 'CREATOR_MAPPING_CONFLICT') return 409;
   if (code === 'WORK_NOT_FOUND') return 404;
   if (code === 'WORK_NOT_OWNED') return 403;
@@ -246,7 +248,9 @@ export default async function handler(req: Request, res: Response) {
         body: JSON.stringify({ authorization: secret, ownerUserId: ownerId, action: 'works.fetch', args: [{ ...options,
           ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId }] }) });
       if (!record(raw) || raw.ok !== true || !record(raw.data) || !Array.isArray(raw.data.data)) {
-        throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed');
+        const error = new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed') as Error & { apiCode?: unknown };
+        if (record(raw)) error.apiCode = raw.code;
+        throw error;
       }
       raw = raw.data.data;
     } else {
@@ -268,7 +272,8 @@ export default async function handler(req: Request, res: Response) {
     return send(res, 200, { ok: true, data: { data: filtered, error: null } });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Works read failed';
-    const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
-    return send(res, status, { ok: false, error: message.slice(0, 300) });
+    const code = error instanceof Error ? (error as Error & { apiCode?: unknown }).apiCode : undefined;
+    const status = code ? ownerErrorStatus(code) : (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
+    return send(res, status, { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}) });
   }
 }
