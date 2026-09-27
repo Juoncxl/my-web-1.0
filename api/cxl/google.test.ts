@@ -117,8 +117,9 @@ describe('Vercel Google Works read proxy', () => {
     vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
     vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
     vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
     const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
-    const cookie = `__Host-cxl_owner=${token}`;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [{ id: 'folder-1', name: 'Owner folder' }] }) });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -224,6 +225,43 @@ describe('Vercel Google Works read proxy', () => {
     expect([noCsrf.statusCode, badOrigin.statusCode, accepted.statusCode]).toEqual([403, 403, 200]);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).ownerUserId).toBe('owner-1');
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).args[0].userId).toBe('owner-1');
+  });
+
+  it('exposes sanitized GAS phase timings in Preview response headers without changing the data body', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const privateWork = makeAsset('work-id-not-for-timing', { userId: 'internal-owner-id' });
+    const timing = { action: 'works.update', phases: { auth_request_validation: 4, canonical_drive_json_read: 120, public_projection_sync: 35 }, totalMs: 180 };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: privateWork, error: null }, meta: { timing } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.update', args: ['asset_work', { title: 'Updated' }, { requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 1 }] }, undefined, 'POST', { cookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).includeTiming).toBe(true);
+    expect(result.headers['Server-Timing']).toContain('cxl_action;desc="works.update"');
+    expect(result.headers['Server-Timing']).toContain('canonical_drive_json_read;dur=120.00');
+    expect(result.json).toEqual({ ok: true, data: { data: privateWork, error: null } });
+    expect(result.headers['Server-Timing']).not.toMatch(/work-id-not-for-timing|internal-owner-id|https:|secret|cookie/i);
+    expect(JSON.stringify(result.json)).not.toContain('meta');
+  });
+
+  it('does not request or expose GAS timing telemetry outside Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production');
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: [], error: null }, meta: { timing: { action: 'works.fetch', phases: {}, totalMs: 1 } } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1' }] }, undefined, 'POST', { cookie: `__Host-cxl_owner=${token}` });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('includeTiming');
+    expect(result.headers['Server-Timing']).toBeUndefined();
+    expect(result.json).not.toHaveProperty('meta');
   });
 
   it('does not inject server-owned userId into works.update payloads', async () => {

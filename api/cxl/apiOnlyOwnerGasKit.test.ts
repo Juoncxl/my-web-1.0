@@ -77,6 +77,44 @@ describe('API-only Owner GAS package isolation', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('returns timing metadata only after Owner authentication and includes no request identifiers or credentials', () => {
+    const context = makeBridge();
+    context.fetchCxlWorks_ = () => {
+      context.ownerTimingPhase_('owner_index_read', 12);
+      return { data: [{ id: 'work-id-must-not-enter-timing' }], error: null };
+    };
+    const response = post(context, { authorization: 'test-only-shared-secret', ownerUserId: 'test-owner', action: 'works.fetch', args: [{}], includeTiming: true });
+    const timing = response.meta.timing;
+    expect(Object.keys(timing).sort()).toEqual(['action', 'phases', 'totalMs']);
+    expect(timing.action).toBe('works.fetch');
+    expect(timing.phases).toMatchObject({ auth_request_validation: expect.any(Number), owner_index_read: 12, response_construction: expect.any(Number) });
+    expect(Object.keys(timing.phases).every((phase: string) => context.OWNER_TIMING_PHASES_.includes(phase))).toBe(true);
+    expect(Object.values(timing.phases).every((duration: any) => typeof duration === 'number' && duration >= 0)).toBe(true);
+    expect(JSON.stringify(timing)).not.toMatch(/work-id-must-not-enter-timing|test-owner|test-only-shared-secret|authorization|cookie|url/i);
+  });
+
+  it('does not return timing metadata without Preview server opt-in or before authentication', () => {
+    const context = makeBridge();
+    context.fetchCxlWorks_ = () => ({ data: [], error: null });
+    const ordinary = post(context, { authorization: 'test-only-shared-secret', ownerUserId: 'test-owner', action: 'works.fetch', args: [{}] });
+    const unauthorized = post(context, { authorization: 'wrong', ownerUserId: 'test-owner', action: 'works.fetch', args: [{}], includeTiming: true });
+    expect(ordinary).not.toHaveProperty('meta');
+    expect(unauthorized).not.toHaveProperty('meta');
+  });
+
+  it('covers the agreed Owner write/read timing phases in source', () => {
+    const requiredPhases = [
+      'auth_request_validation', 'existing_work_index_lookup', 'canonical_drive_json_read',
+      'revision_idempotency_validation', 'write_payload_prepare', 'search_artifact_generation',
+      'search_chunk_write', 'stale_search_cleanup', 'drive_revision_write', 'private_index_update',
+      'private_public_transition', 'public_projection_sync', 'response_construction',
+      'owner_index_read', 'owner_search_index_read', 'summary_parse_projection',
+      'folders_drive_read', 'folders_projection'
+    ];
+    expect(requiredPhases.every(phase => source.includes(`ownerTimingPhase_('${phase}'`))).toBe(true);
+    expect(source).toContain('timing.totalMs=Date.now()-API_TIMING_CONTEXT_.startedAt');
+  });
+
   it.each([
     ['works.fetch', [{}], 'fetchCxlWorks_'],
     ['folders.fetch', [], 'cxlOwnerFolders_'],

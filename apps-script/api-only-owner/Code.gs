@@ -15,11 +15,15 @@ var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDe
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
 var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update'];
 var API_MAX_POST_CHARS_ = 5000000;
+var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read'];
+var API_TIMING_CONTEXT_ = null;
 
 function doGet() {
   return apiJson_({ok:false,error:'Method not allowed',code:'METHOD_NOT_ALLOWED',httpStatus:405});
 }
 function doPost(e) {
+  API_TIMING_CONTEXT_=null;
+  var requestStarted=Date.now();
   var raw=e&&e.postData&&typeof e.postData.contents==='string'?e.postData.contents:'';
   var body;
   try { if(!raw||raw.length>API_MAX_POST_CHARS_)throw new Error('invalid body'); body=JSON.parse(raw); }
@@ -37,6 +41,9 @@ function doPost(e) {
     return apiJson_({ok:false,error:'Invalid request',code:'INVALID_REQUEST',httpStatus:400});
   if(API_OWNER_ACTIONS_.indexOf(body.action)<0)
     return apiJson_({ok:false,error:'Unsupported owner API action',code:'UNSUPPORTED_ACTION',httpStatus:400});
+
+  if(body.includeTiming===true)API_TIMING_CONTEXT_={action:body.action,startedAt:requestStarted,phases:{}};
+  ownerTimingPhase_('auth_request_validation',Date.now()-requestStarted);
 
   try {
     var args=body.args;
@@ -65,7 +72,19 @@ function apiSecretMatches_(provided,expected) {
   return difference===0;
 }
 function apiJson_(value) {
-  return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
+  var output=value;
+  if(API_TIMING_CONTEXT_){
+    var started=Date.now(),timing={action:API_TIMING_CONTEXT_.action,phases:API_TIMING_CONTEXT_.phases,totalMs:0};
+    output=Object.assign({},value,{meta:{timing:timing}});ownerTimingPhase_('response_construction',Date.now()-started);
+    timing.totalMs=Date.now()-API_TIMING_CONTEXT_.startedAt;
+  }
+  return ContentService.createTextOutput(JSON.stringify(output)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function ownerTimingPhase_(phase,durationMs) {
+  if(!API_TIMING_CONTEXT_||OWNER_TIMING_PHASES_.indexOf(phase)<0)return;
+  var duration=Math.max(0,Number(durationMs)||0);
+  API_TIMING_CONTEXT_.phases[phase]=(API_TIMING_CONTEXT_.phases[phase]||0)+duration;
 }
 
 function apiFail_(code,message) { var error=new Error(message);error.apiCode=code;throw error; }
@@ -95,11 +114,12 @@ function cxlAssetFromRecord_(record) {
 
 function cxlOwnerFolders_(ownerUserId) {
   if(!ownerUserId)apiFail_('OWNER_REQUIRED','Authenticated Owner is required');
-  var started=Date.now(),folders=getFolders_().filter(function(folder){return folder&&String(folder.user_id||'')===String(ownerUserId);}).map(function(folder){
+  var started=Date.now(),allFolders=getFolders_(),driveReadMs=Date.now()-started;ownerTimingPhase_('folders_drive_read',driveReadMs);
+  started=Date.now();var folders=allFolders.filter(function(folder){return folder&&String(folder.user_id||'')===String(ownerUserId);}).map(function(folder){
     if(!folder.id||!folder.name||!folder.created_at||!folder.updated_at)apiFail_('FOLDER_SCHEMA_INVALID','Folder source does not match the CXL Folder contract');
     return {id:String(folder.id),userId:String(ownerUserId),name:String(folder.name),icon:folder.icon||'📁',color:folder.color||'purple',createdAt:String(folder.created_at),updatedAt:String(folder.updated_at)};
   });
-  ownerTimingLog_('folders.fetch',{driveReadAndProjectionMs:Date.now()-started});return folders;
+  var projectionMs=Date.now()-started;ownerTimingPhase_('folders_projection',projectionMs);ownerTimingLog_('folders.fetch',{driveReadAndProjectionMs:driveReadMs+projectionMs});return folders;
 }
 
 function cxlRowInput_(asset,ownerUserId,request) {
@@ -123,6 +143,7 @@ function fetchCxlWorks_(options) {
   if(options.assetId)return {data:[cxlAssetFromRecord_(getOwnerWork_(options.assetId))],error:null};
   if(options.detail==='full')apiFail_('FULL_LIST_NOT_SUPPORTED','Full Work reads require one assetId');
   var totalStarted=Date.now(),phaseStarted=totalStarted,index=listOwnerIndex_(),indexReadMs=Date.now()-phaseStarted,searchReadMs=0,summaryMs=0;
+  ownerTimingPhase_('owner_index_read',indexReadMs);
   if(index.some(function(row){return !privateSummaryReady_(row);}))apiFail_('PRIVATE_SUMMARY_NOT_READY','Owner Work summary index is incomplete; run the controlled summary backfill');
   if(options.userId)index=index.filter(function(row){return row.userId===options.userId;});
   if(options.onlyDeleted&&options.currentUserId)index=index.filter(function(row){return row.userId===options.currentUserId;});
@@ -137,9 +158,11 @@ function fetchCxlWorks_(options) {
     var q=normalizeOwnerSearch_(options.search);
     if(q.length>OWNER_SEARCH_MAX_QUERY_CHARS_)apiFail_('SEARCH_QUERY_TOO_LONG','Search query exceeds the supported length');
     phaseStarted=Date.now();var searchRows=listOwnerSearchIndex_(),matching=ownerSearchMatches_(index,searchRows,q);searchReadMs=Date.now()-phaseStarted;
+    ownerTimingPhase_('owner_search_index_read',searchReadMs);
     index=index.filter(function(row){return !!matching[row.id];});
   }
   phaseStarted=Date.now();var works=index.map(function(row){return privateSummaryAsset_(row);});summaryMs=Date.now()-phaseStarted;
+  ownerTimingPhase_('summary_parse_projection',summaryMs);
   ownerTimingLog_('works.fetch',{indexReadMs:indexReadMs,searchReadMs:searchReadMs,summaryMs:summaryMs,totalMs:Date.now()-totalStarted});
   return {data:works,error:null};
 }
@@ -509,16 +532,23 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
   if(!options||!/^([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(String(options.requestId||'')))apiFail_('INVALID_REQUEST_ID','A stable requestId is required');
   var requestId=String(options.requestId).toLowerCase(),assetInput=operation==='create'?payload:payload&&payload.updates,id=operation==='create'?'asset_'+requestId.replace(/-/g,'' ):String(payload&&payload.id||'');
   validateCxlWritePayload_(assetInput,operation);
-  var fingerprint=writeFingerprint_(operation,operation==='create'?assetInput:{id:id,updates:assetInput,expectedRevision:options.expectedRevision}),sh=sheet_(config_().privateSheetId),indexed=operation==='create'?rowByCreateRequestId_(sh,requestId):rowById_(sh,id),record=null;
+  var fingerprint=writeFingerprint_(operation,operation==='create'?assetInput:{id:id,updates:assetInput,expectedRevision:options.expectedRevision});
+  ownerTimingPhase_('revision_idempotency_validation',Date.now()-phaseStarted);phaseStarted=Date.now();
+  var sh=sheet_(config_().privateSheetId),indexed=operation==='create'?rowByCreateRequestId_(sh,requestId):rowById_(sh,id),record=null;
+  ownerTimingPhase_('existing_work_index_lookup',Date.now()-phaseStarted);phaseStarted=Date.now();
   if(indexed)record=parse_(indexed.file_id);
+  ownerTimingPhase_('canonical_drive_json_read',Date.now()-phaseStarted);phaseStarted=Date.now();
   if(operation==='create'&&record){
     if(record.createRequestId!==requestId||record.lastWriteFingerprint!==fingerprint)apiFail_('IDEMPOTENCY_KEY_REUSED','Create requestId was already used with different Work data');
-    finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(record);
+    ownerTimingPhase_('revision_idempotency_validation',Date.now()-phaseStarted);phaseStarted=Date.now();finishCxlPublicProjection_(record,ownerUserId);ownerTimingPhase_('public_projection_sync',Date.now()-phaseStarted);
+    phaseStarted=Date.now();var idempotentCreateResult=cxlWriteResult_(record);ownerTimingPhase_('response_construction',Date.now()-phaseStarted);return idempotentCreateResult;
   }
   if(operation==='update'&&record&&record.lastWriteRequestId===requestId){
     if(record.lastWriteFingerprint!==fingerprint)apiFail_('IDEMPOTENCY_KEY_REUSED','Update requestId was already used with different Work data');
-    finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(record);
+    ownerTimingPhase_('revision_idempotency_validation',Date.now()-phaseStarted);phaseStarted=Date.now();finishCxlPublicProjection_(record,ownerUserId);ownerTimingPhase_('public_projection_sync',Date.now()-phaseStarted);
+    phaseStarted=Date.now();var idempotentUpdateResult=cxlWriteResult_(record);ownerTimingPhase_('response_construction',Date.now()-phaseStarted);return idempotentUpdateResult;
   }
+  ownerTimingPhase_('revision_idempotency_validation',Date.now()-phaseStarted);phaseStarted=Date.now();
   var now=new Date().toISOString(),asset;
   if(operation==='create'){
     var requestRow=rowById_(sh,id);if(requestRow)apiFail_('IDEMPOTENCY_KEY_REUSED','Create requestId conflicts with an existing Work');
@@ -528,8 +558,10 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
     rejectUnsupportedWorkMedia_(asset,null);
   } else {
     if(!record)apiFail_('WORK_NOT_FOUND','Work was not found for this Owner');
+    var revisionStarted=Date.now();
     if(!Number.isInteger(Number(options.expectedRevision))||Number(options.expectedRevision)<1)apiFail_('REVISION_REQUIRED','Expected revision is required for update');
     if(Number(options.expectedRevision)!==Number(record.revision))apiFail_('REVISION_CONFLICT','Work revision is stale; reload before saving');
+    ownerTimingPhase_('revision_idempotency_validation',Date.now()-revisionStarted);
     var existingAsset=cxlAssetFromRecord_(record);if(String(existingAsset.userId||'')!==String(ownerUserId)&&String(record.row.user_id||'')!==String(ownerUserId))apiFail_('WORK_NOT_OWNED','Work is not owned by this authenticated Owner');
     asset=Object.assign({},existingAsset,assetInput);asset.id=id;asset.userId=ownerUserId;asset.createdAt=existingAsset.createdAt;asset.updatedAt=now;
     asset.visibility=assetInput.visibility|| (assetInput.isPublic===undefined?existingAsset.visibility:(assetInput.isPublic?'public':'private'));asset.isPublic=asset.visibility==='public';
@@ -538,22 +570,29 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
     asset.versions=changed?(existingAsset.versions||[]).concat([{version:(existingAsset.versions||[]).at(-1)?.version+1||1,updatedAt:now,title:asset.title,summary:'บันทึกการแก้ไขเนื้อหา'}]):existingAsset.versions||[];
     rejectUnsupportedWorkMedia_(asset,existingAsset);
   }
+  ownerTimingPhase_('write_payload_prepare',Date.now()-phaseStarted);phaseStarted=Date.now();
   validateOwnerFolder_(asset.folderId,ownerUserId);
   var request={operation:operation,requestId:requestId,fingerprint:fingerprint,revision:operation==='update'?Number(options.expectedRevision):0,createRequestId:operation==='create'?requestId:''};
+  ownerTimingPhase_('write_payload_prepare',Date.now()-phaseStarted);phaseStarted=Date.now();
   var validationAndPreloadMs=Date.now()-phaseStarted;phaseStarted=Date.now();var saved=saveOwnerWork_(cxlRowInput_(asset,ownerUserId,request),{deferPublicSync:true,idempotent:true});
   var saveMs=Date.now()-phaseStarted;record=saved.record;if(!record)apiFail_('OWNER_WRITE_STATE_INVALID','Saved Work response is unavailable');
   phaseStarted=Date.now();finishCxlPublicProjection_(record,ownerUserId);var publicSyncMs=Date.now()-phaseStarted;
+  ownerTimingPhase_('public_projection_sync',publicSyncMs);
+  phaseStarted=Date.now();var response=cxlWriteResult_(record);ownerTimingPhase_('response_construction',Date.now()-phaseStarted);
   ownerTimingLog_('works.'+operation,{validationAndPreloadMs:validationAndPreloadMs,saveMs:saveMs,publicSyncMs:publicSyncMs,totalMs:Date.now()-totalStarted});
-  return cxlWriteResult_(record);
+  return response;
 }
 
 function saveOwnerWork_(input,options) {
   options=options||{};var totalStarted=Date.now(),phaseStarted;
   var lock=LockService.getScriptLock(); lock.waitLock(30000);
+  ownerTimingPhase_('script_lock_wait',Date.now()-totalStarted);
   try {
     var lockWaitMs=Date.now()-totalStarted,setupStarted=Date.now(),c=config_(), sh=sheet_(c.privateSheetId), existing=input.id?rowById_(sh,input.id):null, record;
-    if(existing){if(Number(input.revision)!==Number(existing.revision))fail_('งานถูกแก้ไขจากอีกหน้าต่าง กรุณาโหลดใหม่ก่อนบันทึก');record=parse_(existing.file_id);}
+    ownerTimingPhase_('existing_work_index_lookup',Date.now()-setupStarted);phaseStarted=Date.now();
+    if(existing){if(Number(input.revision)!==Number(existing.revision))fail_('งานถูกแก้ไขจากอีกหน้าต่าง กรุณาโหลดใหม่ก่อนบันทึก');ownerTimingPhase_('locked_revision_read',Date.now()-phaseStarted);phaseStarted=Date.now();record=parse_(existing.file_id);}
     else {var id=input.id||('asset_'+Date.now()+'_'+Utilities.getUuid().slice(0,6));record={schemaVersion:1,sourceSha256:null,revision:0,row:{id:id,user_id:input.ownerUserId||'google-temporary-owner',created_at:new Date().toISOString(),versions:[]},collaborationDraft:null,collaborationDraftMeta:null,mediaRecords:[]};}
+    if(existing)ownerTimingPhase_('canonical_drive_json_read',Date.now()-phaseStarted);
     var wasPublic=!!existing&&isPublic_(record.row),loadAndValidateStarted=setupStarted,r=record.row, fields=['title','author_name','author_avatar','icon','category','content_type_labels','content_types','presentation_metadata','public_collaboration','content','ui_code_snippet','short_description','status','visibility','folder_id','tags','content_blocks','preview_image','preview_images','collaboration_asset_id','deleted_at'];
     fields.forEach(function(k){if(Object.prototype.hasOwnProperty.call(input,k))r[k]=input[k];});
     if(!String(r.title||'').trim())fail_('ต้องระบุชื่อผลงาน');
@@ -571,16 +610,22 @@ function saveOwnerWork_(input,options) {
     if(r.visibility==='public'&&(record.mediaRecords||[]).some(function(m){if(!m.drive_file_id)return false;if(m.purpose==='unassigned')return true;if(m.purpose!=='collab'&&m.purpose!=='collab_reference')return false;return !(record.collaborationDraft?.participants||[]).some(function(p){return (p.referenceImages||[]).some(function(x){return (typeof x==='string'?x:(x.src||x.storageKey||''))==='media:'+m.id;});});}))fail_('ยังมีรูปที่ไม่ได้ระบุว่าเป็นภาพรวมงานหรือของผู้เข้าร่วม');
     shareRecordMedia_(record,isPublic_(r));
     record.revision=(record.revision||0)+1;
-    if(wasPublic&&!isPublic_(r)){var publicSheet=sheet_(c.publicSheetId),pub=rowById_(publicSheet,r.id);if(pub){pub.active='false';setRow_(publicSheet,PUBLIC_HEADERS,pub,pub);}}
+    phaseStarted=Date.now();if(wasPublic&&!isPublic_(r)){var publicSheet=sheet_(c.publicSheetId),pub=rowById_(publicSheet,r.id);if(pub){pub.active='false';setRow_(publicSheet,PUBLIC_HEADERS,pub,pub);}}
+    ownerTimingPhase_('private_public_transition',Date.now()-phaseStarted);
     ensurePrivateHeaders_(sh);
-    var loadAndValidateMs=Date.now()-loadAndValidateStarted;phaseStarted=Date.now();var artifacts=ownerSearchArtifacts_(cxlAssetFromRecord_(record)),metadata=privateMeta_(record,'',artifacts),searchSh=ownerSearchSheet_(true);
+    var loadAndValidateMs=Date.now()-loadAndValidateStarted;phaseStarted=Date.now();var artifacts=ownerSearchArtifacts_(cxlAssetFromRecord_(record));ownerTimingPhase_('search_artifact_generation',Date.now()-phaseStarted);phaseStarted=Date.now();
+    var metadata=privateMeta_(record,'',artifacts),searchSh=ownerSearchSheet_(true);
     var searchPrepareMs=Date.now()-phaseStarted;phaseStarted=Date.now();
     appendOwnerSearchChunks_(searchSh,r.id,artifacts);
+    ownerTimingPhase_('search_chunk_write',Date.now()-phaseStarted);
     var searchChunkAppendMs=Date.now()-phaseStarted;phaseStarted=Date.now();
     var fileId=options.idempotent?putJsonRevision_(c.privateId,r.id+'__r'+record.revision+'.json',record):putJson_(c.privateId,r.id+'__r'+record.revision+'.json',record);
     var driveRevisionWriteMs=Date.now()-phaseStarted;phaseStarted=Date.now();metadata.file_id=fileId;setPrivateIndexRow_(sh,metadata);
+    ownerTimingPhase_('drive_revision_write',driveRevisionWriteMs);
+    ownerTimingPhase_('private_index_update',Date.now()-phaseStarted);
     var privateIndexWriteMs=Date.now()-phaseStarted;phaseStarted=Date.now();removeStaleOwnerSearchChunks_(searchSh,r.id,artifacts.token);
     var staleChunkCleanupMs=Date.now()-phaseStarted;
+    ownerTimingPhase_('stale_search_cleanup',staleChunkCleanupMs);
     if(!options.deferPublicSync)syncPublic_(record);
     ownerTimingLog_('works.write.persistence',{lockWaitMs:lockWaitMs,loadAndValidateMs:loadAndValidateMs,searchPrepareMs:searchPrepareMs,searchChunkAppendMs:searchChunkAppendMs,driveRevisionWriteMs:driveRevisionWriteMs,privateIndexWriteMs:privateIndexWriteMs,staleChunkCleanupMs:staleChunkCleanupMs,totalMs:Date.now()-totalStarted});
     return {id:r.id,revision:record.revision,updatedAt:r.updated_at,record:record};

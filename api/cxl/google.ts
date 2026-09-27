@@ -11,6 +11,8 @@ const ALLOWED_OPTIONS = new Set(['userId','currentUserId','creatorSlug','assetId
 const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','settings.readCreatorSpace']);
 const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch']);
 const GAS_TIMEOUT_MS = 30_000;
+const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update']);
+const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
 
 function send(res: Response, status: number, body: unknown) {
   res.statusCode = status;
@@ -19,6 +21,17 @@ function send(res: Response, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 function record(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
+function previewOwnerServerTiming(res: Response, raw: unknown, requestedAction: string) {
+  if (process.env.VERCEL_ENV !== 'preview' || !record(raw) || !record(raw.meta) || !record(raw.meta.timing)) return;
+  const timing = raw.meta.timing;
+  if (timing.action !== requestedAction || !OWNER_TIMING_ACTIONS.has(requestedAction) || typeof timing.totalMs !== 'number'
+    || !Number.isFinite(timing.totalMs) || timing.totalMs < 0 || !record(timing.phases)) return;
+  const metrics = Object.entries(timing.phases).flatMap(([phase, duration]) => OWNER_TIMING_PHASES.has(phase)
+    && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
+    ? [`${phase};dur=${duration.toFixed(2)}`] : []);
+  metrics.push(`cxl_action;desc="${requestedAction}"`, `total;dur=${timing.totalMs.toFixed(2)}`);
+  res.setHeader('Server-Timing', metrics.join(', '));
+}
 function validOptions(value: unknown): value is FetchAssetsOptions {
   return record(value) && Object.keys(value).every(key => ALLOWED_OPTIONS.has(key))
     && ['userId','currentUserId','creatorSlug','assetId','category','search'].every(key => value[key] === undefined || (typeof value[key] === 'string' && value[key].length <= 256))
@@ -179,7 +192,9 @@ export default async function handler(req: Request, res: Response) {
             ? body.args
             : body.args;
       const raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs }) }, action);
+        body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs,
+          ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
+      previewOwnerServerTiming(res, raw, action);
       if (!record(raw) || raw.ok !== true) {
         const code = record(raw) ? raw.code : undefined;
         const message = record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed';
@@ -254,7 +269,9 @@ export default async function handler(req: Request, res: Response) {
       if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
       raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: ownerId, action: 'works.fetch', args: [{ ...options,
-          ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId }] }) }, 'works.fetch');
+          ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId }],
+          ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, 'works.fetch');
+      previewOwnerServerTiming(res, raw, 'works.fetch');
       if (!record(raw) || raw.ok !== true || !record(raw.data) || !Array.isArray(raw.data.data)) {
         const error = new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed') as Error & { apiCode?: unknown };
         if (record(raw)) error.apiCode = raw.code;
