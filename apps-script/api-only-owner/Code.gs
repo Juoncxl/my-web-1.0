@@ -1,11 +1,16 @@
 /* API-only CXL Owner bridge. Generated from the GO 6A storage contract. Do not add Owner UI functions here. */
-var PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_text'];
+var PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_version','search_chunk_count','search_index_token'];
+var OWNER_SEARCH_SHEET_ = 'OwnerSearchIndex';
+var OWNER_SEARCH_HEADERS_ = ['work_id','chunk_index','search_text','search_version','updated_at','index_token'];
 var PUBLIC_HEADERS = ['id','title','category','status','updated_at','tags','short_description','file_id','active','cover_ref','summary_json'];
 var PUBLIC_SUMMARY_VERSION = 2;
 var PUBLIC_SUMMARY_MAX_CHARS = 45000;
 var PRIVATE_SUMMARY_VERSION = 1;
 var PRIVATE_SUMMARY_MAX_CHARS = 45000;
-var PRIVATE_SEARCH_TEXT_MAX_CHARS = 49000;
+var OWNER_SEARCH_VERSION_ = 1;
+var OWNER_SEARCH_CHUNK_CHARS_ = 30000;
+var OWNER_SEARCH_MAX_QUERY_CHARS_ = 256;
+var OWNER_SEARCH_OVERLAP_CHARS_ = OWNER_SEARCH_MAX_QUERY_CHARS_ - 1;
 var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','icon','content','contentBlocks','uiCodeSnippet','previewImage','previewImages','media','folderId','isPublic','visibility','status','tags','createdAt','updatedAt','deletedAt','likesCount','forkedFromAuthor','versions'];
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
 var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update'];
@@ -127,7 +132,12 @@ function fetchCxlWorks_(options) {
   else if(!options.includeDeleted)index=index.filter(function(row){return !row.deletedAt;});
   index.sort(function(a,b){return Date.parse(b.createdAt||'')-Date.parse(a.createdAt||'');});
   if(options.limit)index=index.slice(0,Math.min(100,Math.max(1,Number(options.limit)||100)));
-  if(options.search&&String(options.search).trim()){var q=normalizeOwnerSearch_(options.search);index=index.filter(function(row){return row.searchText.indexOf(q)>=0;});}
+  if(options.search&&String(options.search).trim()){
+    var q=normalizeOwnerSearch_(options.search);
+    if(q.length>OWNER_SEARCH_MAX_QUERY_CHARS_)apiFail_('SEARCH_QUERY_TOO_LONG','Search query exceeds the supported length');
+    var searchRows=listOwnerSearchIndex_(),matching=ownerSearchMatches_(index,searchRows,q);
+    index=index.filter(function(row){return !!matching[row.id];});
+  }
   var works=index.map(function(row){return privateSummaryAsset_(row);});
   return {data:works,error:null};
 }
@@ -135,12 +145,12 @@ function fetchCxlWorks_(options) {
 function privateSummaryAsset_(row) {
   var saved;
   try { saved=JSON.parse(row.summaryJson||''); } catch(_error) { saved=null; }
-  if(Number(row.summaryVersion)!==PRIVATE_SUMMARY_VERSION||!row.searchText||!saved||saved.summaryVersion!==PRIVATE_SUMMARY_VERSION||!saved.asset||typeof saved.asset!=='object')
+  if(Number(row.summaryVersion)!==PRIVATE_SUMMARY_VERSION||!saved||saved.summaryVersion!==PRIVATE_SUMMARY_VERSION||!saved.asset||typeof saved.asset!=='object')
     apiFail_('PRIVATE_SUMMARY_NOT_READY','Owner Work summary index is incomplete; run the controlled summary backfill');
   return saved.asset;
 }
 
-function normalizeOwnerSearch_(value) { return String(value||'').trim().toLocaleLowerCase(); }
+function normalizeOwnerSearch_(value) { return String(value||'').trim().toLowerCase(); }
 
 function privateText_(value,max) { return typeof value==='string'?value.slice(0,max):''; }
 
@@ -148,7 +158,24 @@ function ownerSearchText_(asset) {
   var values=[asset.title,asset.shortDescription,asset.content,asset.authorName,asset.uiCodeSnippet];
   (asset.contentBlocks||[]).forEach(function(block){if(block){values.push(block.title,block.body);}});
   (asset.tags||[]).forEach(function(tag){values.push(tag);});
-  return values.filter(function(value){return typeof value==='string'&&value.length>0;}).join('\n').toLocaleLowerCase();
+  return values.filter(function(value){return typeof value==='string'&&value.length>0;}).join('\n').toLowerCase();
+}
+
+function ownerSearchChunks_(text) {
+  text=String(text||'');if(!text)return [];
+  var chunks=[],step=OWNER_SEARCH_CHUNK_CHARS_-OWNER_SEARCH_OVERLAP_CHARS_;
+  for(var start=0;start<text.length;start+=step){
+    var end=Math.min(text.length,start+OWNER_SEARCH_CHUNK_CHARS_);
+    // Avoid splitting a UTF-16 surrogate pair at a boundary.
+    if(end<text.length&&end>start&&/[\uD800-\uDBFF]/.test(text.charAt(end-1))&&/[\uDC00-\uDFFF]/.test(text.charAt(end)))end--;
+    chunks.push(text.slice(start,end));if(end>=text.length)break;
+  }
+  return chunks;
+}
+
+function ownerSearchArtifacts_(asset) {
+  var text=ownerSearchText_(asset),chunks=ownerSearchChunks_(text);
+  return {text:text,chunks:chunks,version:OWNER_SEARCH_VERSION_,token:Utilities.getUuid(),updatedAt:new Date().toISOString()};
 }
 
 function compactOwnerRef_(value) {
@@ -195,36 +222,115 @@ function privateCardCollaboration_(value) {
   return card;
 }
 
-function assertOwnerSearchIndexFits_(asset) {
-  if(ownerSearchText_(asset).length>PRIVATE_SEARCH_TEXT_MAX_CHARS)
-    apiFail_('SEARCH_INDEX_TOO_LARGE','Work searchable text exceeds the Google Sheets cell limit; save was not written');
-}
-
 function backfillOwnerSummaryIndex_(limit) {
   var batch=Math.min(20,Math.max(1,Number(limit)||20)),sh=sheet_(config_().privateSheetId);
-  ensurePrivateHeaders_(sh);
-  var rows=objectRows_(sh),pending=rows.filter(function(row){return !privateSummaryReady_(row);}).slice(0,batch),updated=0;
+  ensurePrivateHeaders_(sh);var searchSh=ownerSearchSheet_(true),rows=objectRows_(sh),searchRows=objectRows_(searchSh),groupedSearchRows=groupOwnerSearchRows_(searchRows);
+  rows.forEach(function(row){var state=ownerSearchState_(row,groupedSearchRows);if(state.ready&&state.staleChunks)removeStaleOwnerSearchChunks_(searchSh,row.id,state.token);});
+  cleanOwnerSearchIndex_(searchSh,rows);
+  var pending=rows.filter(function(row){return !privateSummaryReady_(row)||!ownerSearchState_(row,groupedSearchRows).ready||hasLegacySearchText_(sh,row);}).slice(0,batch),updated=0,driveReads=0;
   pending.forEach(function(row){
-    var record=parse_(row.file_id); // One canonical JSON read per stale row; never write canonical JSON here.
-    var metadata=privateMeta_(record,row.file_id),values=PRIVATE_HEADERS.map(function(key){return metadata[key]===undefined||metadata[key]===null?'':metadata[key];});
-    sh.getRange(row._sheetRow,1,1,PRIVATE_HEADERS.length).setValues([values]);updated++;
+    var record=parse_(row.file_id);driveReads++; // Read canonical JSON only for a stale/missing index entry.
+    var artifacts=ownerSearchArtifacts_(cxlAssetFromRecord_(record)),metadata=privateMeta_(record,row.file_id,artifacts);
+    appendOwnerSearchChunks_(searchSh,row.id,artifacts);
+    setPrivateIndexRow_(sh,metadata,row._sheetRow);
+    removeStaleOwnerSearchChunks_(searchSh,row.id,artifacts.token);
+    updated++;
   });
-  var remaining=objectRows_(sh).filter(function(row){return !privateSummaryReady_(row);}).length;
-  return {processed:updated,remaining:remaining,ready:remaining===0,batchLimit:batch};
+  removeLegacySearchColumnIfEmpty_(sh);
+  var finalRows=objectRows_(sh),finalSearchRows=objectRows_(searchSh),summaryStats=ownerSummaryReadiness_(finalRows),searchStats=ownerSearchReadiness_(finalRows,finalSearchRows);
+  return {processed:updated,driveReads:driveReads,remaining:summaryStats.missing+summaryStats.invalid+searchStats.missingWorks+searchStats.invalidWorks+searchStats.staleExtraChunks,ready:summaryStats.missing+summaryStats.invalid+searchStats.missingWorks+searchStats.invalidWorks+searchStats.staleExtraChunks===0,batchLimit:batch,
+    missingSummaries:summaryStats.missing,invalidSummaries:summaryStats.invalid,missingSearchWorks:searchStats.missingWorks,invalidSearchWorks:searchStats.invalidWorks,missingSearchChunks:searchStats.missingChunks,invalidSearchChunks:searchStats.invalidChunks,staleExtraChunks:searchStats.staleExtraChunks};
 }
 
 function verifyOwnerSummaryReadiness_() {
-  var sh=sheet_(config_().privateSheetId);ensurePrivateHeaders_(sh);var rows=objectRows_(sh),invalid=rows.filter(function(row){return !privateSummaryReady_(row);});
-  return {total:rows.length,valid:rows.length-invalid.length,invalid:invalid.length,ready:invalid.length===0,summaryVersion:PRIVATE_SUMMARY_VERSION};
+  var sh=sheet_(config_().privateSheetId),rows=objectRows_(sh),searchSh=ownerSearchSheet_(false),searchRows=searchSh?objectRows_(searchSh):[],summary=ownerSummaryReadiness_(rows),search=ownerSearchReadiness_(rows,searchRows);
+  return {total:rows.length,validSummaries:summary.valid,missingSummaries:summary.missing,invalidSummaries:summary.invalid,
+    validSearchWorks:search.validWorks,missingSearchWorks:search.missingWorks,invalidSearchWorks:search.invalidWorks,
+    missingSearchChunks:search.missingChunks,invalidSearchChunks:search.invalidChunks,staleExtraChunks:search.staleExtraChunks,
+    ready:summary.missing+summary.invalid+search.missingWorks+search.invalidWorks+search.staleExtraChunks===0,summaryVersion:PRIVATE_SUMMARY_VERSION,searchVersion:OWNER_SEARCH_VERSION_};
 }
 
 function privateSummaryReady_(row) {
   var version=row.summary_version===undefined?row.summaryVersion:row.summary_version;
-  var text=row.search_text===undefined?row.searchText:row.search_text;
   var json=row.summary_json===undefined?row.summaryJson:row.summary_json;
-  if(Number(version)!==PRIVATE_SUMMARY_VERSION||!text)return false;
+  if(Number(version)!==PRIVATE_SUMMARY_VERSION)return false;
   try { var value=JSON.parse(json||'');return value&&value.summaryVersion===PRIVATE_SUMMARY_VERSION&&value.asset&&value.asset.id===row.id; }
   catch(_error) { return false; }
+}
+
+function ownerSearchState_(row,searchRows) {
+  var workId=String(row.id||''),token=String(row.search_index_token||row.searchIndexToken||''),version=Number(row.search_version||row.searchVersion||0),expected=Number(row.search_chunk_count===undefined?row.searchChunkCount:row.search_chunk_count);
+  if(!Number.isInteger(expected)||expected<0)expected=-1;
+  var grouped=Array.isArray(searchRows)?groupOwnerSearchRows_(searchRows):(searchRows||{}),workRows=grouped[workId]||[];
+  var active=workRows.filter(function(x){return String(x.index_token||x.indexToken||'')===token&&Number(x.search_version||x.searchVersion)===OWNER_SEARCH_VERSION_;});
+  var indices={},invalid=0;
+  active.forEach(function(x){var n=Number(x.chunk_index===undefined?x.chunkIndex:x.chunk_index),text=x.search_text===undefined?x.searchText:x.search_text;if(!Number.isInteger(n)||n<0||n>=expected||indices[n]||typeof text!=='string'||text.length>OWNER_SEARCH_CHUNK_CHARS_)invalid++;else indices[n]=true;});
+  var valid=version===OWNER_SEARCH_VERSION_&&!!token&&expected>=0&&active.length===expected&&invalid===0;
+  if(valid)for(var i=0;i<expected;i++)if(!indices[i]){valid=false;break;}
+  var totalForWork=workRows.length;
+  return {ready:valid,missingChunks:valid?0:Math.max(0,(expected<0?0:expected)-active.length),invalidChunks:invalid+(expected>=0&&active.length>expected?active.length-expected:0),active:active,token:token,expected:expected,staleChunks:Math.max(0,totalForWork-active.length)};
+}
+
+function ownerSearchMatches_(index,searchRows,query) {
+  var result={},byId={},grouped=groupOwnerSearchRows_(searchRows||[]);(index||[]).forEach(function(row){byId[String(row.id)]=row;});
+  (index||[]).forEach(function(row){var state=ownerSearchState_(row,grouped);if(!state.ready)apiFail_('OWNER_SEARCH_INDEX_NOT_READY','Owner Work search index is incomplete; run the controlled index backfill');});
+  Object.keys(grouped).forEach(function(id){var row=byId[id];if(!row)return;var state=ownerSearchState_(row,grouped);if(!state.ready)return;state.active.forEach(function(chunk){if(String(chunk.search_text||chunk.searchText||'').indexOf(query)>=0)result[id]=true;});});
+  return result;
+}
+
+function groupOwnerSearchRows_(rows) { var grouped={};(rows||[]).forEach(function(row){var id=String(row.work_id||row.workId||'');if(!grouped[id])grouped[id]=[];grouped[id].push(row);});return grouped; }
+
+function ownerSummaryReadiness_(rows) { var missing=0,invalid=0;(rows||[]).forEach(function(row){var json=row.summary_json||row.summaryJson||'';if(!json)missing++;else if(!privateSummaryReady_(row))invalid++;});return {valid:(rows||[]).length-missing-invalid,missing:missing,invalid:invalid}; }
+
+function ownerSearchReadiness_(rows,searchRows) {
+  var missingWorks=0,invalidWorks=0,missingChunks=0,invalidChunks=0,activeRowCount=0,grouped=groupOwnerSearchRows_(searchRows||[]);
+  (rows||[]).forEach(function(row){var state=ownerSearchState_(row,grouped);activeRowCount+=state.active.length;if(!state.ready){if(!row.search_index_token&&!row.searchIndexToken)missingWorks++;else invalidWorks++;missingChunks+=state.missingChunks;invalidChunks+=state.invalidChunks;}});
+  return {validWorks:(rows||[]).length-missingWorks-invalidWorks,missingWorks:missingWorks,invalidWorks:invalidWorks,missingChunks:missingChunks,invalidChunks:invalidChunks,staleExtraChunks:Math.max(0,(searchRows||[]).length-activeRowCount)};
+}
+
+function cleanOwnerSearchIndex_(searchSh,privateRows) {
+  var ids={};(privateRows||[]).forEach(function(row){ids[String(row.id)]=true;});
+  var rows=objectRows_(searchSh),numbers=rows.filter(function(row){return !ids[String(row.work_id||'')];}).map(function(row){return row._sheetRow;}).sort(function(a,b){return b-a;});
+  numbers.forEach(function(rowNumber){searchSh.deleteRow(rowNumber);});
+}
+
+function ownerSearchSheet_(createIfMissing) {
+  var book=SpreadsheetApp.openById(config_().privateSheetId),sh=book.getSheetByName(OWNER_SEARCH_SHEET_);
+  if(!sh&&createIfMissing)sh=book.insertSheet(OWNER_SEARCH_SHEET_);
+  if(sh){var actualLast=sh.getLastColumn(),headers=actualLast?sh.getRange(1,1,1,actualLast).getValues()[0].map(String):[];
+    if(!headers.some(function(value){return !!value;}))sh.getRange(1,1,1,OWNER_SEARCH_HEADERS_.length).setValues([OWNER_SEARCH_HEADERS_]);
+    else {var missing=OWNER_SEARCH_HEADERS_.filter(function(key){return headers.indexOf(key)<0;});if(missing.length)sh.getRange(1,actualLast+1,1,missing.length).setValues([missing]);}}
+  return sh;
+}
+
+function listOwnerSearchIndex_() { var sh=ownerSearchSheet_(false);return sh?objectRows_(sh):[]; }
+
+function appendOwnerSearchChunks_(sh,workId,artifacts) {
+  var last=sh.getLastColumn(),headers=sh.getRange(1,1,1,last).getValues()[0].map(String);
+  var rows=artifacts.chunks.map(function(text,index){var item={work_id:workId,chunk_index:index,search_text:text,search_version:artifacts.version,updated_at:artifacts.updatedAt,index_token:artifacts.token};return headers.map(function(key){return item[key]===undefined?'':item[key];});});
+  if(rows.length)sh.getRange(sh.getLastRow()+1,1,rows.length,last).setValues(rows);
+}
+
+function removeStaleOwnerSearchChunks_(sh,workId,keepToken) {
+  var rows=objectRows_(sh),numbers=rows.filter(function(row){return String(row.work_id||'')===String(workId)&&String(row.index_token||'')!==String(keepToken);}).map(function(row){return row._sheetRow;}).sort(function(a,b){return b-a;});
+  numbers.forEach(function(rowNumber){sh.deleteRow(rowNumber);});
+}
+
+function hasLegacySearchText_(sh,row) {
+  return !!row.search_text;
+}
+
+function removeLegacySearchColumnIfEmpty_(sh) {
+  var headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String),index=headers.indexOf('search_text');
+  if(index<0)return;
+  var lastRow=sh.getLastRow();if(lastRow>1&&sh.getRange(2,index+1,lastRow-1,1).getValues().some(function(row){return !!row[0];}))return;
+  sh.deleteColumn(index+1);
+}
+
+function setPrivateIndexRow_(sh,metadata,rowNumber) {
+  var last=Math.max(1,sh.getLastColumn()),headers=sh.getRange(1,1,1,last).getValues()[0].map(String),found=rowNumber?{_sheetRow:rowNumber}:rowById_(sh,metadata.id),values=found?sh.getRange(found._sheetRow,1,1,last).getValues()[0]:headers.map(function(){return '';});
+  headers.forEach(function(header,index){if(header==='search_text'){values[index]='';return;}if(Object.prototype.hasOwnProperty.call(metadata,header))values[index]=metadata[header]===undefined||metadata[header]===null?'':metadata[header];});
+  if(found)sh.getRange(found._sheetRow,1,1,last).setValues([values]);else sh.appendRow(values);
 }
 
 function ensurePrivateHeaders_(sh) {
@@ -252,17 +358,17 @@ function isPublic_(r) { return r.visibility==='public' && flag_(r.is_public) && 
 
 function listOwnerIndex_() {
   var c=config_(); if(!c.privateSheetId)return [];
-  return objectRows_(sheet_(c.privateSheetId)).map(function(x){return {id:x.id,title:x.title,category:x.category,status:x.status,visibility:x.visibility,isPublic:flag_(x.is_public),deletedAt:x.deleted_at||null,folderId:x.folder_id||null,tags:JSON.parse(x.tags||'[]'),updatedAt:x.updated_at,createdAt:x.created_at||'',userId:x.user_id||'',revision:Number(x.revision),hasDraft:flag_(x.has_collab_draft),mediaCount:Number(x.media_count)||0,coverRef:x.cover_ref||'',summaryJson:x.summary_json||'',summaryVersion:Number(x.summary_version)||0,searchText:normalizeOwnerSearch_(x.search_text||'')};});
+  return objectRows_(sheet_(c.privateSheetId)).map(function(x){return {id:x.id,title:x.title,category:x.category,status:x.status,visibility:x.visibility,isPublic:flag_(x.is_public),deletedAt:x.deleted_at||null,folderId:x.folder_id||null,tags:JSON.parse(x.tags||'[]'),updatedAt:x.updated_at,createdAt:x.created_at||'',userId:x.user_id||'',revision:Number(x.revision),hasDraft:flag_(x.has_collab_draft),mediaCount:Number(x.media_count)||0,coverRef:x.cover_ref||'',summaryJson:x.summary_json||'',summaryVersion:Number(x.summary_version)||0,searchVersion:Number(x.search_version)||0,searchChunkCount:Number(x.search_chunk_count)||0,searchIndexToken:x.search_index_token||''};});
 }
 
 function objectRows_(sheet) { var h=sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0]; return values_(sheet).map(function(v,i){var o={_sheetRow:i+2}; h.forEach(function(k,j){o[k]=v[j];}); return o;}); }
 
 function parse_(fileId) { return JSON.parse(DriveApp.getFileById(fileId).getBlob().getDataAsString('UTF-8')); }
 
-function privateMeta_(record,fileId) {
+function privateMeta_(record,fileId,artifacts) {
   var r=record.row,asset=cxlAssetFromRecord_(record);
-  var searchText=ownerSearchText_(asset);if(searchText.length>PRIVATE_SEARCH_TEXT_MAX_CHARS)apiFail_('SEARCH_INDEX_TOO_LARGE','Work searchable text exceeds the Google Sheets cell limit');
-  return { id:r.id,title:r.title||'',category:r.category||'character',status:r.status||'draft',visibility:r.visibility||'private',is_public:r.is_public===true?'true':'false',deleted_at:r.deleted_at||'',folder_id:r.folder_id||'',tags:JSON.stringify(r.tags||[]),updated_at:r.updated_at||'',revision:record.revision||1,file_id:fileId,has_collab_draft:record.collaborationDraft?'true':'false',media_count:(record.mediaRecords||[]).length,cover_ref:r.preview_image||'',create_request_id:record.createRequestId||'',user_id:r.user_id||asset.userId||'',created_at:r.created_at||asset.createdAt||'',summary_json:privateSummaryJson_(record),summary_version:PRIVATE_SUMMARY_VERSION,search_text:searchText };
+  artifacts=artifacts||ownerSearchArtifacts_(asset);
+  return { id:r.id,title:r.title||'',category:r.category||'character',status:r.status||'draft',visibility:r.visibility||'private',is_public:r.is_public===true?'true':'false',deleted_at:r.deleted_at||'',folder_id:r.folder_id||'',tags:JSON.stringify(r.tags||[]),updated_at:r.updated_at||'',revision:record.revision||1,file_id:fileId,has_collab_draft:record.collaborationDraft?'true':'false',media_count:(record.mediaRecords||[]).length,cover_ref:r.preview_image||'',create_request_id:record.createRequestId||'',user_id:r.user_id||asset.userId||'',created_at:r.created_at||asset.createdAt||'',summary_json:privateSummaryJson_(record),summary_version:PRIVATE_SUMMARY_VERSION,search_version:artifacts.version,search_chunk_count:artifacts.chunks.length,search_index_token:artifacts.token };
 }
 
 function privatePublicCreatorId_(ownerUserId) {
@@ -416,7 +522,6 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
     rejectUnsupportedWorkMedia_(asset,existingAsset);
   }
   validateOwnerFolder_(asset.folderId,ownerUserId);
-  assertOwnerSearchIndexFits_(asset);
   var request={operation:operation,requestId:requestId,fingerprint:fingerprint,revision:operation==='update'?Number(options.expectedRevision):0,createRequestId:operation==='create'?requestId:''};
   var saved=saveOwnerWork_(cxlRowInput_(asset,ownerUserId,request),{deferPublicSync:true,idempotent:true});
   record=getOwnerWork_(saved.id);finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(getOwnerWork_(saved.id));
@@ -447,8 +552,12 @@ function saveOwnerWork_(input,options) {
     shareRecordMedia_(record,isPublic_(r));
     record.revision=(record.revision||0)+1;
     if(existing&&isPublic_(parse_(existing.file_id).row)&&!isPublic_(r)){var pub=rowById_(sheet_(c.publicSheetId),r.id);if(pub){pub.active='false';setRow_(sheet_(c.publicSheetId),PUBLIC_HEADERS,pub);}}
+    ensurePrivateHeaders_(sh);
+    var artifacts=ownerSearchArtifacts_(cxlAssetFromRecord_(record)),metadata=privateMeta_(record,'',artifacts),searchSh=ownerSearchSheet_(true);
+    appendOwnerSearchChunks_(searchSh,r.id,artifacts);
     var fileId=options.idempotent?putJsonRevision_(c.privateId,r.id+'__r'+record.revision+'.json',record):putJson_(c.privateId,r.id+'__r'+record.revision+'.json',record);
-    setRow_(sh,PRIVATE_HEADERS,privateMeta_(record,fileId));
+    metadata.file_id=fileId;setPrivateIndexRow_(sh,metadata);
+    removeStaleOwnerSearchChunks_(searchSh,r.id,artifacts.token);
     if(!options.deferPublicSync)syncPublic_(record);
     return {id:r.id,revision:record.revision,updatedAt:r.updated_at};
   } finally {lock.releaseLock();}

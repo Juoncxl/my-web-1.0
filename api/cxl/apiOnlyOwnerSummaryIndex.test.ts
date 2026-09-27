@@ -7,6 +7,8 @@ const source = readFileSync(join(process.cwd(), 'apps-script', 'api-only-owner',
 
 function bridge() {
   const context: Record<string, any> = {};
+  let id = 0;
+  context.Utilities = { getUuid: () => `token-${++id}` };
   runInNewContext(source, context);
   return context;
 }
@@ -21,129 +23,237 @@ function asset(id = 'work-1', overrides: Record<string, unknown> = {}) {
   };
 }
 
-function indexRow(work: ReturnType<typeof asset>, searchText: string, overrides: Record<string, unknown> = {}) {
-  return {
+function indexed(work: ReturnType<typeof asset>, ctx = bridge()) {
+  const artifacts = ctx.ownerSearchArtifacts_(work);
+  const summaryAsset = { ...work, content: String(work.content || '').slice(0, 600), uiCodeSnippet: String(work.uiCodeSnippet || '').slice(0, 600), contentBlocks: (work.contentBlocks as any[]).map(block => ({ ...block, body: '' })) };
+  const row = {
     id: work.id, title: work.title, category: work.category, status: work.status, visibility: work.visibility,
     isPublic: work.isPublic, deletedAt: work.deletedAt, folderId: work.folderId, tags: work.tags,
     createdAt: work.createdAt, updatedAt: work.updatedAt, userId: work.userId, revision: 3,
-    summaryVersion: 1, summaryJson: JSON.stringify({ summaryVersion: 1, asset: work }), searchText, ...overrides
+    summaryVersion: 1, summaryJson: JSON.stringify({ summaryVersion: 1, asset: summaryAsset }),
+    searchVersion: artifacts.version, searchChunkCount: artifacts.chunks.length, searchIndexToken: artifacts.token
   };
+  const chunks = artifacts.chunks.map((search_text: string, chunk_index: number) => ({
+    work_id: work.id, chunk_index, search_text, search_version: artifacts.version,
+    updated_at: artifacts.updatedAt, index_token: artifacts.token
+  }));
+  return { row, chunks, artifacts };
 }
 
-describe('API-only Owner Private summary index', () => {
-  it('serves summary/list from Private Index only and never returns search_text', () => {
-    const context = bridge();
-    const summary = asset('one');
-    context.listOwnerIndex_ = () => [indexRow(summary, 'work title hidden body')];
-    context.getOwnerWork_ = vi.fn(() => { throw new Error('list must not read Drive'); });
+class MemorySheet {
+  rows: unknown[][];
+  constructor(headers: string[], data: unknown[][] = []) { this.rows = [headers, ...data]; }
+  getLastColumn() { return this.rows[0]?.length || 1; }
+  getLastRow() { return this.rows.length; }
+  getRange(row: number, column: number, height = 1, width = 1) {
+    const sheet = this;
+    return {
+      getValues() { return Array.from({ length: height }, (_, r) => Array.from({ length: width }, (_, c) => sheet.rows[row - 1 + r]?.[column - 1 + c] ?? '')); },
+      getValue() { return sheet.rows[row - 1]?.[column - 1] ?? ''; },
+      setValues(values: unknown[][]) {
+        values.forEach((valuesRow, r) => {
+          const rowNumber = row - 1 + r;
+          while (sheet.rows.length <= rowNumber) sheet.rows.push(Array(sheet.getLastColumn()).fill(''));
+          while (sheet.rows[rowNumber].length < column - 1 + valuesRow.length) sheet.rows[rowNumber].push('');
+          valuesRow.forEach((value, c) => { sheet.rows[rowNumber][column - 1 + c] = value; });
+        });
+      }
+    };
+  }
+  appendRow(values: unknown[]) { this.rows.push(values); }
+  deleteRow(row: number) { this.rows.splice(row - 1, 1); }
+  deleteColumn(column: number) { this.rows.forEach(row => row.splice(column - 1, 1)); }
+}
 
-    const result = context.fetchCxlWorks_({ userId: 'owner-1', detail: 'summary' });
-    expect(result.data.map((item: any) => item.id)).toEqual(['one']);
+function legacyPrivateRows(count: number, ctx: Record<string, any>) {
+  const headers = [...ctx.PRIVATE_HEADERS, 'search_text'];
+  const rows = Array.from({ length: count }, (_, index) => {
+    const work = asset(`w${index}`, { title: `Title ${index}`, content: `Existing indexed content ${index}` });
+    return headers.map((header) => ({
+      id: work.id, title: work.title, category: work.category, status: work.status, visibility: 'private', is_public: 'false',
+      deleted_at: '', folder_id: '', tags: '[]', updated_at: work.updatedAt, revision: 1, file_id: `file-${index}`,
+      user_id: 'owner-1', created_at: work.createdAt,
+      summary_json: JSON.stringify({ summaryVersion: 1, asset: work }), summary_version: 1,
+      search_text: 'legacy single-cell corpus'
+    } as Record<string, unknown>)[header] ?? '');
+  });
+  return new MemorySheet(headers, rows);
+}
+
+describe('API-only Owner chunked search index', () => {
+  it('chunks searchable corpora larger than one cell and finds terms in later chunks', () => {
+    const context = bridge();
+    const work = asset('large', { content: `${'x'.repeat(70_000)} unique-late-term ${'y'.repeat(10_000)}` });
+    const { row, chunks } = indexed(work, context);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk: any) => chunk.search_text.length <= context.OWNER_SEARCH_CHUNK_CHARS_)).toBe(true);
+    context.listOwnerIndex_ = () => [row];
+    context.listOwnerSearchIndex_ = () => chunks;
+    context.getOwnerWork_ = vi.fn(() => { throw new Error('search must not read Drive'); });
+    expect(context.fetchCxlWorks_({ search: 'UNIQUE-LATE-TERM' }).data.map((item: any) => item.id)).toEqual(['large']);
     expect(context.getOwnerWork_).not.toHaveBeenCalled();
-    expect(JSON.stringify(result)).not.toContain('search_text');
-    expect(JSON.stringify(result)).not.toContain('hidden body');
   });
 
-  it('matches full-content search text from every legacy search field, case-insensitively', () => {
+  it('preserves substring search for a query crossing a chunk boundary', () => {
     const context = bridge();
-    const searchable = asset('one', {
-      title: 'TitleNeedle', shortDescription: 'DescriptionNeedle', content: 'ContentNeedle',
+    const crossingQuery = 'cross-boundary-substring';
+    const boundaryOffset = context.OWNER_SEARCH_CHUNK_CHARS_ - 8;
+    const work = asset('boundary', { content: `${'a'.repeat(boundaryOffset)}${crossingQuery}${'b'.repeat(40_000)}` });
+    const { row, chunks } = indexed(work, context);
+    expect(chunks.some((chunk: any) => chunk.search_text.includes(crossingQuery))).toBe(true);
+    context.listOwnerIndex_ = () => [row];
+    context.listOwnerSearchIndex_ = () => chunks;
+    expect(context.fetchCxlWorks_({ search: crossingQuery }).data.map((item: any) => item.id)).toEqual(['boundary']);
+  });
+
+  it('keeps full-content search coverage across all existing fields and never returns search data', () => {
+    const context = bridge();
+    const work = asset('fields', {
+      title: 'TitleNeedle', shortDescription: 'DescriptionNeedle', content: `ContentNeedle${'x'.repeat(700)}FullCorpusOnlyMarker`,
       contentBlocks: [{ id: 'b', type: 'Text', title: 'BlockTitleNeedle', body: 'BlockBodyNeedle' }],
       authorName: 'AuthorNeedle', tags: ['TagNeedle'], uiCodeSnippet: 'CodeNeedle'
     });
-    const searchText = context.ownerSearchText_(searchable);
-    const row = indexRow(searchable, searchText);
+    const { row, chunks } = indexed(work, context);
     context.listOwnerIndex_ = () => [row];
-
+    context.listOwnerSearchIndex_ = () => chunks;
     for (const query of ['titleneedle', 'DESCRIPTIONneedle', 'contentneedle', 'blocktitleneedle', 'blockbodyneedle', 'authorneedle', 'tagneedle', 'codeneedle']) {
-      expect(context.fetchCxlWorks_({ userId: 'owner-1', search: query }).data.map((item: any) => item.id), query).toEqual(['one']);
+      const result = context.fetchCxlWorks_({ search: query });
+      expect(result.data.map((item: any) => item.id), query).toEqual(['fields']);
+      expect(JSON.stringify(result)).not.toContain('search_text');
+      expect(JSON.stringify(result)).not.toContain('FullCorpusOnlyMarker');
     }
   });
 
-  it('reads canonical Drive JSON exactly once for a single Work detail and rejects full-list detail', () => {
+  it('does not read OwnerSearchIndex or canonical Drive JSON for an unsearched list', () => {
     const context = bridge();
-    const work = asset('one');
+    const { row } = indexed(asset('list-only'), context);
+    context.listOwnerIndex_ = () => [row];
+    context.listOwnerSearchIndex_ = vi.fn(() => { throw new Error('search sheet must not be read'); });
+    context.getOwnerWork_ = vi.fn(() => { throw new Error('list must not read Drive'); });
+    expect(context.fetchCxlWorks_({ detail: 'summary' }).data[0].id).toBe('list-only');
+    expect(context.listOwnerSearchIndex_).not.toHaveBeenCalled();
+    expect(context.getOwnerWork_).not.toHaveBeenCalled();
+  });
+
+  it('reads only the selected canonical Work JSON for detail and rejects full-list detail', () => {
+    const context = bridge();
+    const work = asset('detail');
     context.getOwnerWork_ = vi.fn(() => ({ cxlAsset: work, revision: 3, mediaRecords: [] }));
-    expect(context.fetchCxlWorks_({ assetId: 'one', detail: 'full' }).data[0].id).toBe('one');
+    expect(context.fetchCxlWorks_({ assetId: 'detail', detail: 'full' }).data[0].id).toBe('detail');
     expect(context.getOwnerWork_).toHaveBeenCalledTimes(1);
     expect(() => context.fetchCxlWorks_({ detail: 'full' })).toThrow(/Full Work reads require one assetId/);
     expect(context.getOwnerWork_).toHaveBeenCalledTimes(1);
   });
 
-  it('fails the list closed until every Private Index row has the supported summary version', () => {
+  it('fails a search closed when a required chunk is missing or invalid', () => {
     const context = bridge();
-    context.listOwnerIndex_ = () => [indexRow(asset('ready'), 'ready'), indexRow(asset('stale'), 'stale', { summaryVersion: 0 })];
-    context.getOwnerWork_ = vi.fn();
-    expect(() => context.fetchCxlWorks_({ userId: 'owner-1' })).toThrow(/summary index is incomplete/);
-    expect(context.getOwnerWork_).not.toHaveBeenCalled();
+    const { row, chunks } = indexed(asset('stale', { content: 'searchable body' }), context);
+    context.listOwnerIndex_ = () => [row];
+    context.listOwnerSearchIndex_ = () => chunks.slice(1);
+    expect(() => context.fetchCxlWorks_({ search: 'body' })).toThrow(/search index is incomplete/);
   });
 
   it('preserves owner, public, folder, deleted, category, ordering, and limit filters', () => {
     const context = bridge();
-    context.listOwnerIndex_ = () => [
-      indexRow(asset('older', { createdAt: '2025-01-01', category: 'lore', folderId: 'folder-1' }), 'older'),
-      indexRow(asset('newer', { createdAt: '2026-02-01', category: 'lore', folderId: 'folder-1', isPublic: true, visibility: 'public' }), 'newer'),
-      indexRow(asset('deleted', { createdAt: '2026-03-01', deletedAt: '2026-03-02', category: 'lore', folderId: 'folder-1' }), 'deleted'),
-      indexRow(asset('other-folder', { category: 'lore', folderId: 'folder-2' }), 'other-folder'),
-      indexRow(asset('other-owner', { userId: 'elsewhere', category: 'lore', folderId: 'folder-1' }), 'other-owner'),
-      indexRow(asset('other-category', { category: 'prompts', folderId: 'folder-1' }), 'other-category')
+    const works = [
+      asset('older', { createdAt: '2025-01-01', category: 'lore', folderId: 'folder-1' }),
+      asset('newer', { createdAt: '2026-02-01', category: 'lore', folderId: 'folder-1', isPublic: true, visibility: 'public' }),
+      asset('deleted', { createdAt: '2026-03-01', deletedAt: '2026-03-02', category: 'lore', folderId: 'folder-1' }),
+      asset('other-folder', { category: 'lore', folderId: 'folder-2' }),
+      asset('other-owner', { userId: 'elsewhere', category: 'lore', folderId: 'folder-1' }),
+      asset('other-category', { category: 'prompts', folderId: 'folder-1' })
     ];
+    const ready = works.map(work => indexed(work, context));
+    context.listOwnerIndex_ = () => ready.map(item => item.row);
+    context.listOwnerSearchIndex_ = () => ready.flatMap(item => item.chunks);
     const result = context.fetchCxlWorks_({ userId: 'owner-1', currentUserId: 'owner-1', category: 'lore', folderId: 'folder-1', includeDeleted: false, limit: 1 });
     expect(result.data.map((item: any) => item.id)).toEqual(['newer']);
     expect(context.fetchCxlWorks_({ userId: 'owner-1', publicOnly: true }).data.map((item: any) => item.id)).toEqual(['newer']);
     expect(context.fetchCxlWorks_({ userId: 'owner-1', onlyDeleted: true, currentUserId: 'owner-1' }).data.map((item: any) => item.id)).toEqual(['deleted']);
   });
 
-  it('refreshes versioned summary and private search index on every create/update metadata build', () => {
+  it('refreshes compact private summary and search generation without storing search text in Private Index', () => {
     const context = bridge();
-    const longContent = `${'x'.repeat(1600)} Updated hidden content`;
-    const work = asset('one', { title: 'Updated Title', content: longContent, uiCodeSnippet: 'Updated code' });
-    const record = { row: { id: 'one', user_id: 'owner-1', created_at: work.createdAt, title: work.title, tags: [] }, cxlAsset: work, revision: 4, mediaRecords: [] };
-    const metadata = context.privateMeta_(record, 'private-file-id');
+    const work = asset('updated', { content: `${'x'.repeat(65_000)} updated hidden content`, uiCodeSnippet: 'Updated code' });
+    const record = { row: { id: 'updated', user_id: 'owner-1', created_at: work.createdAt, title: work.title, tags: [], is_public: false }, cxlAsset: work, revision: 4, mediaRecords: [] };
+    const artifacts = context.ownerSearchArtifacts_(work);
+    const metadata = context.privateMeta_(record, 'private-file-id', artifacts);
     const envelope = JSON.parse(metadata.summary_json);
-    expect(metadata.summary_version).toBe(1);
+    expect(metadata.search_version).toBe(1);
+    expect(metadata.search_chunk_count).toBeGreaterThan(1);
+    expect(metadata.search_index_token).toBe(artifacts.token);
+    expect(metadata).not.toHaveProperty('search_text');
     expect(envelope.summaryVersion).toBe(1);
-    expect(envelope.asset.title).toBe('Updated Title');
-    expect(metadata.search_text).toContain('updated hidden content');
-    expect(metadata.search_text).toContain('updated code');
     expect(envelope.asset.content).toHaveLength(600);
-    expect(envelope.asset.content).not.toContain('Updated hidden content');
     expect(envelope).not.toHaveProperty('search_text');
-    const changed = context.privateMeta_({ ...record, cxlAsset: { ...work, content: 'next revision content' }, revision: 5 }, 'private-file-id-2');
-    expect(changed.summary_version).toBe(1);
-    expect(JSON.parse(changed.summary_json).asset.content).toBe('next revision content');
-    expect(changed.search_text).toContain('next revision content');
+    expect(artifacts.chunks.join('')).toContain('updated hidden content');
   });
 
-  it('backfills at most 20 stale rows and is safe to rerun without rereading or rewriting ready rows', () => {
+  it('backfill resumes partial progress, clears legacy cells, and reruns without duplicate chunks or rereads', () => {
     const context = bridge();
-    const rows: Record<string, any>[] = Array.from({ length: 21 }, (_, index) => ({ _sheetRow: index + 2, id: `w${index}`, file_id: `file-${index}`, summary_version: 0 }));
-    const headers = [...context.PRIVATE_HEADERS];
-    const sheet = {
-      getLastColumn: () => headers.length,
-      getRange: (row: number, _column: number, _height: number, _width: number) => ({
-        setValues: (values: unknown[][]) => {
-          const target = rows.find(item => item._sheetRow === row)!;
-          headers.forEach((key, index) => { target[key] = values[0][index]; });
-        }
-      })
-    };
+    const privateSheet = legacyPrivateRows(21, context);
+    const searchSheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_);
     let reads = 0;
     context.config_ = () => ({ privateSheetId: 'private-sheet' });
-    context.sheet_ = () => sheet;
-    context.ensurePrivateHeaders_ = () => undefined;
-    context.objectRows_ = () => rows;
-    context.parse_ = () => { reads++; return { row: { id: `w${reads}`, user_id: 'owner', title: `Title ${reads}`, created_at: '2026-01-01' }, cxlAsset: asset(`w${reads}`), revision: 1, mediaRecords: [] }; };
-    context.privateMeta_ = (record: any) => ({ id: record.row.id, summary_json: JSON.stringify({ summaryVersion: 1, asset: asset(record.row.id) }), summary_version: 1, search_text: 'indexed text' });
-
+    context.sheet_ = () => privateSheet;
+    context.ownerSearchSheet_ = () => searchSheet;
+    context.parse_ = (fileId: string) => {
+      reads++;
+      const index = Number(fileId.split('-')[1]);
+      const work = asset(`w${index}`, { title: `Title ${index}`, content: `${'z'.repeat(35_000)} needle-${index}` });
+      return { row: { id: work.id, user_id: 'owner-1', created_at: work.createdAt, title: work.title, tags: [], is_public: false }, cxlAsset: work, revision: 1, mediaRecords: [] };
+    };
     const first = context.backfillOwnerSummaryIndex_();
-    expect(first).toMatchObject({ processed: 20, remaining: 1, ready: false, batchLimit: 20 });
+    expect(first).toMatchObject({ processed: 20, driveReads: 20, remaining: 1, ready: false, batchLimit: 20 });
     expect(reads).toBe(20);
     const second = context.backfillOwnerSummaryIndex_();
-    expect(second).toMatchObject({ processed: 1, remaining: 0, ready: true });
+    expect(second).toMatchObject({ processed: 1, driveReads: 1, remaining: 0, ready: true });
     expect(reads).toBe(21);
+    const rowCount = searchSheet.getLastRow();
     const third = context.backfillOwnerSummaryIndex_();
-    expect(third).toMatchObject({ processed: 0, remaining: 0, ready: true });
-    expect(reads).toBe(21);
+    expect(third).toMatchObject({ processed: 0, driveReads: 0, remaining: 0, ready: true });
+    expect(searchSheet.getLastRow()).toBe(rowCount);
+    expect(privateSheet.rows[0]).not.toContain('search_text');
+  });
+
+  it('replaces old chunks after an update and removes stale extra chunks', () => {
+    const context = bridge();
+    const old = indexed(asset('update-work', { content: `${'old '.repeat(12_000)}stale-only-term` }), context);
+    const next = indexed(asset('update-work', { content: 'short new revision' }), context);
+    const rows = [...old.chunks, ...next.chunks];
+    const sheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_, rows.map((chunk: any) => context.OWNER_SEARCH_HEADERS_.map((key: string) => chunk[key])));
+    context.removeStaleOwnerSearchChunks_(sheet, 'update-work', next.artifacts.token);
+    expect(sheet.getLastRow() - 1).toBe(next.chunks.length);
+    expect(JSON.stringify(sheet.rows)).not.toContain('stale-only-term');
+  });
+
+  it('refreshes the Private summary and active search generation on create/update writes', () => {
+    const context = bridge();
+    const privateSheet = new MemorySheet(context.PRIVATE_HEADERS_ || context.PRIVATE_HEADERS);
+    const searchSheet = new MemorySheet(context.OWNER_SEARCH_HEADERS_);
+    let canonical: any;
+    context.config_ = () => ({ privateSheetId: 'private', privateId: 'drive' });
+    context.sheet_ = () => privateSheet;
+    context.ownerSearchSheet_ = () => searchSheet;
+    context.LockService = { getScriptLock: () => ({ waitLock: vi.fn(), releaseLock: vi.fn() }) };
+    context.shareRecordMedia_ = vi.fn();
+    context.parse_ = () => canonical;
+    context.putJsonRevision_ = vi.fn((_folder: string, _name: string, record: any) => { canonical = record; return `file-${record.revision}`; });
+    context.putJson_ = vi.fn((_folder: string, _name: string, record: any) => { canonical = record; return `file-${record.revision}`; });
+    const original = asset('write-work', { content: 'first indexed revision' });
+    context.saveOwnerWork_({ id: original.id, ownerUserId: 'owner-1', title: original.title, category: 'character', status: 'draft', visibility: 'private', tags: [], cxlAsset: original, content: original.content }, { idempotent: true, deferPublicSync: true });
+    const firstIndex = context.objectRows_(privateSheet)[0];
+    const firstToken = firstIndex.search_index_token;
+    expect(context.objectRows_(searchSheet).some((row: any) => row.index_token === firstToken && String(row.search_text).includes('first indexed revision'))).toBe(true);
+
+    context.saveOwnerWork_({ id: original.id, ownerUserId: 'owner-1', revision: 1, title: original.title, category: 'character', status: 'draft', visibility: 'private', tags: [], cxlAsset: { ...original, content: 'replacement indexed revision' }, content: 'replacement indexed revision' }, { idempotent: true, deferPublicSync: true });
+    const updatedIndex = context.objectRows_(privateSheet)[0];
+    const chunks = context.objectRows_(searchSheet);
+    expect(updatedIndex.search_index_token).not.toBe(firstToken);
+    expect(updatedIndex.revision).toBe(2);
+    expect(chunks.every((row: any) => row.index_token === updatedIndex.search_index_token)).toBe(true);
+    expect(chunks.map((row: any) => row.search_text).join('')).toContain('replacement indexed revision');
+    expect(chunks.map((row: any) => row.search_text).join('')).not.toContain('first indexed revision');
+    expect(updatedIndex).not.toHaveProperty('search_text');
   });
 });
