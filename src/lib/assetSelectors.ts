@@ -25,6 +25,7 @@ export interface AssetFilterOptions extends AssetCollectionOptions {
   selectedStatusFilter: AssetStatus | 'all';
   visibilityFilter: VisibilityFilter;
   searchQuery: string;
+  searchAlreadyApplied?: boolean;
 }
 
 export interface PlatformCount {
@@ -130,7 +131,7 @@ function matchesNonCategoryFilters(asset: Asset, options: AssetFilterOptions): b
     const tag = options.selectedTag.toLowerCase();
     if (!asset.tags?.some(item => item.toLowerCase() === tag)) return false;
   }
-  return matchesSearch(asset, options.searchQuery);
+  return options.searchAlreadyApplied || matchesSearch(asset, options.searchQuery);
 }
 
 export function selectFilteredAssets(

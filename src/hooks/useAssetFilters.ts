@@ -21,6 +21,7 @@ interface UseAssetFiltersOptions {
   selectedStatusFilter: AssetStatus | 'all';
   visibilityFilter: 'all' | 'public' | 'private';
   searchQuery: string;
+  searchAlreadyApplied?: boolean;
   bookmarkedAssetIds: string[];
   recentlyViewedIds: string[];
   currentUserId: string | undefined;

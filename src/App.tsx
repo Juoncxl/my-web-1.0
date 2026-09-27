@@ -27,6 +27,7 @@ import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/p
 import { getCanonicalProfilePath, getCanonicalProfileSlug } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
+import { isGoogleWorksReadBackend } from './data/cxlDataService';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
 const CreatorSpacePage = React.lazy(() => import('./pages/CreatorSpacePage').then(module => ({ default: module.CreatorSpacePage })));
@@ -58,6 +59,7 @@ function MainApp() {
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
   const [activeVaultTab, setActiveVaultTab] = useState<VaultTabType>('my_assets');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -81,6 +83,11 @@ function MainApp() {
     window.addEventListener('popstate', rerenderForRoute);
     return () => window.removeEventListener('popstate', rerenderForRoute);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
   const [operationError, setOperationError] = useState<string | null>(null);
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
@@ -124,6 +131,12 @@ function MainApp() {
   // A creator route must wait for Auth restoration once so it can choose the
   // owner query immediately instead of doing an anonymous read followed by a
   // second owner read. The public Feed remains independent and starts at once.
+  const indexedOwnerSearch = isGoogleWorksReadBackend && 'userId' in assetLoadOptions && Boolean(assetLoadOptions.userId) && assetLoadOptions.detail === 'summary';
+  const effectiveAssetLoadOptions = useMemo(() => indexedOwnerSearch
+    ? { ...assetLoadOptions, search: debouncedSearchQuery.trim() || undefined }
+    : assetLoadOptions,
+  [assetLoadOptions, debouncedSearchQuery, indexedOwnerSearch]);
+
   const assetLoadingEnabled = !creatorSlug || !authLoading;
 
   const {
@@ -140,7 +153,7 @@ function MainApp() {
     moveAsset,
     updateAssetLikeCount,
     clearFolderAssignments
-  } = useAssetData(currentUser, setAssetLoadError, assetLoadingEnabled, assetLoadOptions);
+  } = useAssetData(currentUser, setAssetLoadError, assetLoadingEnabled, effectiveAssetLoadOptions);
   const {
     folders,
     isLoadingFolders,
@@ -455,6 +468,7 @@ function MainApp() {
     selectedStatusFilter,
     visibilityFilter,
     searchQuery,
+    searchAlreadyApplied: indexedOwnerSearch,
     bookmarkedAssetIds,
     recentlyViewedIds,
     currentUserId: currentUser?.id

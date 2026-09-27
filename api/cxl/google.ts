@@ -266,7 +266,7 @@ export default async function handler(req: Request, res: Response) {
       }
     }
     const works = validateAssetList(raw);
-    const scopedOptions = { ...options, publicOnly: publicCreatorSlug ? true : options.publicOnly,
+    const scopedOptions = { ...options, ...(ownerScope ? { search: undefined } : {}), publicOnly: publicCreatorSlug ? true : options.publicOnly,
       currentUserId: ownerScope ? ownerId || undefined : undefined };
     const filtered = filterGoogleWorks(works, scopedOptions, { currentUserId: ownerScope ? ownerId || undefined : undefined });
     return send(res, 200, { ok: true, data: { data: filtered, error: null } });

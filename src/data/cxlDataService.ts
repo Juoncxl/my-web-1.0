@@ -127,6 +127,7 @@ export function createCxlDataService(
 }
 
 const environment = (import.meta as any).env || {};
+export const isGoogleWorksReadBackend = String(environment.VITE_CXL_WORKS_READ_BACKEND || '').trim().toLowerCase() === 'google';
 
 /** Build-time rollout flag; missing/unknown values keep the Supabase default. */
 export const cxlDataService: CxlDataService = createCxlDataService(

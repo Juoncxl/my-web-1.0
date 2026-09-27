@@ -1,8 +1,11 @@
 /* API-only CXL Owner bridge. Generated from the GO 6A storage contract. Do not add Owner UI functions here. */
-var PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id'];
+var PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_text'];
 var PUBLIC_HEADERS = ['id','title','category','status','updated_at','tags','short_description','file_id','active','cover_ref','summary_json'];
 var PUBLIC_SUMMARY_VERSION = 2;
 var PUBLIC_SUMMARY_MAX_CHARS = 45000;
+var PRIVATE_SUMMARY_VERSION = 1;
+var PRIVATE_SUMMARY_MAX_CHARS = 45000;
+var PRIVATE_SEARCH_TEXT_MAX_CHARS = 49000;
 var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','icon','content','contentBlocks','uiCodeSnippet','previewImage','previewImages','media','folderId','isPublic','visibility','status','tags','createdAt','updatedAt','deletedAt','likesCount','forkedFromAuthor','versions'];
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
 var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update'];
@@ -110,18 +113,123 @@ function ensureHeaders_(sheet,headers) { var last=sheet.getLastColumn();if(last<
 function fail_(message) { throw new Error(message); }
 
 function fetchCxlWorks_(options) {
-  options=options||{};var works=options.assetId?[cxlAssetFromRecord_(getOwnerWork_(options.assetId))]:listOwnerIndex_().map(function(x){return cxlAssetFromRecord_(getOwnerWork_(x.id));});
-  if(options.userId)works=works.filter(function(x){return x.userId===options.userId;});
-  if(options.onlyDeleted&&options.currentUserId)works=works.filter(function(x){return x.userId===options.currentUserId;});
-  if(options.category&&options.category!=='all')works=works.filter(function(x){return x.category===options.category;});
-  if(options.userId&&options.folderId!==undefined)works=works.filter(function(x){return x.folderId===options.folderId;});
-  if(options.publicOnly)works=works.filter(function(x){return x.isPublic&&!x.deletedAt;});
-  else if(options.onlyDeleted)works=works.filter(function(x){return !!x.deletedAt;});
-  else if(!options.includeDeleted)works=works.filter(function(x){return !x.deletedAt;});
-  works.sort(function(a,b){return Date.parse(b.createdAt||'')-Date.parse(a.createdAt||'');});
-  if(options.limit)works=works.slice(0,Math.min(100,Math.max(1,Number(options.limit)||100)));
-  if(options.search&&String(options.search).trim()){var q=String(options.search).trim().toLocaleLowerCase();works=works.filter(function(x){return [x.title,x.content,x.tags.join('\n')].join('\n').toLocaleLowerCase().indexOf(q)>=0;});}
+  options=options||{};
+  if(options.assetId)return {data:[cxlAssetFromRecord_(getOwnerWork_(options.assetId))],error:null};
+  if(options.detail==='full')apiFail_('FULL_LIST_NOT_SUPPORTED','Full Work reads require one assetId');
+  var index=listOwnerIndex_();
+  if(index.some(function(row){return !privateSummaryReady_(row);}))apiFail_('PRIVATE_SUMMARY_NOT_READY','Owner Work summary index is incomplete; run the controlled summary backfill');
+  if(options.userId)index=index.filter(function(row){return row.userId===options.userId;});
+  if(options.onlyDeleted&&options.currentUserId)index=index.filter(function(row){return row.userId===options.currentUserId;});
+  if(options.category&&options.category!=='all')index=index.filter(function(row){return row.category===options.category;});
+  if(options.userId&&options.folderId!==undefined)index=index.filter(function(row){return row.folderId===options.folderId;});
+  if(options.publicOnly)index=index.filter(function(row){return row.isPublic&&!row.deletedAt;});
+  else if(options.onlyDeleted)index=index.filter(function(row){return !!row.deletedAt;});
+  else if(!options.includeDeleted)index=index.filter(function(row){return !row.deletedAt;});
+  index.sort(function(a,b){return Date.parse(b.createdAt||'')-Date.parse(a.createdAt||'');});
+  if(options.limit)index=index.slice(0,Math.min(100,Math.max(1,Number(options.limit)||100)));
+  if(options.search&&String(options.search).trim()){var q=normalizeOwnerSearch_(options.search);index=index.filter(function(row){return row.searchText.indexOf(q)>=0;});}
+  var works=index.map(function(row){return privateSummaryAsset_(row);});
   return {data:works,error:null};
+}
+
+function privateSummaryAsset_(row) {
+  var saved;
+  try { saved=JSON.parse(row.summaryJson||''); } catch(_error) { saved=null; }
+  if(Number(row.summaryVersion)!==PRIVATE_SUMMARY_VERSION||!row.searchText||!saved||saved.summaryVersion!==PRIVATE_SUMMARY_VERSION||!saved.asset||typeof saved.asset!=='object')
+    apiFail_('PRIVATE_SUMMARY_NOT_READY','Owner Work summary index is incomplete; run the controlled summary backfill');
+  return saved.asset;
+}
+
+function normalizeOwnerSearch_(value) { return String(value||'').trim().toLocaleLowerCase(); }
+
+function privateText_(value,max) { return typeof value==='string'?value.slice(0,max):''; }
+
+function ownerSearchText_(asset) {
+  var values=[asset.title,asset.shortDescription,asset.content,asset.authorName,asset.uiCodeSnippet];
+  (asset.contentBlocks||[]).forEach(function(block){if(block){values.push(block.title,block.body);}});
+  (asset.tags||[]).forEach(function(tag){values.push(tag);});
+  return values.filter(function(value){return typeof value==='string'&&value.length>0;}).join('\n').toLocaleLowerCase();
+}
+
+function compactOwnerRef_(value) {
+  return typeof value==='string'&&value.length<=1024&&!/^data:/i.test(value)?value:'';
+}
+
+function privateSummaryJson_(record) {
+  var asset=cxlAssetFromRecord_(record);
+  var icon=asset.icon;
+  if(icon&&icon.type==='image') {
+    var ref=compactOwnerRef_(icon.value);
+    icon=ref?{type:'image',value:ref,mediaId:icon.mediaId||undefined}:{type:'emoji',value:'✨'};
+  } else if(icon&&typeof icon.value==='string') icon={type:icon.type,value:privateText_(icon.value,96)};
+  var previewImage=compactOwnerRef_(asset.previewImage||'');
+  var previewImages=(asset.previewImages||[]).map(compactOwnerRef_).filter(Boolean).slice(0,6);
+  var summary={id:asset.id,userId:asset.userId,publicCreatorId:asset.publicCreatorId,authorName:privateText_(asset.authorName||'Creator',200),title:privateText_(asset.title||'',1000),
+    icon:icon||{type:'emoji',value:'✨'},category:asset.category,shortDescription:privateText_(asset.shortDescription||'',800),
+    contentTypeLabels:(asset.contentTypeLabels||[]).slice(0,20).map(function(x){return privateText_(x,100);}),contentTypes:(asset.contentTypes||[]).slice(0,20),presentationMetadata:privatePresentationMetadata_(asset.presentationMetadata),
+    publicCollaboration:asset.publicCollaboration?privateCardCollaboration_(asset.publicCollaboration):null,collaborationAssetId:asset.collaborationAssetId||null,
+    contentBlocks:(asset.contentBlocks||[]).map(function(block){return {id:privateText_(block.id||'',50),type:privateText_(block.type||'Text',30),title:privateText_(block.title||'',100),body:''};}).slice(0,24),
+    content:String(asset.content||'').slice(0,600),uiCodeSnippet:String(asset.uiCodeSnippet||'').slice(0,600),
+    previewImage:previewImage,previewImages:previewImages,media:[],folderId:asset.folderId||null,isPublic:!!asset.isPublic,
+    visibility:asset.visibility||'private',status:asset.status||'draft',tags:(asset.tags||[]).slice(0,50).map(function(x){return privateText_(x,80);}),createdAt:asset.createdAt||'',updatedAt:asset.updatedAt||'',
+    deletedAt:asset.deletedAt||null,likesCount:Number(asset.likesCount)||0,forkCount:Number(asset.forkCount)||0,
+    forkedFromId:asset.forkedFromId||null,forkedFromAuthor:asset.forkedFromAuthor||null,linkedAssetIds:asset.linkedAssetIds||[],revision:Number(asset.revision)||1};
+  var serialized=JSON.stringify({summaryVersion:PRIVATE_SUMMARY_VERSION,asset:summary});
+  if(serialized.length>PRIVATE_SUMMARY_MAX_CHARS)apiFail_('PRIVATE_SUMMARY_TOO_LARGE','Owner Work summary exceeds the configured size limit');
+  return serialized;
+}
+
+function privatePresentationMetadata_(value) {
+  if(!value||typeof value!=='object')return null;
+  function strings(items){return (Array.isArray(items)?items:[]).filter(function(x){return typeof x==='string';}).slice(0,12).map(function(x){return privateText_(x,80);});}
+  return {contentTypes:strings(value.contentTypes),appPlatforms:strings(value.appPlatforms),audienceRating:privateText_(value.audienceRating||'general',40),
+    contentWarnings:strings(value.contentWarnings),genres:strings(value.genres),imagePromptToolModel:privateText_(value.imagePromptToolModel||'',120),workStatus:privateText_(value.workStatus||'not_started',40)};
+}
+
+function privateCardCollaboration_(value) {
+  var card=publicCardCollaboration_(value);if(!card)return null;
+  card.name=privateText_(card.name,300);card.sharedTag=privateText_(card.sharedTag,120);
+  card.platforms=(card.platforms||[]).slice(0,12).map(function(x){return privateText_(x,80);});
+  card.deadlines=(card.deadlines||[]).slice(0,20).map(function(x){return {label:privateText_(x.label,80),date:privateText_(x.date,40)};});
+  card.sharedInformation=(card.sharedInformation||[]).slice(0,20);card.participants=(card.participants||[]).slice(0,50);
+  return card;
+}
+
+function assertOwnerSearchIndexFits_(asset) {
+  if(ownerSearchText_(asset).length>PRIVATE_SEARCH_TEXT_MAX_CHARS)
+    apiFail_('SEARCH_INDEX_TOO_LARGE','Work searchable text exceeds the Google Sheets cell limit; save was not written');
+}
+
+function backfillOwnerSummaryIndex_(limit) {
+  var batch=Math.min(20,Math.max(1,Number(limit)||20)),sh=sheet_(config_().privateSheetId);
+  ensurePrivateHeaders_(sh);
+  var rows=objectRows_(sh),pending=rows.filter(function(row){return !privateSummaryReady_(row);}).slice(0,batch),updated=0;
+  pending.forEach(function(row){
+    var record=parse_(row.file_id); // One canonical JSON read per stale row; never write canonical JSON here.
+    var metadata=privateMeta_(record,row.file_id),values=PRIVATE_HEADERS.map(function(key){return metadata[key]===undefined||metadata[key]===null?'':metadata[key];});
+    sh.getRange(row._sheetRow,1,1,PRIVATE_HEADERS.length).setValues([values]);updated++;
+  });
+  var remaining=objectRows_(sh).filter(function(row){return !privateSummaryReady_(row);}).length;
+  return {processed:updated,remaining:remaining,ready:remaining===0,batchLimit:batch};
+}
+
+function verifyOwnerSummaryReadiness_() {
+  var sh=sheet_(config_().privateSheetId);ensurePrivateHeaders_(sh);var rows=objectRows_(sh),invalid=rows.filter(function(row){return !privateSummaryReady_(row);});
+  return {total:rows.length,valid:rows.length-invalid.length,invalid:invalid.length,ready:invalid.length===0,summaryVersion:PRIVATE_SUMMARY_VERSION};
+}
+
+function privateSummaryReady_(row) {
+  var version=row.summary_version===undefined?row.summaryVersion:row.summary_version;
+  var text=row.search_text===undefined?row.searchText:row.search_text;
+  var json=row.summary_json===undefined?row.summaryJson:row.summary_json;
+  if(Number(version)!==PRIVATE_SUMMARY_VERSION||!text)return false;
+  try { var value=JSON.parse(json||'');return value&&value.summaryVersion===PRIVATE_SUMMARY_VERSION&&value.asset&&value.asset.id===row.id; }
+  catch(_error) { return false; }
+}
+
+function ensurePrivateHeaders_(sh) {
+  var last=Math.max(1,sh.getLastColumn()),headers=sh.getRange(1,1,1,last).getValues()[0].map(String),missing=PRIVATE_HEADERS.filter(function(key){return headers.indexOf(key)<0;});
+  if(missing.length)sh.getRange(1,last+1,1,missing.length).setValues([missing]);
 }
 
 function finishCxlPublicProjection_(record,ownerUserId) {
@@ -144,7 +252,7 @@ function isPublic_(r) { return r.visibility==='public' && flag_(r.is_public) && 
 
 function listOwnerIndex_() {
   var c=config_(); if(!c.privateSheetId)return [];
-  return objectRows_(sheet_(c.privateSheetId)).map(function(x){return {id:x.id,title:x.title,category:x.category,status:x.status,visibility:x.visibility,isPublic:flag_(x.is_public),deletedAt:x.deleted_at||null,folderId:x.folder_id||null,tags:JSON.parse(x.tags||'[]'),updatedAt:x.updated_at,revision:Number(x.revision),hasDraft:flag_(x.has_collab_draft),mediaCount:Number(x.media_count)||0,coverRef:x.cover_ref||''};});
+  return objectRows_(sheet_(c.privateSheetId)).map(function(x){return {id:x.id,title:x.title,category:x.category,status:x.status,visibility:x.visibility,isPublic:flag_(x.is_public),deletedAt:x.deleted_at||null,folderId:x.folder_id||null,tags:JSON.parse(x.tags||'[]'),updatedAt:x.updated_at,createdAt:x.created_at||'',userId:x.user_id||'',revision:Number(x.revision),hasDraft:flag_(x.has_collab_draft),mediaCount:Number(x.media_count)||0,coverRef:x.cover_ref||'',summaryJson:x.summary_json||'',summaryVersion:Number(x.summary_version)||0,searchText:normalizeOwnerSearch_(x.search_text||'')};});
 }
 
 function objectRows_(sheet) { var h=sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0]; return values_(sheet).map(function(v,i){var o={_sheetRow:i+2}; h.forEach(function(k,j){o[k]=v[j];}); return o;}); }
@@ -152,8 +260,9 @@ function objectRows_(sheet) { var h=sheet.getRange(1,1,1,sheet.getLastColumn()).
 function parse_(fileId) { return JSON.parse(DriveApp.getFileById(fileId).getBlob().getDataAsString('UTF-8')); }
 
 function privateMeta_(record,fileId) {
-  var r=record.row;
-  return { id:r.id,title:r.title||'',category:r.category||'character',status:r.status||'draft',visibility:r.visibility||'private',is_public:r.is_public===true?'true':'false',deleted_at:r.deleted_at||'',folder_id:r.folder_id||'',tags:JSON.stringify(r.tags||[]),updated_at:r.updated_at||'',revision:record.revision||1,file_id:fileId,has_collab_draft:record.collaborationDraft?'true':'false',media_count:(record.mediaRecords||[]).length,cover_ref:r.preview_image||'',create_request_id:record.createRequestId||'' };
+  var r=record.row,asset=cxlAssetFromRecord_(record);
+  var searchText=ownerSearchText_(asset);if(searchText.length>PRIVATE_SEARCH_TEXT_MAX_CHARS)apiFail_('SEARCH_INDEX_TOO_LARGE','Work searchable text exceeds the Google Sheets cell limit');
+  return { id:r.id,title:r.title||'',category:r.category||'character',status:r.status||'draft',visibility:r.visibility||'private',is_public:r.is_public===true?'true':'false',deleted_at:r.deleted_at||'',folder_id:r.folder_id||'',tags:JSON.stringify(r.tags||[]),updated_at:r.updated_at||'',revision:record.revision||1,file_id:fileId,has_collab_draft:record.collaborationDraft?'true':'false',media_count:(record.mediaRecords||[]).length,cover_ref:r.preview_image||'',create_request_id:record.createRequestId||'',user_id:r.user_id||asset.userId||'',created_at:r.created_at||asset.createdAt||'',summary_json:privateSummaryJson_(record),summary_version:PRIVATE_SUMMARY_VERSION,search_text:searchText };
 }
 
 function privatePublicCreatorId_(ownerUserId) {
@@ -307,6 +416,7 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
     rejectUnsupportedWorkMedia_(asset,existingAsset);
   }
   validateOwnerFolder_(asset.folderId,ownerUserId);
+  assertOwnerSearchIndexFits_(asset);
   var request={operation:operation,requestId:requestId,fingerprint:fingerprint,revision:operation==='update'?Number(options.expectedRevision):0,createRequestId:operation==='create'?requestId:''};
   var saved=saveOwnerWork_(cxlRowInput_(asset,ownerUserId,request),{deferPublicSync:true,idempotent:true});
   record=getOwnerWork_(saved.id);finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(getOwnerWork_(saved.id));

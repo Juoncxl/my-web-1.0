@@ -130,6 +130,15 @@ describe('asset selectors', () => {
     }).map(asset => asset.id)).toEqual(['matching']);
   });
 
+  it('does not re-run full-text filtering on compact rows already matched by the Owner server index', () => {
+    const summary = makeAsset({ content: '', contentBlocks: [], uiCodeSnippet: '', title: 'Compact card title' });
+    expect(selectFilteredAssets([summary], {
+      activeView: 'vault', activeVaultTab: 'my_assets', bookmarkedAssetIds: [], recentlyViewedIds: [], currentUserId: 'owner-1',
+      selectedCategory: 'all', selectedTag: null, selectedFolderId: 'all', selectedStatusFilter: 'all', visibilityFilter: 'all',
+      searchQuery: 'term-in-indexed-content', searchAlreadyApplied: true
+    })).toEqual([summary]);
+  });
+
   it('treats App / Platform as a cross-category view without losing legacy app data', () => {
     const platformMetadata = (appPlatforms: string[]) => ({
       contentTypes: [], appPlatforms, audienceRating: 'general' as const, contentWarnings: [], genres: [], imagePromptToolModel: '', workStatus: 'not_started' as const

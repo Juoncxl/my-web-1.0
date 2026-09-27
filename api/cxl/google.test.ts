@@ -82,6 +82,17 @@ describe('Vercel Google Works read proxy', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).authorization).toBe('server-only-secret');
   });
 
+  it('sends Owner list search to GAS and does not re-filter compact summaries in Vercel', async () => {
+    const indexedMatch = makeAsset('indexed-match', { title: 'Compact title', content: '', tags: [] });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: [indexedMatch], error: null } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1', search: 'needle-in-canonical-content', detail: 'summary' }] }, 'Bearer owner-session');
+
+    expect(result.statusCode).toBe(200);
+    expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['indexed-match']);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).args[0].search).toBe('needle-in-canonical-content');
+  });
+
   it('refuses owner scope without a verified user token', async () => {
     const result = await invoke({ action: 'works.fetch', args: [{ userId: 'owner-1' }] });
     expect(result.statusCode).toBe(401);
