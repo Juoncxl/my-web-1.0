@@ -62,6 +62,27 @@ describe('Creator Work canonical serializer', () => {
     ]);
   });
 
+  it('converts hydrated Google proxy sources back to media refs before Work persistence', () => {
+    const iconId = '123e4567-e89b-42d3-a456-426614174011';
+    const galleryId = '123e4567-e89b-42d3-a456-426614174012';
+    const blockId = '123e4567-e89b-42d3-a456-426614174013';
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const proxy = (id: string) => `/api/cxl/media?scope=owner&workId=${workId}&ref=media%3A${id}`;
+    const result = serialize({
+      icon: { type: 'image', value: proxy(iconId), mediaId: iconId, mimeType: 'image/png' },
+      mediaDraft: { items: [createMediaItem(proxy(galleryId), 'image/png', 'gallery-item', galleryId)], coverId: 'gallery-item' },
+      coverImage: proxy(galleryId), previewImages: [proxy(galleryId)],
+      contentBlocks: [{ id: 'image-block', type: 'Image', title: 'Image', body: proxy(blockId), mediaId: blockId }]
+    });
+
+    expect(result.icon.value).toBe(`media:${iconId}`);
+    expect(result.previewImage).toBe(`media:${galleryId}`);
+    expect(result.previewImages).toEqual([`media:${galleryId}`]);
+    expect(result.contentBlocks[0].body).toBe(`media:${blockId}`);
+    expect(result.workMediaDraft).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('/api/cxl/media');
+  });
+
   it('does not create standard Work upload descriptors for Collaboration drafts', () => {
     const result = serialize({
       workMode: 'collab',

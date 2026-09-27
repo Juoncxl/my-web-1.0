@@ -11,7 +11,7 @@ import {
 } from '../../../lib/workMedia';
 import { callGoogleBackend } from './googleTransport';
 import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
-import { prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
+import { hydrateGoogleWorkMediaResult, prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
 
 type Operation = (...args: any[]) => any;
 const remote = <T extends Operation>(action: string): T =>
@@ -47,7 +47,10 @@ async function saveGoogleWork<T>(action: 'works.create' | 'works.update', idOrAs
 /** Inactive Google implementation of the current CXL data contract. */
 export const googleDataAdapter = {
   works: {
-    fetch: remote<CxlDataService['works']['fetch']>('works.fetch'),
+    fetch: (async (...args: Parameters<CxlDataService['works']['fetch']>) => {
+      const result = await callGoogleBackend<Awaited<ReturnType<CxlDataService['works']['fetch']>>>('works.fetch', args);
+      return hydrateGoogleWorkMediaResult(result);
+    }) as CxlDataService['works']['fetch'],
     create: ((asset, options) => saveGoogleWork('works.create', asset as GoogleWorkAssetInput, options)) as CxlDataService['works']['create'],
     update: ((id, updates, options) => saveGoogleWork('works.update', id, updates, options)) as CxlDataService['works']['update'],
     softDelete: remote<CxlDataService['works']['softDelete']>('works.softDelete'),

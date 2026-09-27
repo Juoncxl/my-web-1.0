@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { prepareGoogleWorkMedia, uploadGoogleWorkMedia, GOOGLE_WORK_MEDIA_CHUNK_BYTES } from './googleWorkMedia';
+import { hydrateGoogleWorkMedia, prepareGoogleWorkMedia, uploadGoogleWorkMedia, GOOGLE_WORK_MEDIA_CHUNK_BYTES } from './googleWorkMedia';
 
 vi.mock('../../../lib/supabaseClient', () => ({
   getSupabaseClient: () => ({ auth: { getSession: async () => ({ data: { session: null } }) } })
@@ -57,6 +57,58 @@ describe('Google standard Work media upload foundation', () => {
     });
     expect(prepared.asset.contentBlocks?.[0].body).toBe(remote);
     expect(prepared.pending).toEqual([]);
+  });
+
+  it('hydrates standard Work proxy media for reloads and maps hydrated sources back to canonical refs', async () => {
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const asset = {
+      id: workId, userId: 'owner', title: 'Hydrated Work', authorName: 'Owner',
+      icon: { type: 'image' as const, value: `media:${IDS.icon}`, mediaId: IDS.icon },
+      category: 'prompts' as const, content: `Example media:${IDS.block}`,
+      contentBlocks: [{ id: 'block-1', type: 'Image' as const, title: 'Example', body: `media:${IDS.block}`, mediaId: IDS.block }],
+      previewImage: `media:${IDS.gallery}`, previewImages: [`media:${IDS.gallery}`], media: [
+        { id: IDS.icon, assetId: workId, storagePath: `google-work-media/${IDS.icon}`, purpose: 'icon' as const,
+          mimeType: 'image/png', fileSize: 8, sortOrder: 0, isCover: false, delivery: 'vercel_proxy' as const },
+        { id: IDS.gallery, assetId: workId, storagePath: `google-work-media/${IDS.gallery}`, purpose: 'gallery' as const,
+          mimeType: 'image/webp', fileSize: 8, sortOrder: 0, isCover: true, delivery: 'vercel_proxy' as const },
+        { id: IDS.block, assetId: workId, storagePath: `google-work-media/${IDS.block}`, purpose: 'prompt_example' as const,
+          contextId: 'block-1', mimeType: 'image/png', fileSize: 8, sortOrder: 0, isCover: false, delivery: 'vercel_proxy' as const }
+      ],
+      isPublic: false, visibility: 'private' as const, status: 'draft' as const, createdAt: '', updatedAt: '', tags: []
+    };
+    const hydrated = hydrateGoogleWorkMedia(asset);
+    const iconUrl = hydrated.icon.type === 'image' ? hydrated.icon.value : '';
+    const galleryUrl = hydrated.previewImages?.[0] || '';
+    const blockUrl = hydrated.contentBlocks?.[0]?.body || '';
+    expect(iconUrl).toContain('scope=owner');
+    expect(iconUrl).toContain(`ref=media%3A${IDS.icon}`);
+    expect(galleryUrl).toContain(`ref=media%3A${IDS.gallery}`);
+    expect(hydrated.previewImage).toBe(galleryUrl);
+    expect(blockUrl).toContain(`ref=media%3A${IDS.block}`);
+    expect(asset.icon.value).toBe(`media:${IDS.icon}`);
+    expect(asset.previewImage).toBe(`media:${IDS.gallery}`);
+
+    const prepared = await prepareGoogleWorkMedia(hydrated);
+    expect(prepared.asset.icon).toMatchObject({ value: `media:${IDS.icon}`, mediaId: IDS.icon });
+    expect(prepared.asset.previewImages).toEqual([`media:${IDS.gallery}`]);
+    expect(prepared.asset.previewImage).toBe(`media:${IDS.gallery}`);
+    expect(prepared.asset.contentBlocks?.[0]).toMatchObject({ body: `media:${IDS.block}`, mediaId: IDS.block });
+    expect(prepared.asset.content).toBe(`Example media:${IDS.block}`);
+    expect(prepared.pending).toEqual([]);
+  });
+
+  it('does not proxy Collaboration media or non-proxy legacy media records', () => {
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const asset = {
+      id: workId, userId: 'owner', title: 'Legacy', authorName: 'Owner',
+      icon: { type: 'image' as const, value: 'media:legacy-id', mediaId: 'legacy-id' },
+      category: 'prompts' as const, content: '', contentBlocks: [], previewImage: 'media:legacy-id',
+      previewImages: ['media:legacy-id'], media: [{ id: 'legacy-id', assetId: workId, storagePath: 'legacy/path',
+        purpose: 'gallery' as const, mimeType: 'image/png', fileSize: 8, sortOrder: 0, isCover: true }],
+      isPublic: true, visibility: 'public' as const, status: 'finished' as const, createdAt: '', updatedAt: '', tags: []
+    };
+    expect(hydrateGoogleWorkMedia(asset)).toEqual(asset);
+    expect(hydrateGoogleWorkMedia({ ...asset, category: 'collab' })).toEqual({ ...asset, category: 'collab' });
   });
 
   it('does not prepare Collaboration media for the standard Work upload route', async () => {

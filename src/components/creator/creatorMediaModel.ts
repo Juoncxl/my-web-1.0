@@ -1,3 +1,5 @@
+import type { AssetMediaRecord } from '../../types';
+
 /**
  * Composer-local unified media draft.
  *
@@ -62,7 +64,7 @@ export function createMediaItem(
   return { id, src, ...(mediaId ? { mediaId } : {}), kind: getCreatorMediaKind(mimeType, src), mimeType };
 }
 
-export function createMediaDraftFromLegacy(input: { previewImages?: string[]; previewImage?: string }): CreatorMediaDraft {
+export function createMediaDraftFromLegacy(input: { previewImages?: string[]; previewImage?: string; media?: AssetMediaRecord[] }): CreatorMediaDraft {
   const legacyCover = (input.previewImage || '').trim();
   const sources = [...(input.previewImages || [])];
   if (legacyCover && !sources.includes(legacyCover)) sources.unshift(legacyCover);
@@ -72,8 +74,12 @@ export function createMediaDraftFromLegacy(input: { previewImages?: string[]; pr
 
   const items = sources
     .filter((src, index) => Boolean(src) && sources.indexOf(src) === index)
-    .map((src, index) => createMediaItem(src, undefined, `legacy-media-${index}`,
-      src.startsWith('media:') ? src.slice('media:'.length) : isLocalMediaSource(src) ? createStableMediaId_() : undefined));
+    .map((src, index) => {
+      const refId = src.startsWith('media:') ? src.slice('media:'.length) : '';
+      const proxyRecord = input.media?.find(item => item.delivery === 'vercel_proxy' && item.signedUrl === src && item.purpose === 'gallery');
+      return createMediaItem(src, proxyRecord?.mimeType, `legacy-media-${index}`,
+        refId || proxyRecord?.id || (isLocalMediaSource(src) ? createStableMediaId_() : undefined));
+    });
   const coverItem = legacyCover ? items.find(item => item.src === legacyCover) : undefined;
   return { items, coverId: coverItem?.id || items[0]?.id || null };
 }

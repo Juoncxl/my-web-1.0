@@ -307,7 +307,7 @@ export function createCreatorWorkDraftFromAsset(asset: Asset): CreatorWorkDraft 
     uiCodeSnippet: contentBlocks.find(block => block.type === 'UI Code')?.body || '',
     previewImages: asset.previewImages?.length ? [...asset.previewImages] : (asset.previewImage ? [asset.previewImage] : []),
     coverImage: asset.previewImage || '',
-    mediaDraft: createMediaDraftFromLegacy({ previewImages: asset.previewImages, previewImage: asset.previewImage }),
+    mediaDraft: createMediaDraftFromLegacy({ previewImages: asset.previewImages, previewImage: asset.previewImage, media: asset.media }),
     tags: [...(asset.tags || [])],
     appPlatforms: [...(asset.presentationMetadata?.appPlatforms || [])],
     audienceRating: asset.presentationMetadata?.audienceRating || 'general',

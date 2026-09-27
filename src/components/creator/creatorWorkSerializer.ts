@@ -11,6 +11,7 @@ import type {
 import { CREATOR_CONTENT_TYPE_META } from './creatorContentModel';
 import type { CreatorMediaDraft } from './creatorMediaModel';
 import type { StandardWorkMediaDraft } from '../../lib/workMedia';
+import { mediaReference } from '../../lib/workMedia';
 import {
   cloneCreatorCollaborationDraft,
   createPublicCollaborationSnapshot,
@@ -46,6 +47,19 @@ export interface SerializableCreatorWorkDraft {
 
 function isLocalMediaSource(value: string): boolean {
   return /^data:image\//i.test(value) || /^blob:/i.test(value);
+}
+
+function canonicalProxyMediaSource(value: string, mediaId?: string): string {
+  if (isLocalMediaSource(value) || value.startsWith('media:')) return value;
+  if (!mediaId) return value;
+  try {
+    const url = new URL(value, 'https://cxl.invalid');
+    const params = url.searchParams;
+    return url.pathname === '/api/cxl/media'
+      && ['owner', 'public'].includes(params.get('scope') || '')
+      && params.get('ref') === mediaReference(mediaId)
+      ? mediaReference(mediaId) : value;
+  } catch { return value; }
 }
 
 export type CreatorWorkAssetFields = Pick<Asset,
@@ -86,7 +100,14 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
   const contentTypes = [...draft.contentTypes];
   const regularBlocks = draft.contentBlocks
     .filter(block => !isPublicCollabContentBlock(block))
-    .map(block => ({ ...block }));
+    .map(block => block.type === 'Image'
+      ? { ...block, body: canonicalProxyMediaSource(block.body, block.mediaId) }
+      : { ...block });
+  const canonicalGallerySource = (source: string) => {
+    const item = draft.mediaDraft?.items.find(candidate => candidate.src === source);
+    return canonicalProxyMediaSource(source, item?.mediaId);
+  };
+  const coverItem = draft.mediaDraft?.items.find(item => item.src === draft.coverImage);
   const workMediaDraft: StandardWorkMediaDraft[] = [];
   if (!isCollaboration) {
     if (draft.icon.type === 'image' && isLocalMediaSource(draft.icon.value) && draft.icon.mediaId) {
@@ -109,7 +130,9 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
 
   return {
     title,
-    icon: { ...draft.icon },
+    icon: draft.icon.type === 'image'
+      ? { ...draft.icon, value: canonicalProxyMediaSource(draft.icon.value, draft.icon.mediaId) }
+      : { ...draft.icon },
     category: isCollaboration ? 'collab' : contentTypesToCategory(contentTypes),
     shortDescription: draft.description.trim(),
     contentTypeLabels: contentTypes.map(type => CREATOR_CONTENT_TYPE_META.find(option => option.value === type)?.label || type),
@@ -129,8 +152,8 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
     contentBlocks: regularBlocks,
     content: draft.content,
     uiCodeSnippet: draft.uiCodeSnippet,
-    previewImage: draft.coverImage || '',
-    previewImages: [...draft.previewImages],
+    previewImage: draft.coverImage ? canonicalProxyMediaSource(draft.coverImage, coverItem?.mediaId) : '',
+    previewImages: draft.previewImages.map(canonicalGallerySource),
     folderId: draft.folderId,
     isPublic: draft.visibility === 'public',
     visibility: draft.visibility,

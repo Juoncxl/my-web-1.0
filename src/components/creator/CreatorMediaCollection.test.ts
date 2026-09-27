@@ -43,6 +43,17 @@ describe('Creator Composer unified media draft', () => {
     expect(draft.items[2].mediaId).toBeUndefined();
   });
 
+  it('restores gallery media identity from a hydrated Google proxy URL after reload', () => {
+    const mediaId = '123e4567-e89b-42d3-a456-426614174004';
+    const source = `/api/cxl/media?scope=owner&workId=asset_1234567890abcdef1234567890abcdef&ref=media%3A${mediaId}`;
+    const draft = createMediaDraftFromLegacy({ previewImages: [source], previewImage: source, media: [{
+      id: mediaId, assetId: 'asset_1234567890abcdef1234567890abcdef', storagePath: `google-work-media/${mediaId}`,
+      purpose: 'gallery', mimeType: 'image/png', fileSize: 68, sortOrder: 0, isCover: true,
+      delivery: 'vercel_proxy', signedUrl: source
+    }] });
+    expect(draft.items[0]).toMatchObject({ src: source, mediaId, mimeType: 'image/png' });
+  });
+
   it('accepts static images for new global media while preserving legacy GIF records', () => {
     const image = createMediaItem('data:image/png;base64,image', 'image/png', 'one');
     const gif = createMediaItem('data:image/gif;base64,gif', 'image/gif', 'two');
@@ -140,7 +151,8 @@ describe('Creator Composer unified media draft', () => {
     expect(draft.items.map(item => item.src)).toEqual(['gallery-one', 'cover', 'gallery-two']);
     expect(getCoverMedia(draft)?.src).toBe('cover');
     expect(appSource).toContain('serializeCreatorWorkDraft');
-    expect(readFileSync(new URL('./creatorWorkSerializer.ts', import.meta.url), 'utf8')).toContain("previewImage: draft.coverImage || ''");
+    expect(readFileSync(new URL('./creatorWorkSerializer.ts', import.meta.url), 'utf8'))
+      .toContain('previewImage: draft.coverImage ? canonicalProxyMediaSource');
   });
 
   it('keeps media order and cover selection immutable across updates', () => {

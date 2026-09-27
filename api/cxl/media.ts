@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleMediaPoc } from '../../src/server/cxlMediaPoc.js';
+import { handleGoogleWorkMediaRead } from '../../src/server/cxlGoogleWorkMedia.js';
 export { mediaPocLimits } from '../../src/server/cxlMediaPoc.js';
 
 type Request = IncomingMessage & { body?: unknown; url?: string };
@@ -121,6 +122,11 @@ export default async function handler(req: Request, res: Response) {
     }
     return handleMediaPoc(req, res);
   }
+
+  // Google Work media references opt into the private, association-checked
+  // proxy with an explicit scope. Legacy media continues through its existing
+  // public icon route unchanged.
+  if (params.has('scope')) return handleGoogleWorkMediaRead(req, res);
 
   return publicIconHandler(req, res);
 }

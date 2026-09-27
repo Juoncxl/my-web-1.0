@@ -18,7 +18,8 @@ function sha256(bytes: Uint8Array): string {
 function makeWorkMediaBridge() {
   const properties = new Map<string, string>([
     ['CXL_API_SHARED_SECRET', 'test-secret'], ['CXL_OWNER_USER_ID', OWNER_ID],
-    ['CXL_WORK_MEDIA_FOLDER_ID', 'canonical'], ['CXL_WORK_MEDIA_STAGING_FOLDER_ID', 'staging']
+    ['CXL_WORK_MEDIA_FOLDER_ID', 'canonical'], ['CXL_WORK_MEDIA_STAGING_FOLDER_ID', 'staging'],
+    ['PUBLIC_SHEET_ID', 'public-index']
   ]);
   let nextFileId = 0;
   class FakeFile {
@@ -72,6 +73,16 @@ function makeWorkMediaBridge() {
       base64Encode: (value: ArrayLike<number>) => Buffer.from(Array.from(value, item => Number(item) & 255)).toString('base64'),
       newBlob: (value: ArrayLike<number>, mimeType: string, name: string) => ({ getBytes: () => Array.from(value, item => Number(item) & 255), mimeType, name })
     },
+    ScriptApp: { getOAuthToken: () => 'test-access-token' },
+    UrlFetchApp: { fetch: (url: string, options: { headers?: Record<string, string> }) => {
+      const fileId = decodeURIComponent(url.split('/files/')[1]?.split('?')[0] || '');
+      const file = Array.from(folders.values()).flatMap(folder => folder.files).find(item => item.id === fileId);
+      if (!file) throw new Error('missing file');
+      const range = options.headers?.Range?.match(/^bytes=(\d+)-(\d+)$/);
+      if (!range) throw new Error('missing range');
+      const bytes = file.bytes.slice(Number(range[1]), Number(range[2]) + 1);
+      return { getResponseCode: () => 206, getContent: () => bytes };
+    } },
     DriveApp: {
       Access: { PRIVATE: 'private', ANYONE_WITH_LINK: 'anyone' }, Permission: { VIEW: 'view' },
       getFolderById: (id: string) => { const folder = folders.get(String(id)); if (!folder) throw new Error('missing folder'); return folder; },
@@ -163,5 +174,70 @@ describe('API-only Owner standard Work media foundation', () => {
 
     expect(projection.mediaRecords).toMatchObject([{ id: blockMediaId, purpose: 'prompt_example', delivery: 'vercel_proxy', storage_path: null, drive_file_id: null, drive_url: null }]);
     expect(JSON.stringify(projection)).not.toMatch(/private-drive-id|private-drive-url/);
+  });
+
+  it('reads an attached private Work chunk only through the Work reference and private Drive file', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const file = folders.get('canonical')!.createFile({ name: 'read.png', getBytes: () => [...bytes] });
+    file.setSharing('private');
+    const icon = { type: 'image', value: `media:${MEDIA_ID}`, mediaId: MEDIA_ID };
+    const media = { id: MEDIA_ID, asset_id: WORK_ID, drive_file_id: file.getId(), delivery: 'vercel_proxy',
+      purpose: 'icon', context_id: null, file_size: bytes.length };
+    const asset = { id: WORK_ID, icon, previewImage: '', previewImages: [], contentBlocks: [] };
+    const record = { row: { id: WORK_ID, user_id: OWNER_ID, visibility: 'private', is_public: false,
+      deleted_at: '', updated_at: '2026-09-28T00:00:00.000Z', icon, preview_image: '', preview_images: [], content_blocks: [] },
+      cxlAsset: asset, mediaRecords: [media] };
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ mediaId: MEDIA_ID, workId: WORK_ID,
+      ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: bytes.length, mimeType: 'image/png', sha256: sha256(bytes),
+      purpose: 'icon', contextId: null, sortOrder: 0, isCover: false, totalChunks: 1, delivery: 'vercel_proxy', state: 'attached' }));
+    context.getOwnerWork_ = () => record;
+
+    const result = context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, false);
+    expect(result).toMatchObject({ workId: WORK_ID, mediaId: MEDIA_ID, mimeType: 'image/png', totalChunks: 1, chunkIndex: 0,
+      base64: Buffer.from(bytes).toString('base64') });
+    expect(JSON.stringify(result)).not.toContain(file.getId());
+    expect(file.getSharingAccess()).toBe('private');
+    const privateSummary = JSON.parse(context.privateSummaryJson_(record)).asset;
+    expect(privateSummary.media).toMatchObject([{ id: MEDIA_ID, purpose: 'icon', delivery: 'vercel_proxy' }]);
+    expect(JSON.stringify(privateSummary)).not.toContain(file.getId());
+  });
+
+  it('requires the current public projection to contain the same Work media association', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const file = folders.get('canonical')!.createFile({ name: 'public-read.png', getBytes: () => [...bytes] });
+    file.setSharing('private');
+    const icon = { type: 'image', value: `media:${MEDIA_ID}`, mediaId: MEDIA_ID };
+    const media = { id: MEDIA_ID, asset_id: WORK_ID, drive_file_id: file.getId(), delivery: 'vercel_proxy',
+      purpose: 'icon', context_id: null, file_size: bytes.length };
+    const asset = { id: WORK_ID, icon, previewImage: '', previewImages: [], contentBlocks: [] };
+    const record = { row: { id: WORK_ID, user_id: OWNER_ID, visibility: 'public', is_public: true,
+      deleted_at: '', updated_at: '2026-09-28T00:00:00.000Z', icon, preview_image: '', preview_images: [], content_blocks: [] },
+      cxlAsset: asset, mediaRecords: [media] };
+    const projection = { id: WORK_ID, updated_at: record.row.updated_at, cxlAsset: asset,
+      mediaRecords: [{ id: MEDIA_ID, delivery: 'vercel_proxy', purpose: 'icon' }] };
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ mediaId: MEDIA_ID, workId: WORK_ID,
+      ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: bytes.length, mimeType: 'image/png', sha256: sha256(bytes),
+      purpose: 'icon', contextId: null, sortOrder: 0, isCover: false, totalChunks: 1, delivery: 'vercel_proxy', state: 'attached' }));
+    context.getOwnerWork_ = () => record;
+    context.sheet_ = () => ({});
+    context.rowById_ = () => ({ active: 'true', updated_at: record.row.updated_at, file_id: 'public-projection' });
+    context.parse_ = () => projection;
+
+    const result = context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, true);
+    expect(result).toMatchObject({ workId: WORK_ID, mediaId: MEDIA_ID, totalChunks: 1 });
+    const publicSummary = context.publicSummaryEnvelope_(projection).asset;
+    expect(publicSummary.media).toMatchObject([{ id: MEDIA_ID, delivery: 'vercel_proxy' }]);
+    expect(JSON.stringify(publicSummary)).not.toContain(file.getId());
+
+    context.rowById_ = () => ({ active: 'false', updated_at: record.row.updated_at, file_id: 'public-projection' });
+    expect(() => context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, true))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
+
+    context.rowById_ = () => ({ active: 'true', updated_at: record.row.updated_at, file_id: 'public-projection' });
+    context.parse_ = () => ({ ...projection, cxlAsset: { ...asset, icon: { type: 'emoji', value: '✨' } } });
+    expect(() => context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, true))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
   });
 });

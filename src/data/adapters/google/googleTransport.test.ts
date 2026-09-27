@@ -31,12 +31,30 @@ describe('Google server transport boundary', () => {
   });
 
   it('exposes public creator Works lookup through the existing Works fetch contract', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, data: { data: [], error: null } }) });
+    const iconId = '123e4567-e89b-42d3-a456-426614174031';
+    const galleryId = '123e4567-e89b-42d3-a456-426614174032';
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const iconUrl = `/api/cxl/media?scope=public&workId=${workId}&ref=media%3A${iconId}`;
+    const galleryUrl = `/api/cxl/media?scope=public&workId=${workId}&ref=media%3A${galleryId}`;
+    const work = { id: workId, userId: 'public-owner', authorName: 'Creator', title: 'Public Work',
+      icon: { type: 'image', value: `media:${iconId}`, mediaId: iconId }, category: 'character', content: '', contentBlocks: [],
+      previewImage: `media:${galleryId}`, previewImages: [`media:${galleryId}`], media: [
+        { id: iconId, assetId: workId, storagePath: `google-work-media/${iconId}`, purpose: 'icon', mimeType: 'image/png',
+          fileSize: 8, sortOrder: 0, isCover: false, delivery: 'vercel_proxy' },
+        { id: galleryId, assetId: workId, storagePath: `google-work-media/${galleryId}`, purpose: 'gallery', mimeType: 'image/png',
+          fileSize: 8, sortOrder: 0, isCover: true, delivery: 'vercel_proxy' }
+      ], isPublic: true, visibility: 'public', status: 'finished',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z', tags: [] };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200,
+      json: async () => ({ ok: true, data: { data: [work], error: null } }) });
     vi.stubGlobal('fetch', fetchMock);
-    await googleDataAdapter.works.fetch({ creatorSlug: 'creator-one', publicOnly: true });
+    const result = await googleDataAdapter.works.fetch({ creatorSlug: 'creator-one', publicOnly: true });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
       action: 'works.fetch', args: [{ creatorSlug: 'creator-one', publicOnly: true }]
     });
+    expect(result.data?.[0].icon.value).toBe(iconUrl);
+    expect(result.data?.[0].previewImage).toBe(galleryUrl);
+    expect(result.data?.[0].previewImages).toEqual([galleryUrl]);
   });
 
   it('sends Owner write and folder requests with the current session token but no server secret', async () => {

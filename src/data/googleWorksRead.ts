@@ -64,8 +64,10 @@ function toSummaryAsset(asset: Asset): Asset {
       : '';
   const parsedUpdatedAt = asset.updatedAt ? Date.parse(asset.updatedAt) : Number.NaN;
   const cacheVersion = Number.isFinite(parsedUpdatedAt) ? String(parsedUpdatedAt) : undefined;
+  const proxyIcon = Boolean(iconMedia?.delivery === 'vercel_proxy');
   const iconUrl = iconRef
     ? `/api/cxl/media?${new URLSearchParams({ workId: asset.id, ref: iconRef,
+      ...(proxyIcon ? { scope: isPublic(asset) ? 'public' : 'owner' } : {}),
       ...(cacheVersion !== undefined ? { v: cacheVersion } : {}) }).toString()}`
     : '';
   const safeIcon = asset.icon?.type === 'image' && iconMedia?.signedUrl

@@ -48,6 +48,8 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
   const ids = new Set<string>();
   const pending: GooglePendingWorkMedia[] = [];
   const byMediaId = new Map<string, StandardWorkMediaDraft>();
+  const attachedMediaIdForSource = (source: string): string | undefined =>
+    asset.media?.find(item => item.delivery === 'vercel_proxy' && item.signedUrl === source)?.id;
 
   for (const draft of drafts) {
     if (!validUuid(draft.mediaId) || ids.has(draft.mediaId)) throw new Error('รายการรูปมี media identity ไม่ถูกต้อง');
@@ -62,7 +64,7 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
   }
 
   const toReference = (source: string, mediaId?: string): string => {
-    const id = mediaId || (source.startsWith('media:') ? source.slice('media:'.length) : '');
+    const id = mediaId || (source.startsWith('media:') ? source.slice('media:'.length) : '') || attachedMediaIdForSource(source) || '';
     if (isInlineMediaUrl(source)) {
       const upload = id ? byMediaId.get(id) : undefined;
       if (!upload || upload.source !== source) throw new Error('รูปใน Work ไม่มี media identity ที่คงที่');
@@ -120,6 +122,75 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 export interface GoogleWorkMediaUploadOptions {
   workId: string;
+}
+
+function mediaIdFromRef(value: string | undefined): string | null {
+  const match = typeof value === 'string' ? value.match(/^media:([A-Za-z0-9_-]{1,128})$/) : null;
+  return match?.[1] || null;
+}
+
+export function googleWorkMediaProxyUrl(workId: string, mediaId: string, scope: 'owner' | 'public'): string {
+  const params = new URLSearchParams({ scope, workId, ref: mediaReference(mediaId) });
+  return `/api/cxl/media?${params.toString()}`;
+}
+
+/** Convert only attached standard Work proxy media into display URLs in a read object. */
+export function hydrateGoogleWorkMedia(asset: Asset): Asset {
+  if (asset.category === 'collab') return asset;
+  const scope = asset.visibility === 'public' && asset.isPublic === true && !asset.deletedAt ? 'public' : 'owner';
+  const records = (asset.media || []).filter(item => item.delivery === 'vercel_proxy'
+    && item.assetId === asset.id && ['icon', 'gallery', 'prompt_example'].includes(item.purpose));
+  if (!records.length) return asset;
+
+  const urlFor = (id: string | null, purpose: 'icon' | 'gallery' | 'prompt_example', contextId?: string) => {
+    if (!id) return undefined;
+    const item = records.find(record => record.id === id && record.purpose === purpose
+      && (purpose !== 'prompt_example' || record.contextId === contextId));
+    return item ? googleWorkMediaProxyUrl(asset.id, item.id, scope) : undefined;
+  };
+  const media = (asset.media || []).map(item => {
+    const signedUrl = item.delivery === 'vercel_proxy' && item.assetId === asset.id
+      && ['icon', 'gallery', 'prompt_example'].includes(item.purpose)
+      ? googleWorkMediaProxyUrl(asset.id, item.id, scope) : item.signedUrl;
+    return signedUrl ? { ...item, signedUrl } : item;
+  });
+
+  const iconId = asset.icon?.type === 'image'
+    ? asset.icon.mediaId || mediaIdFromRef(asset.icon.value)
+    : null;
+  const iconUrl = urlFor(iconId, 'icon');
+  const previewImages = asset.previewImages?.map(source => {
+    const id = mediaIdFromRef(source);
+    return urlFor(id, 'gallery') || source;
+  });
+  const previewImageId = mediaIdFromRef(asset.previewImage);
+  const coverRecord = records.find(item => item.purpose === 'gallery' && item.isCover);
+  const previewImage = urlFor(previewImageId, 'gallery')
+    || (!asset.previewImage && coverRecord ? urlFor(coverRecord.id, 'gallery') : undefined)
+    || asset.previewImage;
+  const contentBlocks = asset.contentBlocks?.map(block => {
+    if (block.type !== 'Image') return block;
+    const id = block.mediaId || mediaIdFromRef(block.body);
+    const imageUrl = urlFor(id, 'prompt_example', block.id);
+    return imageUrl ? { ...block, body: imageUrl, mediaId: id || undefined } : block;
+  });
+
+  return {
+    ...asset,
+    media,
+    icon: iconUrl && asset.icon?.type === 'image'
+      ? { ...asset.icon, value: iconUrl, mediaId: iconId || undefined,
+        mimeType: records.find(item => item.id === iconId)?.mimeType || asset.icon.mimeType }
+      : asset.icon,
+    ...(previewImages ? { previewImages } : {}),
+    ...(previewImage !== undefined ? { previewImage } : {}),
+    ...(contentBlocks ? { contentBlocks } : {})
+  };
+}
+
+export function hydrateGoogleWorkMediaResult<T extends { data?: Asset[] | null }>(result: T): T {
+  if (!Array.isArray(result.data)) return result;
+  return { ...result, data: result.data.map(hydrateGoogleWorkMedia) };
 }
 
 /** Upload one file at a time, with one <=2 MiB chunk request in flight. */

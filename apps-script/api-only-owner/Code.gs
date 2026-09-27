@@ -15,6 +15,7 @@ var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDe
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
 var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update',
   'media.upload.begin','media.upload.chunk','media.upload.finalize',
+  'media.work.ownerChunk','media.work.publicChunk',
   'media.poc.begin','media.poc.chunk','media.poc.finalize','media.poc.setPublic',
   'media.poc.ownerChunk','media.poc.publicChunk','media.poc.readDiagnostics','media.poc.cleanup'];
 var API_MAX_POST_CHARS_ = 5000000;
@@ -90,6 +91,10 @@ function doPost(e) {
       return apiJson_({ok:true,data:saveCxlWorkApi_('update',{id:args[0],updates:args[1]},args[2],configuredOwner)});
     if(body.action.indexOf('media.upload.')===0) {
       return apiJson_({ok:true,data:mediaWorkUploadDispatch_(body.action,args,configuredOwner)});
+    }
+    if(body.action==='media.work.ownerChunk'||body.action==='media.work.publicChunk') {
+      if(args.length!==1)return apiJson_({ok:false,error:'Invalid Work media read request',code:'INVALID_MEDIA_READ_REQUEST',httpStatus:400});
+      return apiJson_({ok:true,data:mediaWorkReadChunk_(args[0],configuredOwner,body.action==='media.work.publicChunk')});
     }
     if(body.action.indexOf('media.poc.')===0) {
       var mediaResult=mediaPocDispatch_(body.action,args,configuredOwner);
@@ -756,13 +761,18 @@ function privateSummaryJson_(record) {
   } else if(icon&&typeof icon.value==='string') icon={type:icon.type,value:privateText_(icon.value,96)};
   var previewImage=compactOwnerRef_(asset.previewImage||'');
   var previewImages=(asset.previewImages||[]).map(compactOwnerRef_).filter(Boolean).slice(0,6);
+  var coverMediaId=previewImage.indexOf('media:')===0?previewImage.slice(6):'';
+  var media=(asset.media||[]).filter(function(item){return item&&((item.purpose==='icon')||!!item.isCover||String(item.id||'')===coverMediaId);})
+    .slice(0,7).map(function(item){return {id:String(item.id||''),assetId:String(item.assetId||asset.id||''),purpose:String(item.purpose||''),
+      contextId:item.contextId||null,mimeType:item.mimeType||'',fileSize:Number(item.fileSize||0),sortOrder:Number(item.sortOrder||0),
+      isCover:!!item.isCover,delivery:item.delivery==='vercel_proxy'?'vercel_proxy':undefined};});
   var summary={id:asset.id,userId:asset.userId,publicCreatorId:asset.publicCreatorId,authorName:privateText_(asset.authorName||'Creator',200),title:privateText_(asset.title||'',1000),
     icon:icon||{type:'emoji',value:'✨'},category:asset.category,shortDescription:privateText_(asset.shortDescription||'',800),
     contentTypeLabels:(asset.contentTypeLabels||[]).slice(0,20).map(function(x){return privateText_(x,100);}),contentTypes:(asset.contentTypes||[]).slice(0,20),presentationMetadata:privatePresentationMetadata_(asset.presentationMetadata),
     publicCollaboration:asset.publicCollaboration?privateCardCollaboration_(asset.publicCollaboration):null,collaborationAssetId:asset.collaborationAssetId||null,
     contentBlocks:(asset.contentBlocks||[]).map(function(block){return {id:privateText_(block.id||'',50),type:privateText_(block.type||'Text',30),title:privateText_(block.title||'',100),body:''};}).slice(0,24),
     content:String(asset.content||'').slice(0,600),uiCodeSnippet:String(asset.uiCodeSnippet||'').slice(0,600),
-    previewImage:previewImage,previewImages:previewImages,media:[],folderId:asset.folderId||null,isPublic:!!asset.isPublic,
+    previewImage:previewImage,previewImages:previewImages,media:media,folderId:asset.folderId||null,isPublic:!!asset.isPublic,
     visibility:asset.visibility||'private',status:asset.status||'draft',tags:(asset.tags||[]).slice(0,50).map(function(x){return privateText_(x,80);}),createdAt:asset.createdAt||'',updatedAt:asset.updatedAt||'',
     deletedAt:asset.deletedAt||null,likesCount:Number(asset.likesCount)||0,forkCount:Number(asset.forkCount)||0,
     forkedFromId:asset.forkedFromId||null,forkedFromAuthor:asset.forkedFromAuthor||null,linkedAssetIds:asset.linkedAssetIds||[],revision:Number(asset.revision)||1};
@@ -1013,7 +1023,10 @@ function publicSummaryEnvelope_(pub) {
   var media=mediaSource.filter(function(m){return m&&((m.purpose||'')==='icon'||!!(m.isCover||m.is_cover)||String(m.id||'')===coverId);}).map(function(m){return {
     id:String(m.id||''),assetId:String(m.assetId||m.asset_id||pub.id||a.id||''),purpose:String(m.purpose||''),contextId:m.contextId||m.context_id||null,
     mimeType:m.mimeType||m.mime_type||'',fileSize:Number(m.fileSize||m.file_size||0),sortOrder:Number(m.sortOrder||m.sort_order||0),
+    delivery:m.delivery==='vercel_proxy'?'vercel_proxy':undefined,
     isCover:!!(m.isCover||m.is_cover),createdAt:m.createdAt||m.created_at||'',updatedAt:m.updatedAt||m.updated_at||''};});
+  var mediaById={};media.forEach(function(item){if(!mediaById[item.id]||item.delivery==='vercel_proxy')mediaById[item.id]=item;});
+  media=Object.keys(mediaById).map(function(id){return mediaById[id];});
   var platforms=summaryStrings_(presentation.appPlatforms);
   var asset={id:String(a.id||pub.id||''),title:String(a.title||pub.title||''),authorName:String(a.authorName||pub.author_name||'Creator'),
     category:String(a.category||pub.category||'character'),shortDescription:String(a.shortDescription||pub.short_description||''),
@@ -1154,6 +1167,78 @@ function mediaWorkMarkAttached_(manifests,workId,revision) {
     current.state='attached';current.workRevision=revision;current.attachedAt=new Date().toISOString();
     mediaWorkStoreJson_(mediaWorkManifestKey_(current.mediaId),current);
   });
+}
+
+function mediaWorkReadChunk_(input,ownerUserId,isPublic) {
+  if(!input||typeof input!=='object'||Array.isArray(input)
+    ||Object.keys(input).some(function(key){return ['workId','mediaId','ref','chunkIndex'].indexOf(key)<0;})
+    ||typeof input.workId!=='string'||!/^asset_[A-Za-z0-9_-]{1,96}$/.test(input.workId)
+    ||!mediaPocUuid_(input.mediaId)||input.ref!=='media:'+input.mediaId
+    ||!Number.isInteger(input.chunkIndex)||input.chunkIndex<0||input.chunkIndex>4)
+    apiFail_('INVALID_MEDIA_READ_REQUEST','Invalid Work media read request');
+
+  var record;
+  try { record=getOwnerWork_(input.workId); }
+  catch(_workError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
+  if(!record||!record.row||String(record.row.id)!==input.workId||String(record.row.user_id||'')!==String(ownerUserId))
+    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+  if(record.row.category==='collab')apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+
+  var canonical=cxlAssetFromRecord_(record),placements=mediaWorkReferenceMap_(canonical),placement=placements[input.mediaId];
+  var media=(record.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.asset_id===input.workId&&item.delivery==='vercel_proxy';})[0];
+  var manifest=mediaWorkReadJson_(mediaWorkManifestKey_(input.mediaId));
+  if(!placement||!media||!manifest||manifest.mediaId!==input.mediaId||manifest.workId!==input.workId
+    ||manifest.ownerUserId!==ownerUserId||manifest.delivery!=='vercel_proxy'||manifest.state!=='attached'
+    ||String(manifest.drive_file_id||'')!==String(media.drive_file_id||'')
+    ||manifest.purpose!==placement.purpose||String(manifest.contextId||'')!==String(placement.contextId||'')
+    ||Number(manifest.sortOrder)!==Number(placement.sortOrder)||Boolean(manifest.isCover)!==Boolean(placement.isCover))
+    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+
+  if(isPublic) {
+    if(!isPublic_(record.row))apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+    var publicRow;
+    try { publicRow=rowById_(sheet_(config_().publicSheetId),input.workId); }
+    catch(_publicIndexError) { publicRow=null; }
+    if(!publicRow||String(publicRow.active).toLowerCase()!=='true'||String(publicRow.updated_at||'')!==String(record.row.updated_at||''))
+      apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+    var projection;
+    try { projection=parse_(publicRow.file_id); } catch(_projectionError) { projection=null; }
+    if(!projection||projection.id!==input.workId||String(projection.updated_at||'')!==String(record.row.updated_at||''))
+      apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+    if(projection.category==='collab')apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+    var projectedAsset=projection.cxlAsset&&typeof projection.cxlAsset==='object'?projection.cxlAsset:{
+      id:projection.id,icon:projection.icon,previewImage:projection.preview_image,previewImages:projection.preview_images,
+      contentBlocks:projection.content_blocks
+    };
+    var publicPlacement=mediaWorkReferenceMap_(projectedAsset)[input.mediaId];
+    var publicMedia=(projection.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.delivery==='vercel_proxy';})[0];
+    if(!publicPlacement||!publicMedia||publicPlacement.purpose!==placement.purpose
+      ||String(publicPlacement.contextId||'')!==String(placement.contextId||''))
+      apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+  } else if(String(manifest.ownerUserId)!==String(ownerUserId)) {
+    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+  }
+
+  if(manifest.purpose==='collab'||manifest.purpose==='collab_reference'||manifest.purpose==='unassigned')
+    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+  var file;
+  try { file=DriveApp.getFileById(manifest.drive_file_id); }
+  catch(_fileError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
+  if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE)
+    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+  if(file.getSize()!==Number(manifest.totalFileSize)||media.file_size!==undefined&&Number(media.file_size)!==Number(manifest.totalFileSize)
+    ||media.mime_type!==undefined&&String(media.mime_type)!==String(manifest.mimeType)
+    ||media.sha256!==undefined&&String(media.sha256).toLowerCase()!==String(manifest.sha256||'').toLowerCase()
+    ||!MEDIA_POC_ALLOWED_MIME_.includes(String(manifest.mimeType||''))||!/^([a-f0-9]{64})$/i.test(String(manifest.sha256||'')))
+    apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+
+  var totalSize=Number(manifest.totalFileSize),count=Math.ceil(totalSize/CXL_WORK_MEDIA_CHUNK_BYTES_);
+  if(totalSize<1||totalSize>CXL_WORK_MEDIA_MAX_BYTES_||count<1||count>5||Number(manifest.totalChunks)!==count||input.chunkIndex>=count)
+    apiFail_('INVALID_MEDIA_READ_REQUEST','Invalid Work media chunk index');
+  var start=input.chunkIndex*CXL_WORK_MEDIA_CHUNK_BYTES_,expectedLength=Math.min(CXL_WORK_MEDIA_CHUNK_BYTES_,totalSize-start);
+  var chunk=mediaPocDriveChunk_(manifest.drive_file_id,start,expectedLength,totalSize,'media.work.'+(isPublic?'publicChunk':'ownerChunk'),input.chunkIndex);
+  return {workId:input.workId,mediaId:input.mediaId,ref:input.ref,mimeType:manifest.mimeType,totalFileSize:totalSize,
+    totalChunks:count,chunkIndex:input.chunkIndex,sha256:manifest.sha256,chunkSha256:mediaPocSha256_(chunk),base64:Utilities.base64Encode(chunk)};
 }
 
 function mediaWorkRepairCommitted_(record,workId,ownerUserId) {

@@ -91,6 +91,15 @@ describe('Google Works fetch semantics', () => {
     expect(summaries.find(item => item.id === 'inline-image')?.icon).toEqual({ type: 'emoji', value: '✨' });
     expect(JSON.stringify(summaries)).not.toContain('base64,AA==');
   });
+  it('emits the scoped proxy URL for an associated Google public media icon', () => {
+    const id = '123e4567-e89b-42d3-a456-426614174021';
+    const summary = filterGoogleWorks([work('google-public', { visibility: 'public', isPublic: true,
+      icon: { type: 'image', value: `media:${id}`, mediaId: id },
+      media: [{ id, assetId: 'google-public', storagePath: `google-work-media/${id}`, purpose: 'icon', mimeType: 'image/png',
+        fileSize: 68, sortOrder: 0, isCover: false, delivery: 'vercel_proxy' }] })], { publicOnly: true, detail: 'summary' })[0];
+    expect(summary.icon.value).toContain('scope=public');
+    expect(summary.icon.value).toContain(`ref=media%3A${id}`);
+  });
   it('uses Unix milliseconds for valid updatedAt cache versions and omits invalid dates', () => {
     const valid = work('valid-date', { visibility: 'public', isPublic: true,
       updatedAt: '2026-01-01T00:00:00.000Z', icon: { type: 'image', value: 'media:icon-1' } });
