@@ -329,6 +329,7 @@ describe('isolated Preview media POC route', () => {
     ['upstream JSON failure', 'MEDIA_POC_READ_UPSTREAM_RESPONSE_INVALID', 'upstream-json'],
     ['upstream timeout', 'MEDIA_POC_READ_UPSTREAM_TIMEOUT', 'timeout'],
     ['upstream network failure', 'MEDIA_POC_READ_UPSTREAM_FAILED', 'network'],
+    ['unknown upstream operation', 'MEDIA_POC_READ_UPSTREAM_FAILED', 'unknown'],
     ['invalid response shape', 'MEDIA_POC_READ_RESPONSE_INVALID', 'response-shape'],
     ['invalid media metadata', 'MEDIA_POC_READ_METADATA_INVALID', 'metadata'],
     ['invalid chunk size', 'MEDIA_POC_READ_CHUNK_SIZE', 'chunk-size'],
@@ -343,6 +344,8 @@ describe('isolated Preview media POC route', () => {
     else if (failureKind === 'upstream-json') fetchImpl = async () => ({ ok: true, status: 200, text: async () => '{bad json' });
     else if (failureKind === 'timeout') fetchImpl = async () => { throw Object.assign(new Error('deadline exceeded'), { name: 'TimeoutError' }); };
     else if (failureKind === 'network') fetchImpl = async () => { throw new Error('network unavailable'); };
+    else if (failureKind === 'unknown') fetchImpl = async () => ({ ok: true, status: 200,
+      text: async () => JSON.stringify({ ok: false, code: 'private-code', error: 'secret GAS response body' }) });
     else if (failureKind === 'response-shape') fetchImpl = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: null }) });
     else {
       let data = gasReadData(bytes, ids);
@@ -361,7 +364,39 @@ describe('isolated Preview media POC route', () => {
     expect(response.json).toMatchObject({ ok: false, code: expectedCode });
     expect(response.json.error).toMatch(/read (validation|request) failed/i);
     expect(JSON.stringify(response.json)).not.toMatch(/123e4567|server-only|drive|secret|https?:|base64:/i);
+    const transportByFailureKind: Record<string, { stage: string; failureClass: string; stages: string[] }> = {
+      'upstream-http': { stage: 'gas_body_read_completed', failureClass: 'upstream_http', stages: [
+        'gas_request_started', 'gas_response_headers_received', 'gas_body_read_started', 'gas_body_read_completed'
+      ] },
+      'upstream-json': { stage: 'gas_body_read_completed', failureClass: 'json_parse', stages: [
+        'gas_request_started', 'gas_response_headers_received', 'gas_body_read_started', 'gas_body_read_completed'
+      ] },
+      timeout: { stage: 'gas_request_started', failureClass: 'fetch_wait', stages: ['gas_request_started'] },
+      network: { stage: 'gas_request_started', failureClass: 'network_runtime', stages: ['gas_request_started'] },
+      unknown: { stage: 'gas_json_parsed', failureClass: 'unknown', stages: [
+        'gas_request_started', 'gas_response_headers_received', 'gas_body_read_started', 'gas_body_read_completed', 'gas_json_parsed'
+      ] }
+    };
+    if (transportByFailureKind[failureKind]) expect(response.json.transport).toEqual(transportByFailureKind[failureKind]);
+    else expect(response.json).not.toHaveProperty('transport');
     expectSafeReadFailureLog(warn, expectedCode);
+  });
+
+  it('reports a body-read timeout in the same 504 response without exposing upstream details', async () => {
+    const ids = { workNonce: '123e4567-e89b-42d3-a456-426614174030', mediaId: '123e4567-e89b-42d3-a456-426614174031' };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const response = await invokeOwnerRead(async () => ({ ok: true, status: 200, text: async () => {
+      throw Object.assign(new Error('https://script.google.com/private Bearer server-only-cxl-shared-secret'), { name: 'TimeoutError' });
+    } }), ids);
+
+    expect(response.statusCode).toBe(504);
+    expect(response.json).toMatchObject({ ok: false, code: 'MEDIA_POC_READ_UPSTREAM_TIMEOUT', transport: {
+      stage: 'gas_body_read_started', failureClass: 'body_read', stages: [
+        'gas_request_started', 'gas_response_headers_received', 'gas_body_read_started'
+      ]
+    } });
+    expect(JSON.stringify(response.json)).not.toMatch(/script\.google|server-only|https?:|Bearer|private/i);
+    expectSafeReadFailureLog(warn, 'MEDIA_POC_READ_UPSTREAM_TIMEOUT');
   });
 
   it('distinguishes inconsistent metadata between chunks without logging identifiers', async () => {

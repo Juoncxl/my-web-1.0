@@ -61,6 +61,16 @@ const READ_DIAGNOSTIC_FAILURE_CLASSES = new Set([
   'url_fetch_runtime_failure', 'unknown_fetch_exception'
 ]);
 const READ_DIAGNOSTIC_PHASE_KEYS = new Set(['phase', 'code', 'failureClass', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
+const GAS_TRANSPORT_STAGES = [
+  'gas_request_started', 'gas_response_headers_received', 'gas_body_read_started',
+  'gas_body_read_completed', 'gas_json_parsed'
+] as const;
+const GAS_TRANSPORT_FAILURE_CLASSES = [
+  'fetch_wait', 'body_read', 'json_parse', 'upstream_http', 'network_runtime', 'unknown'
+] as const;
+type GasTransportStage = typeof GAS_TRANSPORT_STAGES[number];
+type GasTransportFailureClass = typeof GAS_TRANSPORT_FAILURE_CLASSES[number];
+type GasTransportTrace = { stages: GasTransportStage[]; failureClass?: GasTransportFailureClass };
 
 type MediaPocReadFailureCode =
   | 'MEDIA_POC_READ_RESPONSE_INVALID'
@@ -170,7 +180,7 @@ function gasError(raw: unknown): { status: number; error: string; code?: string 
   return { status: 502, error: 'Media proof-of-concept request failed' };
 }
 
-async function callGas(action: string, args: unknown[], includeTiming: boolean) {
+async function callGas(action: string, args: unknown[], includeTiming: boolean, transport?: GasTransportTrace) {
   const endpoint = gasEndpoint();
   const secret = process.env.CXL_API_SHARED_SECRET || '';
   const ownerId = process.env.CXL_OWNER_USER_ID?.trim() || '';
@@ -179,23 +189,46 @@ async function callGas(action: string, args: unknown[], includeTiming: boolean) 
     ...(includeTiming && process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) });
   if (payload.length > GAS_POST_CHAR_LIMIT) throw Object.assign(new Error('request too large'), { statusCode: 413 });
   const startedAt = Date.now();
-  const response = await fetch(endpoint.toString(), {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: payload,
-    redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS)
-  });
-  const responseText = await response.text();
-  if (!response.ok) {
-    if (action === 'ownerChunk' || action === 'publicChunk') failRead('MEDIA_POC_READ_UPSTREAM_HTTP');
-    throw Object.assign(new Error('upstream error'), { statusCode: 502 });
+  transport?.stages.push('gas_request_started');
+  let response: Awaited<ReturnType<typeof fetch>>;
+  try {
+    response = await fetch(endpoint.toString(), {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: payload,
+      redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (transport) transport.failureClass = isTimeoutError(error) ? 'fetch_wait' : 'network_runtime';
+    throw error;
   }
-  let raw: unknown;
-  try { raw = JSON.parse(responseText); }
-  catch {
-    if (action === 'ownerChunk' || action === 'publicChunk') failRead('MEDIA_POC_READ_UPSTREAM_RESPONSE_INVALID');
-    throw Object.assign(new Error('invalid upstream response'), { statusCode: 502 });
+  transport?.stages.push('gas_response_headers_received');
+  transport?.stages.push('gas_body_read_started');
+  let responseText: string;
+  try { responseText = await response.text(); }
+  catch (error) {
+    if (transport) transport.failureClass = 'body_read';
+    throw error;
   }
-  if (!isRecord(raw) || raw.ok !== true) throw Object.assign(new Error('upstream operation failed'), gasError(raw));
-  return { data: raw.data, timing: raw.meta && isRecord(raw.meta) ? raw.meta.timing : undefined, elapsedMs: Date.now() - startedAt };
+  transport?.stages.push('gas_body_read_completed');
+  try {
+    if (!response.ok) {
+      if (transport) transport.failureClass = 'upstream_http';
+      if (action === 'ownerChunk' || action === 'publicChunk') failRead('MEDIA_POC_READ_UPSTREAM_HTTP');
+      throw Object.assign(new Error('upstream error'), { statusCode: 502 });
+    }
+    let raw: unknown;
+    try { raw = JSON.parse(responseText); }
+    catch {
+      if (transport) transport.failureClass = 'json_parse';
+      if (action === 'ownerChunk' || action === 'publicChunk') failRead('MEDIA_POC_READ_UPSTREAM_RESPONSE_INVALID');
+      throw Object.assign(new Error('invalid upstream response'), { statusCode: 502 });
+    }
+    transport?.stages.push('gas_json_parsed');
+    if (!isRecord(raw) || raw.ok !== true) throw Object.assign(new Error('upstream operation failed'), gasError(raw));
+    return { data: raw.data, timing: raw.meta && isRecord(raw.meta) ? raw.meta.timing : undefined, elapsedMs: Date.now() - startedAt };
+  } catch (error) {
+    if (transport && !transport.failureClass) transport.failureClass = 'unknown';
+    throw error;
+  }
 }
 
 function validUuid(value: unknown): value is string {
@@ -333,10 +366,14 @@ async function waitForDrain(res: Response) {
   });
 }
 
+function isTimeoutError(error: unknown) {
+  return error instanceof Error && (error.name === 'TimeoutError' || /time.?out/i.test(error.message));
+}
+
 function readFailureCode(error: unknown): string {
   if (error instanceof MediaPocReadError && READ_FAILURE_CODES.has(error.diagnosticCode)) return error.diagnosticCode;
   if (isRecord(error) && typeof error.code === 'string' && SAFE_GAS_CODES.has(error.code)) return error.code;
-  if (error instanceof Error && (error.name === 'TimeoutError' || /time.?out/i.test(error.message))) {
+  if (isTimeoutError(error)) {
     return 'MEDIA_POC_READ_UPSTREAM_TIMEOUT';
   }
   return 'MEDIA_POC_READ_UPSTREAM_FAILED';
@@ -362,15 +399,26 @@ function readFailureStatus(error: unknown, code: string) {
   return 502;
 }
 
-function sendReadFailure(res: Response, error: unknown, code: string) {
+function safeGasTransportFailure(transport?: GasTransportTrace) {
+  if (process.env.VERCEL_ENV !== 'preview' || !transport?.failureClass
+    || transport.stages.length < 1 || transport.stages.length > GAS_TRANSPORT_STAGES.length
+    || !GAS_TRANSPORT_FAILURE_CLASSES.includes(transport.failureClass)
+    || transport.stages.some(stage => !GAS_TRANSPORT_STAGES.includes(stage))) return null;
+  return { stage: transport.stages[transport.stages.length - 1], failureClass: transport.failureClass, stages: [...transport.stages] };
+}
+
+function sendReadFailure(res: Response, error: unknown, code: string, transport?: GasTransportTrace) {
   if (isRecord(error) && typeof error.status === 'number' && typeof error.code === 'string' && SAFE_GAS_CODES.has(error.code)) {
     return controlledError(res, error);
   }
   const validationFailure = READ_VALIDATION_CODES.has(code);
-  return sendJson(res, readFailureStatus(error, code), {
+  const status = readFailureStatus(error, code);
+  const safeTransport = status === 502 || status === 504 ? safeGasTransportFailure(transport) : null;
+  return sendJson(res, status, {
     ok: false,
     error: validationFailure ? 'Media proof-of-concept read validation failed' : 'Media proof-of-concept read request failed',
-    code: READ_FAILURE_CODES.has(code) ? code : 'MEDIA_POC_READ_UPSTREAM_FAILED'
+    code: READ_FAILURE_CODES.has(code) ? code : 'MEDIA_POC_READ_UPSTREAM_FAILED',
+    ...(safeTransport ? { transport: safeTransport } : {})
   });
 }
 
@@ -387,11 +435,13 @@ async function streamRead(req: Request, res: Response, startedAt: number) {
   const fullDigest = createHash('sha256');
   let metadata: JsonRecord | undefined;
   let failedChunkIndex = 0;
+  let transport: GasTransportTrace | undefined;
   try {
     for (let chunkIndex = 0; ; chunkIndex++) {
       failedChunkIndex = chunkIndex;
       const action = scope === 'owner' ? 'ownerChunk' : 'publicChunk';
-      const result = await callGas(action, [{ workNonce, mediaId, ref, chunkIndex }], true);
+      transport = { stages: [] };
+      const result = await callGas(action, [{ workNonce, mediaId, ref, chunkIndex }], true, transport);
       if (isRecord(result.timing) && isRecord(result.timing.phases)) {
         for (const [phase, duration] of Object.entries(result.timing.phases)) {
           if (TIMING_PHASES.has(phase) && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0) {
@@ -446,7 +496,7 @@ async function streamRead(req: Request, res: Response, startedAt: number) {
     const code = readFailureCode(error);
     logSafeReadFailure(scope === 'public' ? 'publicChunk' : 'ownerChunk', code, failedChunkIndex, startedAt);
     if (res.headersSent) return res.destroy(new Error('Media proof-of-concept stream failed'));
-    return sendReadFailure(res, error, code);
+    return sendReadFailure(res, error, code, transport);
   }
 }
 
