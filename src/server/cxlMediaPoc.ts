@@ -6,7 +6,7 @@ import {
   selectOwnerAuthMode,
   verifyCsrfRequest,
   verifyOwnerSessionToken
-} from '../../src/server/cxlOwnerAuth.js';
+} from './cxlOwnerAuth.js';
 
 type Request = IncomingMessage & { body?: unknown; url?: string };
 type Response = ServerResponse & {
@@ -303,7 +303,7 @@ async function streamRead(req: Request, res: Response, startedAt: number) {
   }
 }
 
-export default async function handler(req: Request, res: Response) {
+export async function handleMediaPoc(req: Request, res: Response) {
   if (!enabled()) return unavailable(res);
   if (req.method === 'POST') {
     let body: unknown;

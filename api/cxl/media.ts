@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { handleMediaPoc } from '../../src/server/cxlMediaPoc.js';
+export { mediaPocLimits } from '../../src/server/cxlMediaPoc.js';
 
-type Request = IncomingMessage & { url?: string };
-type Response = ServerResponse & { end: (data?: string | Buffer) => void };
+type Request = IncomingMessage & { body?: unknown; url?: string };
+type Response = ServerResponse & {
+  end: (data?: string | Buffer) => void;
+  write: (chunk: Uint8Array) => boolean;
+  once: (event: 'drain', listener: () => void) => Response;
+  destroy: (error?: Error) => void;
+};
 const GAS_TIMEOUT_MS = 12_000;
 const MAX_ICON_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -30,7 +37,7 @@ function cacheHeaders(res: Response, etag?: string) {
   if (etag) res.setHeader('ETag', etag);
 }
 
-export default async function handler(req: Request, res: Response) {
+async function publicIconHandler(req: Request, res: Response) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return sendError(res, 405, 'Method not allowed');
@@ -101,4 +108,19 @@ export default async function handler(req: Request, res: Response) {
     }
     return sendError(res, 502, 'Public icon is unavailable');
   }
+}
+
+export default async function handler(req: Request, res: Response) {
+  let params: URLSearchParams;
+  try { params = new URL(req.url || '/', 'https://cxl.invalid').searchParams; }
+  catch { return sendError(res, 400, 'Invalid media request'); }
+
+  if (params.has('poc')) {
+    if (params.getAll('poc').length !== 1 || params.get('poc') !== '1') {
+      return sendError(res, 404, 'Media proof-of-concept is unavailable');
+    }
+    return handleMediaPoc(req, res);
+  }
+
+  return publicIconHandler(req, res);
 }

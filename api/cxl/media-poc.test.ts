@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler, { mediaPocLimits } from './media-poc';
+import handler, { mediaPocLimits } from './media';
 import { createOwnerSessionToken } from '../../src/server/cxlOwnerAuth';
 
 const SECRET = 'server-only-cxl-shared-secret';
@@ -37,7 +37,7 @@ function makeResponse() {
 function makeRequest(body: unknown, options: { method?: string; url?: string; cookie?: string; origin?: string; csrf?: string } = {}) {
   return {
     method: options.method || 'POST',
-    url: options.url || '/api/cxl/media-poc',
+    url: options.url || '/api/cxl/media?poc=1',
     body,
     headers: {
       ...(options.cookie ? { cookie: options.cookie } : {}),
@@ -78,6 +78,42 @@ describe('isolated Preview media POC route', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     vi.stubEnv('VERCEL_ENV', 'production'); vi.stubEnv('CXL_MEDIA_POC_ENABLED', '1');
     expect((await invoke({ action: 'cleanup' })).statusCode).toBe(404);
+  });
+
+  it('keeps the existing public icon path available when the POC is disabled', async () => {
+    vi.stubEnv('CXL_MEDIA_POC_ENABLED', '0');
+    vi.stubEnv('CXL_GAS_PUBLIC_URL', 'https://script.google.com/macros/s/public/exec');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, data: {
+      mimeType: 'image/png', base64: Buffer.from('existing-icon').toString('base64')
+    } }) }));
+
+    const response = await (async () => {
+      const result = makeResponse();
+      await handler(makeRequest(undefined, { method: 'GET', url: '/api/cxl/media?workId=asset_existing&ref=media%3Aicon' }) as any, result as any);
+      return result;
+    })();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['Content-Type']).toBe('image/png');
+    expect(response.bodyBuffer).toEqual(Buffer.from('existing-icon'));
+  });
+
+  it('routes only a single exact poc=1 discriminator to the isolated handler', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const duplicate = await invoke({ action: 'cleanup' }, {
+      url: '/api/cxl/media?poc=1&poc=1', cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token'
+    });
+    const invalid = await invoke({ action: 'cleanup' }, {
+      url: '/api/cxl/media?poc=true', cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token'
+    });
+    const normalPost = await invoke({ action: 'cleanup' }, {
+      url: '/api/cxl/media', cookie: OWNER_COOKIE, origin: APP_ORIGIN, csrf: 'csrf-token'
+    });
+
+    expect(duplicate.statusCode).toBe(404);
+    expect(invalid.statusCode).toBe(404);
+    expect(normalPost.statusCode).toBe(405);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('requires a valid Owner session and exact Origin/CSRF for every state-changing POC operation', async () => {
@@ -128,7 +164,7 @@ describe('isolated Preview media POC route', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const response = makeResponse();
-    const url = `/api/cxl/media-poc?scope=owner&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}`;
+    const url = `/api/cxl/media?poc=1&scope=owner&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}`;
     await handler(makeRequest(undefined, { method: 'GET', url, cookie: OWNER_COOKIE }) as any, response as any);
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(response.statusCode).toBe(200);
@@ -153,7 +189,7 @@ describe('isolated Preview media POC route', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const response = makeResponse();
-    await handler(makeRequest(undefined, { method: 'GET', url: `/api/cxl/media-poc?scope=public&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}` }) as any, response as any);
+    await handler(makeRequest(undefined, { method: 'GET', url: `/api/cxl/media?poc=1&scope=public&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}` }) as any, response as any);
     expect(response.statusCode).toBe(200);
     expect(response.bodyBuffer).toEqual(bytes);
     expect(response.headers['Content-Type']).toBe('image/png');
@@ -168,11 +204,11 @@ describe('isolated Preview media POC route', () => {
       ok: false, code: 'MEDIA_POC_MEDIA_NOT_PUBLIC', error: 'private file ID must not leak'
     }) }));
     vi.stubGlobal('fetch', fetchMock);
-    const ownerRequest = `/api/cxl/media-poc?scope=owner&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}`;
+    const ownerRequest = `/api/cxl/media?poc=1&scope=owner&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}`;
     const anonymousPrivate = await (async () => { const response = makeResponse(); await handler(makeRequest(undefined, { method: 'GET', url: ownerRequest }) as any, response as any); return response; })();
     expect(anonymousPrivate.statusCode).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
-    const publicRequest = `/api/cxl/media-poc?scope=public&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}`;
+    const publicRequest = `/api/cxl/media?poc=1&scope=public&workNonce=${ids.workNonce}&mediaId=${ids.mediaId}&ref=media%3A${ids.mediaId}`;
     const response = makeResponse();
     await handler(makeRequest(undefined, { method: 'GET', url: publicRequest }) as any, response as any);
     expect(response.statusCode).toBe(404);
@@ -183,7 +219,7 @@ describe('isolated Preview media POC route', () => {
   it('rejects invalid methods, references, chunk metadata and bad upstream binary signatures', async () => {
     const method = await invoke({}, { method: 'PUT' });
     expect(method.statusCode).toBe(405);
-    const invalid = await invoke({}, { method: 'GET', url: '/api/cxl/media-poc?scope=public&mediaId=bad&workNonce=bad&ref=media%3Abad' });
+    const invalid = await invoke({}, { method: 'GET', url: '/api/cxl/media?poc=1&scope=public&mediaId=bad&workNonce=bad&ref=media%3Abad' });
     expect(invalid.statusCode).toBe(400);
     const bytes = Buffer.from('not an image');
     const upstreamData = { ok: true, data: {
@@ -193,7 +229,7 @@ describe('isolated Preview media POC route', () => {
     } };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(upstreamData) }));
     const badImage = makeResponse();
-    const request = makeRequest(undefined, { method: 'GET', url: '/api/cxl/media-poc?scope=public&workNonce=123e4567-e89b-42d3-a456-426614174000&mediaId=123e4567-e89b-42d3-a456-426614174001&ref=media%3A123e4567-e89b-42d3-a456-426614174001' });
+    const request = makeRequest(undefined, { method: 'GET', url: '/api/cxl/media?poc=1&scope=public&workNonce=123e4567-e89b-42d3-a456-426614174000&mediaId=123e4567-e89b-42d3-a456-426614174001&ref=media%3A123e4567-e89b-42d3-a456-426614174001' });
     await handler(request as any, badImage as any);
     expect(badImage.statusCode).toBe(502);
     expect(badImage.json).toMatchObject({ ok: false, error: 'Media proof-of-concept request failed' });
