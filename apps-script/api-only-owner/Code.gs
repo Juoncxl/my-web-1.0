@@ -496,11 +496,11 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
   if(indexed)record=parse_(indexed.file_id);
   if(operation==='create'&&record){
     if(record.createRequestId!==requestId||record.lastWriteFingerprint!==fingerprint)apiFail_('IDEMPOTENCY_KEY_REUSED','Create requestId was already used with different Work data');
-    finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(getOwnerWork_(id));
+    finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(record);
   }
   if(operation==='update'&&record&&record.lastWriteRequestId===requestId){
     if(record.lastWriteFingerprint!==fingerprint)apiFail_('IDEMPOTENCY_KEY_REUSED','Update requestId was already used with different Work data');
-    finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(getOwnerWork_(id));
+    finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(record);
   }
   var now=new Date().toISOString(),asset;
   if(operation==='create'){
@@ -524,7 +524,7 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
   validateOwnerFolder_(asset.folderId,ownerUserId);
   var request={operation:operation,requestId:requestId,fingerprint:fingerprint,revision:operation==='update'?Number(options.expectedRevision):0,createRequestId:operation==='create'?requestId:''};
   var saved=saveOwnerWork_(cxlRowInput_(asset,ownerUserId,request),{deferPublicSync:true,idempotent:true});
-  record=getOwnerWork_(saved.id);finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(getOwnerWork_(saved.id));
+  record=getOwnerWork_(saved.id);finishCxlPublicProjection_(record,ownerUserId);return cxlWriteResult_(record);
 }
 
 function saveOwnerWork_(input,options) {

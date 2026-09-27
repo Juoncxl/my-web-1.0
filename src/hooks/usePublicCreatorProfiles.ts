@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Asset, User } from '../types';
 import { cxlDataService } from '../data/cxlDataService';
-import { collectPublicCreatorKeys } from '../lib/publicCreatorIdentity';
+import { collectPublicCreatorKeys, type PublicCreatorIdentitySource } from '../lib/publicCreatorIdentity';
+
+export function getPublicCreatorProfileLookupKey(assets: readonly PublicCreatorIdentitySource[]): string {
+  return collectPublicCreatorKeys(assets).join('\u0001');
+}
 
 /** Keeps list-card identity current without restoring legacy avatar blobs to Work queries. */
 export function usePublicCreatorProfiles(assets: readonly Asset[], currentUser: User | null): Map<string, User> {
-  const creatorIds = useMemo(
-    () => collectPublicCreatorKeys(assets),
-    [assets]
-  );
-  const creatorIdsKey = creatorIds.join('\u0001');
+  const creatorIdsKey = getPublicCreatorProfileLookupKey(assets);
+  const creatorIds = useMemo(() => creatorIdsKey ? creatorIdsKey.split('\u0001') : [], [creatorIdsKey]);
   const [profilesById, setProfilesById] = useState<Map<string, User>>(() => new Map());
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function usePublicCreatorProfiles(assets: readonly Asset[], currentUser: 
 
     void cxlDataService.profiles.getPublic(creatorIds).then(result => applyProfiles(result.data));
     return () => { cancelled = true; };
-  }, [creatorIds, creatorIdsKey, currentUser]);
+  }, [creatorIdsKey, currentUser]);
 
   return profilesById;
 }

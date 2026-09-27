@@ -98,4 +98,65 @@ describe('API-only Owner GAS package isolation', () => {
     expect(() => context.rejectUnsupportedWorkMedia_({ previewImage: 'data:image/png;base64,AA==' }, null))
       .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
   });
+
+  it('reuses the canonical post-write record instead of rereading it for the response', () => {
+    const context = makeBridge();
+    const currentRecord = {
+      revision: 3,
+      row: { id: 'asset_work', user_id: 'test-owner', visibility: 'private', is_public: false, deleted_at: '', folder_id: '' },
+      cxlAsset: { id: 'asset_work', userId: 'test-owner', title: 'Before', visibility: 'private', isPublic: false, folderId: null }
+    };
+    const savedRecord = {
+      ...currentRecord,
+      revision: 4,
+      row: { ...currentRecord.row, title: 'After' },
+      cxlAsset: { ...currentRecord.cxlAsset, title: 'After' }
+    };
+    const getOwnerWork = vi.fn(() => savedRecord);
+    const responseRecord = vi.fn(record => record);
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({ sheet: 'private-index' });
+    context.rowById_ = () => ({ id: 'asset_work', file_id: 'current-file' });
+    context.parse_ = () => currentRecord;
+    context.writeFingerprint_ = () => 'fingerprint';
+    context.saveOwnerWork_ = () => ({ id: 'asset_work', revision: 4, updatedAt: '2026-09-27T00:00:00.000Z' });
+    context.getOwnerWork_ = getOwnerWork;
+    context.finishCxlPublicProjection_ = vi.fn();
+    context.cxlWriteResult_ = responseRecord;
+
+    const result = context.saveCxlWorkApi_('update', { id: 'asset_work', updates: { title: 'After' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 3
+    }, 'test-owner');
+
+    expect(getOwnerWork).toHaveBeenCalledOnce();
+    expect(responseRecord).toHaveBeenCalledWith(savedRecord);
+    expect(result).toBe(savedRecord);
+  });
+
+  it('answers an idempotent update retry from its already loaded canonical record', () => {
+    const context = makeBridge();
+    const record = {
+      revision: 4, lastWriteRequestId: '123e4567-e89b-42d3-a456-426614174000', lastWriteFingerprint: 'fingerprint',
+      row: { id: 'asset_work', visibility: 'private', is_public: false, deleted_at: '' },
+      cxlAsset: { id: 'asset_work', title: 'After', visibility: 'private', isPublic: false }
+    };
+    const getOwnerWork = vi.fn();
+    const responseRecord = vi.fn(value => value);
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({ sheet: 'private-index' });
+    context.rowById_ = () => ({ id: 'asset_work', file_id: 'current-file' });
+    context.parse_ = () => record;
+    context.writeFingerprint_ = () => 'fingerprint';
+    context.getOwnerWork_ = getOwnerWork;
+    context.finishCxlPublicProjection_ = vi.fn();
+    context.cxlWriteResult_ = responseRecord;
+
+    const result = context.saveCxlWorkApi_('update', { id: 'asset_work', updates: { title: 'After' } }, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 3
+    }, 'test-owner');
+
+    expect(getOwnerWork).not.toHaveBeenCalled();
+    expect(responseRecord).toHaveBeenCalledWith(record);
+    expect(result).toBe(record);
+  });
 });
