@@ -25,6 +25,10 @@ var MEDIA_POC_MAX_CLEANUP_SESSIONS_ = 5;
 var MEDIA_POC_SESSION_PREFIX_ = 'CXL_MEDIA_POC_SESSION_';
 var MEDIA_POC_MANIFEST_PREFIX_ = 'CXL_MEDIA_POC_MEDIA_';
 var MEDIA_POC_ALLOWED_MIME_ = ['image/jpeg','image/png','image/webp','image/gif'];
+var MEDIA_POC_READ_ACTIONS_ = ['media.poc.ownerChunk','media.poc.publicChunk'];
+var MEDIA_POC_READ_PHASES_ = ['request_received','manifest_validated','drive_fetch_started','drive_fetch_completed','drive_range_validated','response_constructed','read_failed'];
+var MEDIA_POC_READ_ERROR_CODES_ = ['INVALID_MEDIA_POC_REQUEST','MEDIA_POC_STATE_INVALID','MEDIA_POC_MEDIA_NOT_FOUND',
+  'MEDIA_POC_MEDIA_NOT_PUBLIC','MEDIA_POC_MEDIA_INVALID','MEDIA_POC_MEDIA_READ_FAILED'];
 
 function doGet() {
   return apiJson_({ok:false,error:'Method not allowed',code:'METHOD_NOT_ALLOWED',httpStatus:405});
@@ -55,6 +59,9 @@ function doPost(e) {
 
   try {
     var args=body.args;
+    if(mediaPocIsReadAction_(body.action))mediaPocReadLog_(body.action,'request_received',{
+      chunkIndex:mediaPocSafeChunkIndex_(args[0]),durationMs:Date.now()-requestStarted
+    });
     if(body.action==='works.fetch') {
       if(args.length>1)return apiJson_({ok:false,error:'Invalid works.fetch request',code:'INVALID_REQUEST',httpStatus:400});
       return apiJson_({ok:true,data:fetchCxlWorks_(args[0]||{})});
@@ -67,10 +74,19 @@ function doPost(e) {
       return apiJson_({ok:true,data:saveCxlWorkApi_('create',args[0],args[1],configuredOwner)});
     if(body.action==='works.update'&&args.length===3)
       return apiJson_({ok:true,data:saveCxlWorkApi_('update',{id:args[0],updates:args[1]},args[2],configuredOwner)});
-    if(body.action.indexOf('media.poc.')===0)
-      return apiJson_({ok:true,data:mediaPocDispatch_(body.action,args,configuredOwner)});
+    if(body.action.indexOf('media.poc.')===0) {
+      var mediaResult=mediaPocDispatch_(body.action,args,configuredOwner);
+      var mediaOutput=apiJson_({ok:true,data:mediaResult});
+      if(mediaPocIsReadAction_(body.action))mediaPocReadLog_(body.action,'response_constructed',{
+        chunkIndex:mediaPocSafeChunkIndex_(args[0]),durationMs:Date.now()-requestStarted
+      });
+      return mediaOutput;
+    }
     return apiJson_({ok:false,error:'Invalid action arguments',code:'INVALID_REQUEST',httpStatus:400});
   } catch(error) {
+    if(body&&mediaPocIsReadAction_(body.action))mediaPocReadLog_(body.action,'read_failed',{
+      code:mediaPocSafeReadCode_(error),chunkIndex:mediaPocSafeChunkIndex_(body.args&&body.args[0]),durationMs:Date.now()-requestStarted
+    });
     return apiJson_({ok:false,error:String(error&&error.message||error),code:error&&error.apiCode||'OWNER_API_ERROR',
       httpStatus:400,privateSaved:!!(error&&error.privateSaved),workId:error&&error.workId||undefined});
   }
@@ -98,6 +114,32 @@ function ownerTimingPhase_(phase,durationMs) {
 }
 
 function apiFail_(code,message) { var error=new Error(message);error.apiCode=code;throw error; }
+
+function mediaPocIsReadAction_(action) { return MEDIA_POC_READ_ACTIONS_.indexOf(action)>=0; }
+function mediaPocSafeChunkIndex_(input) {
+  var index=input&&Number(input.chunkIndex);
+  return Number.isInteger(index)&&index>=0&&index<=4?index:undefined;
+}
+function mediaPocSafeReadCode_(error) {
+  var code=error&&typeof error.apiCode==='string'?error.apiCode:'';
+  return MEDIA_POC_READ_ERROR_CODES_.indexOf(code)>=0?code:'MEDIA_POC_MEDIA_READ_FAILED';
+}
+function mediaPocReadLog_(action,phase,details) {
+  if(!mediaPocIsReadAction_(action)||MEDIA_POC_READ_PHASES_.indexOf(phase)<0)return;
+  var record={event:'media_poc_read',action:action,phase:phase},data=details||{};
+  var code=typeof data.code==='string'&&MEDIA_POC_READ_ERROR_CODES_.indexOf(data.code)>=0?data.code:'';
+  var status=Number(data.httpStatus),expected=Number(data.expectedBytes),actual=Number(data.actualBytes),duration=Number(data.durationMs),chunkIndex=Number(data.chunkIndex);
+  if(code)record.code=code;
+  if(Number.isInteger(status)&&status>=100&&status<=599)record.httpStatus=status;
+  if(Number.isFinite(expected)&&expected>=0)record.expectedBytes=expected;
+  if(Number.isFinite(actual)&&actual>=0)record.actualBytes=actual;
+  if(Number.isFinite(duration)&&duration>=0)record.durationMs=duration;
+  if(Number.isInteger(chunkIndex)&&chunkIndex>=0&&chunkIndex<=4)record.chunkIndex=chunkIndex;
+  try {
+    var line=JSON.stringify(record);
+    if(phase==='read_failed')console.warn(line);else console.log(line);
+  } catch(_error) {}
+}
 
 function mediaPocDispatch_(action,args,ownerUserId) {
   var operation=function(){
@@ -267,14 +309,27 @@ function mediaPocSetPublic_(input,ownerUserId) {
   manifest.isPublic=input.isPublic;manifest.active=true;mediaPocStoreJson_(mediaPocManifestKey_(input.mediaId),manifest);
   return {workId:manifest.workId,mediaId:manifest.mediaId,ref:'media:'+manifest.mediaId,state:manifest.isPublic?'public':'private'};
 }
-function mediaPocDriveChunk_(fileId,start,expectedLength,totalSize) {
+function mediaPocDriveChunk_(fileId,start,expectedLength,totalSize,action,chunkIndex) {
   var end=start+expectedLength-1,url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media';
-  var response;
+  var response,fetchStarted=Date.now();
+  mediaPocReadLog_(action,'drive_fetch_started',{expectedBytes:expectedLength,chunkIndex:chunkIndex});
   try{response=UrlFetchApp.fetch(url,{method:'get',headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken(),Range:'bytes='+start+'-'+end},muteHttpExceptions:true});}
-  catch(_error){apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
+  catch(_error){mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_READ_FAILED',expectedBytes:expectedLength,durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');}
   var status=response.getResponseCode(),content=response.getContent();
-  if(status===206){if(content.length!==expectedLength)apiFail_('MEDIA_POC_MEDIA_INVALID','Isolated media byte range has an invalid size');return content;}
-  if(status===200&&content.length===totalSize){var full=content.slice(start,end+1);if(full.length===expectedLength)return full;}
+  mediaPocReadLog_(action,'drive_fetch_completed',{httpStatus:status,expectedBytes:expectedLength,actualBytes:content.length,
+    durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});
+  if(status===206){
+    if(content.length!==expectedLength){mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_INVALID',httpStatus:status,
+      expectedBytes:expectedLength,actualBytes:content.length,durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});apiFail_('MEDIA_POC_MEDIA_INVALID','Isolated media byte range has an invalid size');}
+    mediaPocReadLog_(action,'drive_range_validated',{httpStatus:status,expectedBytes:expectedLength,actualBytes:content.length,
+      durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});return content;
+  }
+  if(status===200&&content.length===totalSize){var full=content.slice(start,end+1);if(full.length===expectedLength){
+    mediaPocReadLog_(action,'drive_range_validated',{httpStatus:status,expectedBytes:expectedLength,actualBytes:full.length,
+      durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});return full;
+  }}
+  mediaPocReadLog_(action,'read_failed',{code:'MEDIA_POC_MEDIA_READ_FAILED',httpStatus:status,expectedBytes:expectedLength,
+    actualBytes:content.length,durationMs:Date.now()-fetchStarted,chunkIndex:chunkIndex});
   apiFail_('MEDIA_POC_MEDIA_READ_FAILED','Isolated media bytes could not be read');
 }
 function mediaPocReadChunk_(input,ownerUserId,isPublic) {
@@ -293,7 +348,9 @@ function mediaPocReadChunk_(input,ownerUserId,isPublic) {
   if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE)apiFail_('MEDIA_POC_MEDIA_NOT_FOUND','Isolated media test item was not found');
   if(file.getSize()!==manifest.totalFileSize)apiFail_('MEDIA_POC_MEDIA_INVALID','Isolated media test item is invalid');
   var start=input.chunkIndex*MEDIA_POC_CHUNK_BYTES_,expectedLength=Math.min(MEDIA_POC_CHUNK_BYTES_,manifest.totalFileSize-start);
-  var chunkBytes=mediaPocDriveChunk_(manifest.fileId,start,expectedLength,manifest.totalFileSize);
+  var action=isPublic?'media.poc.publicChunk':'media.poc.ownerChunk';
+  mediaPocReadLog_(action,'manifest_validated',{expectedBytes:expectedLength,chunkIndex:input.chunkIndex});
+  var chunkBytes=mediaPocDriveChunk_(manifest.fileId,start,expectedLength,manifest.totalFileSize,action,input.chunkIndex);
   ownerTimingPhase_(isPublic?'public_media_read':'owner_media_read',Date.now()-readStarted);
   return {workId:manifest.workId,mediaId:manifest.mediaId,ref:'media:'+manifest.mediaId,mimeType:manifest.mimeType,
     totalFileSize:manifest.totalFileSize,totalChunks:count,chunkIndex:input.chunkIndex,sha256:manifest.sha256,

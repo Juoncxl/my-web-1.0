@@ -70,6 +70,7 @@ function makeBridge(secret = SECRET) {
   const staging = new MemoryFolder(properties.CXL_MEDIA_STAGING_FOLDER_ID);
   const folders: Record<string, MemoryFolder> = { [canonical.id]: canonical, [staging.id]: staging };
   const driveRangeCalls: Array<{ url: string; options: Record<string, any> }> = [];
+  let driveFetchOverride: ((url: string, options: Record<string, any>) => any) | undefined;
   const context: Record<string, any> = {
     __properties: properties,
     __canonical: canonical,
@@ -91,6 +92,7 @@ function makeBridge(secret = SECRET) {
     ScriptApp: { getOAuthToken: () => 'test-only-google-oauth-token' },
     UrlFetchApp: { fetch: (url: string, options: Record<string, any>) => {
       driveRangeCalls.push({ url, options });
+      if (driveFetchOverride) return driveFetchOverride(url, options);
       const fileId = decodeURIComponent(new URL(url).pathname.split('/').at(-1) || '');
       const file = [...canonical.files, ...staging.files].find(item => item.id === fileId && !item.trashed);
       if (!file) return { getResponseCode: () => 404, getContent: () => [] };
@@ -109,9 +111,10 @@ function makeBridge(secret = SECRET) {
       getUuid: () => randomUUID()
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    console: { log: vi.fn(), info: vi.fn() }
+    console: { log: vi.fn(), info: vi.fn(), warn: vi.fn() }
   };
   runInNewContext(source, context);
+  context.__setDriveFetch = (override: typeof driveFetchOverride) => { driveFetchOverride = override; };
   context.__wrongSecret = secret;
   return context;
 }
@@ -129,6 +132,30 @@ function png(size: number) {
 
 function liveTestPng68() {
   return Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/7b8AAAAASUVORK5CYII=', 'base64');
+}
+
+function seedReadMedia(context: Record<string, any>, bytes: Buffer) {
+  const ids = { mediaId: randomUUID(), workNonce: randomUUID() };
+  const file = context.__canonical.createFile(new MemoryBlob(bytes, 'image/png', 'isolated-read-test.png'));
+  context.__properties[`CXL_MEDIA_POC_MEDIA_${ids.mediaId}`] = JSON.stringify({
+    workNonce: ids.workNonce,
+    workId: `asset_media_poc_${ids.workNonce}`,
+    mediaId: ids.mediaId,
+    fileId: file.id,
+    mimeType: 'image/png',
+    totalFileSize: bytes.length,
+    sha256: digest(bytes),
+    active: true,
+    isPublic: false,
+    ownerUserId: OWNER_ID
+  });
+  return { ids, file, readArgs: (chunkIndex: number) => ({
+    mediaId: ids.mediaId, workNonce: ids.workNonce, ref: `media:${ids.mediaId}`, chunkIndex
+  }) };
+}
+
+function parsedReadLogs(context: Record<string, any>) {
+  return [...context.console.log.mock.calls, ...context.console.warn.mock.calls].map(([line]: [string]) => JSON.parse(line));
 }
 
 function begin(context: Record<string, any>, bytes: Buffer, extras: Record<string, unknown> = {}) {
@@ -278,6 +305,9 @@ describe('API-only Owner isolated Media POC', () => {
     const publicChunk = post(context, 'media.poc.publicChunk', [readArgs]);
     expect(publicChunk).toMatchObject({ ok: true, data: { mimeType: 'image/png', totalFileSize: bytes.length, ref: `media:${ids.mediaId}` } });
     expect(Buffer.from(publicChunk.data.base64, 'base64')).toEqual(bytes);
+    const publicReadLogs = parsedReadLogs(context).filter(log => log.action === 'media.poc.publicChunk');
+    expect(publicReadLogs.map(log => log.phase)).toContain('response_constructed');
+    expect(publicReadLogs.map(log => log.phase)).toContain('drive_range_validated');
     expect(context.__driveRangeCalls[0].options.headers.Range).toBe(`bytes=0-${bytes.length - 1}`);
     expect(context.__driveRangeCalls[0].options.headers.Authorization).toBe('Bearer test-only-google-oauth-token');
     expect(JSON.stringify(publicChunk)).not.toContain('test-only-google-oauth-token');
@@ -311,6 +341,92 @@ describe('API-only Owner isolated Media POC', () => {
       chunkSha256: digest(bytes)
     } });
     expect(Buffer.from(response.data.base64, 'base64')).toEqual(bytes);
+  });
+
+  it('logs successful Owner chunk reads with only safe fields and records Drive 206 validation', () => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    const fixture = seedReadMedia(context, bytes);
+    const response = post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]);
+    expect(response.ok).toBe(true);
+
+    const logs = parsedReadLogs(context);
+    expect(logs.map(log => log.phase)).toEqual(expect.arrayContaining([
+      'request_received', 'manifest_validated', 'drive_fetch_started', 'drive_fetch_completed',
+      'drive_range_validated', 'response_constructed'
+    ]));
+    expect(logs.find(log => log.phase === 'drive_fetch_completed')).toMatchObject({
+      event: 'media_poc_read', action: 'media.poc.ownerChunk', httpStatus: 206,
+      expectedBytes: bytes.length, actualBytes: bytes.length
+    });
+    const allowedKeys = new Set(['event', 'action', 'phase', 'code', 'httpStatus', 'expectedBytes', 'actualBytes', 'durationMs', 'chunkIndex']);
+    for (const log of logs) {
+      expect(Object.keys(log).every(key => allowedKeys.has(key))).toBe(true);
+      expect(log.chunkIndex).toBe(0);
+      expect(typeof log.durationMs === 'undefined' || Number.isFinite(log.durationMs)).toBe(true);
+    }
+    const serialized = JSON.stringify(logs);
+    for (const sensitive of [fixture.ids.mediaId, fixture.ids.workNonce, fixture.file.id,
+      `media:${fixture.ids.mediaId}`, 'test-only-google-oauth-token', digest(bytes), bytes.toString('base64'), 'isolated-canonical-folder']) {
+      expect(serialized).not.toContain(sensitive);
+    }
+    expect(serialized).not.toMatch(/https?:\/\//i);
+  });
+
+  it('supports Drive HTTP 200 full-body fallback and logs only status and byte counts', () => {
+    const context = makeBridge();
+    const bytes = png(CHUNK_BYTES + 23);
+    const fixture = seedReadMedia(context, bytes);
+    context.__setDriveFetch(() => ({ getResponseCode: () => 200, getContent: () => [...bytes].map(byte => byte > 127 ? byte - 256 : byte) }));
+
+    const response = post(context, 'media.poc.ownerChunk', [fixture.readArgs(1)]);
+    expect(response.ok).toBe(true);
+    expect(Buffer.from(response.data.base64, 'base64')).toEqual(bytes.subarray(CHUNK_BYTES));
+    const logs = parsedReadLogs(context);
+    expect(logs.find(log => log.phase === 'drive_fetch_completed')).toMatchObject({
+      httpStatus: 200, expectedBytes: 23, actualBytes: bytes.length
+    });
+    expect(logs.find(log => log.phase === 'drive_range_validated')).toMatchObject({
+      httpStatus: 200, expectedBytes: 23, actualBytes: 23
+    });
+  });
+
+  it('logs non-range Drive status and throws a safe failure code', () => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    const fixture = seedReadMedia(context, bytes);
+    context.__setDriveFetch(() => ({ getResponseCode: () => 403, getContent: () => [1, 2, 3] }));
+
+    const response = post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]);
+    expect(response).toMatchObject({ ok: false, code: 'MEDIA_POC_MEDIA_READ_FAILED' });
+    const logs = parsedReadLogs(context);
+    expect(logs.find(log => log.phase === 'drive_fetch_completed')).toMatchObject({
+      httpStatus: 403, expectedBytes: bytes.length, actualBytes: 3
+    });
+    expect(logs.filter(log => log.phase === 'read_failed').at(-1)).toMatchObject({
+      code: 'MEDIA_POC_MEDIA_READ_FAILED', action: 'media.poc.ownerChunk'
+    });
+  });
+
+  it('logs thrown UrlFetch failures without copying exception details or sensitive read data', () => {
+    const context = makeBridge();
+    const bytes = liveTestPng68();
+    const fixture = seedReadMedia(context, bytes);
+    const sensitiveFailure = 'https://drive.example/private/file-id Bearer secret-token ' + bytes.toString('base64');
+    context.__setDriveFetch(() => { throw new Error(sensitiveFailure); });
+
+    const response = post(context, 'media.poc.ownerChunk', [fixture.readArgs(0)]);
+    expect(response).toMatchObject({ ok: false, code: 'MEDIA_POC_MEDIA_READ_FAILED' });
+    const logs = parsedReadLogs(context);
+    expect(logs.filter(log => log.phase === 'read_failed').at(-1)).toMatchObject({
+      code: 'MEDIA_POC_MEDIA_READ_FAILED', action: 'media.poc.ownerChunk'
+    });
+    const serialized = JSON.stringify(logs);
+    expect(serialized).not.toContain(sensitiveFailure);
+    expect(serialized).not.toContain(fixture.ids.mediaId);
+    expect(serialized).not.toContain(fixture.ids.workNonce);
+    expect(serialized).not.toContain(fixture.file.id);
+    expect(serialized).not.toContain(digest(bytes));
   });
 
   it('cleans only a bounded number of expired POC staging sessions and never touches canonical media', () => {
