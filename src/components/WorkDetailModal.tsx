@@ -31,7 +31,7 @@ import { formatThaiDate } from '../lib/dateUtils';
 import { resolveWorkCreator } from '../lib/workPresentation';
 import { resolveWorkPresentationContent } from '../lib/workContent';
 import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
-import { isValidWorkIcon } from '../lib/assetVisibility';
+import { isValidWorkIcon, isValidWorkImageSource } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
 import { getParticipantContentCopy, getParticipantTagCopy } from '../lib/collaborationPresentation';
@@ -101,7 +101,7 @@ function ContentBlock({ block, copied, onCopy }: { block: WorkContentBlock; copi
   }
 
   const body = block.body.trim();
-  const isImageSource = block.type === 'Image' && /^(?:data:image\/|blob:|https?:\/\/)/i.test(body);
+  const isImageSource = block.type === 'Image' && isValidWorkImageSource(body);
   const isCopyable = ['Text', 'Prompt', 'Note'].includes(block.type) && isMeaningfulCopyText(body, block.title);
 
   return <article className={`work-detail-block is-${block.type.toLowerCase().replace(/\s+/g, '-')}`}>

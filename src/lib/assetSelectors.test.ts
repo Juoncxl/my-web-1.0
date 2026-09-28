@@ -10,7 +10,7 @@ import {
   selectVaultStats
 } from './assetSelectors';
 import { isPublicFeedAsset } from './accessPolicy';
-import { isPublicFeedVisibility, isValidWorkIcon, normalizeAssetVisibility } from './assetVisibility';
+import { isPublicFeedVisibility, isValidWorkIcon, isValidWorkImageSource, normalizeAssetVisibility } from './assetVisibility';
 
 function makeAsset(overrides: Partial<Asset> = {}): Asset {
   return {
@@ -81,9 +81,35 @@ describe('asset visibility compatibility', () => {
   it('accepts only valid persisted Work Icon values', () => {
     expect(isValidWorkIcon({ type: 'emoji', value: '🧪' })).toBe(true);
     expect(isValidWorkIcon({ type: 'image', value: 'data:image/png;base64,abc' })).toBe(true);
+    expect(isValidWorkIcon({ type: 'image', value: 'blob:legacy-icon' })).toBe(true);
     expect(isValidWorkIcon({ type: 'image', value: 'https://cdn.example/icon.gif' })).toBe(true);
     expect(isValidWorkIcon({ type: 'image', value: 'not-a-media-url' })).toBe(false);
     expect(isValidWorkIcon({ type: 'image', value: '' })).toBe(false);
+  });
+
+  it('accepts only canonical Owner and Public CXL proxy sources for Work images', () => {
+    const proxy = (scope: 'owner' | 'public') => `/api/cxl/media?scope=${scope}&workId=asset_1234567890abcdef&ref=media%3A550e8400-e29b-41d4-a716-446655440000`;
+
+    for (const scope of ['owner', 'public'] as const) {
+      const source = proxy(scope);
+      expect(isValidWorkIcon({ type: 'image', value: source })).toBe(true);
+      expect(isValidWorkImageSource(source)).toBe(true);
+      expect(isValidWorkIcon({ type: 'image', value: `${source}&v=1767225600000` })).toBe(true);
+    }
+
+    expect(isValidWorkIcon({ type: 'image', value: '/images/icon.png' })).toBe(false);
+    expect(isValidWorkImageSource('/images/content.png')).toBe(false);
+    expect(isValidWorkImageSource('//cdn.example/content.png')).toBe(false);
+    expect(isValidWorkImageSource('/api/cxl/other?scope=owner')).toBe(false);
+    expect(isValidWorkImageSource('/api/cxl/media?scope=admin&workId=asset_1234567890abcdef&ref=media%3A550e8400-e29b-41d4-a716-446655440000')).toBe(false);
+    expect(isValidWorkIcon({ type: 'image', value: `${proxy('owner')}&v=not-a-timestamp` })).toBe(false);
+    expect(isValidWorkIcon({ type: 'image', value: `${proxy('owner')}&v=1&v=2` })).toBe(false);
+  });
+
+  it('keeps existing legacy content image source types valid', () => {
+    expect(isValidWorkImageSource('data:image/png;base64,abc')).toBe(true);
+    expect(isValidWorkImageSource('blob:legacy-content-image')).toBe(true);
+    expect(isValidWorkImageSource('https://cdn.example/content.png')).toBe(true);
   });
 });
 
