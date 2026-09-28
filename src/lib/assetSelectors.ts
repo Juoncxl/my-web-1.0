@@ -80,12 +80,21 @@ export function selectCollectionAssets(
  * It deliberately does not read the owner-only `collaboration` draft.
  */
 export function getAssetPlatforms(asset: Asset): string[] {
+  // Treat nested public metadata as runtime input: old summary generations may
+  // contain invalid shapes even when the top-level Work passed validation.
+  const presentationPlatforms = Array.isArray(asset.presentationMetadata?.appPlatforms)
+    ? asset.presentationMetadata.appPlatforms
+    : [];
+  const collaborationPlatforms = Array.isArray(asset.publicCollaboration?.platforms)
+    ? asset.publicCollaboration.platforms
+    : [];
   const values = [
-    ...(asset.presentationMetadata?.appPlatforms || []),
-    ...(asset.publicCollaboration?.platforms || [])
+    ...presentationPlatforms,
+    ...collaborationPlatforms
   ];
   const seen = new Set<string>();
   return values.reduce<string[]>((platforms, value) => {
+    if (typeof value !== 'string') return platforms;
     const clean = value.trim();
     const key = clean.toLocaleLowerCase();
     if (!clean || seen.has(key)) return platforms;
