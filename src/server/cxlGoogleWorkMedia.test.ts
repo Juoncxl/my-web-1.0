@@ -110,7 +110,7 @@ describe('Google standard Work media proxy', () => {
       return new Response(JSON.stringify({ ok: true, data: chunkResponse(), meta: { timing: {
         action: 'media.work.ownerChunk', phases: {
           work_lookup: 12, canonical_work_read: 3.25, association_validation: 4,
-          file_metadata_validation: 2, binary_fetch: 9, response_construction: 1,
+          owner_auth_cache: 1.5, file_metadata_validation: 2, binary_fetch: 9, response_construction: 1,
           injected: 55, 'drive-file-secret': 100, public_projection_validation: 'bad'
         }, totalMs: 32.5, ownerId: OWNER_SUB
       } } }), { status: 200 });
@@ -120,7 +120,7 @@ describe('Google standard Work media proxy', () => {
     await handleGoogleWorkMediaRead(request(`/api/cxl/media?scope=owner&workId=${WORK_ID}&ref=media%3A${MEDIA_ID}`, ownerCookie()), res as unknown as ServerResponse);
     expect(res.statusCode).toBe(200);
     expect(res.body()).toEqual(IMAGE_BYTES);
-    expect(res.headers['Server-Timing']).toBe('work_lookup;dur=12.00, canonical_work_read;dur=3.25, association_validation;dur=4.00, file_metadata_validation;dur=2.00, binary_fetch;dur=9.00, response_construction;dur=1.00, total;dur=32.50');
+    expect(res.headers['Server-Timing']).toBe('work_lookup;dur=12.00, canonical_work_read;dur=3.25, association_validation;dur=4.00, owner_auth_cache;dur=1.50, file_metadata_validation;dur=2.00, binary_fetch;dur=9.00, response_construction;dur=1.00, total;dur=32.50');
     expect(res.headers['Server-Timing']).not.toMatch(/secret|ownerId|drive|media:|asset_/i);
   });
 

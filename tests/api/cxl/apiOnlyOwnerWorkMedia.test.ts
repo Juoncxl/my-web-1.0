@@ -59,7 +59,14 @@ function makeWorkMediaBridge() {
     }
   }
   const folders = new Map<string, FakeFolder>([['canonical', new FakeFolder('canonical')], ['staging', new FakeFolder('staging')]]);
+  const cacheValues = new Map<string, string>();
+  const scriptCache = {
+    get: (key: string) => cacheValues.get(key) || null,
+    put: (key: string, value: string) => { cacheValues.set(key, String(value)); },
+    remove: (key: string) => { cacheValues.delete(key); }
+  };
   const context: Record<string, any> = {
+    CacheService: { getScriptCache: () => scriptCache },
     PropertiesService: { getScriptProperties: () => ({
       getProperty: (key: string) => properties.get(key) || null,
       setProperty: (key: string, value: string) => { properties.set(key, String(value)); },
@@ -70,6 +77,7 @@ function makeWorkMediaBridge() {
     LockService: { getScriptLock: () => ({ waitLock: () => undefined, releaseLock: () => undefined }) },
     Utilities: {
       DigestAlgorithm: { SHA_256: 'SHA_256' },
+      getUuid: () => `cache-test-${Math.random()}`,
       computeDigest: (_algorithm: string, value: ArrayLike<number>) => Array.from(createHash('sha256').update(Buffer.from(Array.from(value, item => Number(item) & 255))).digest()),
       base64Decode: (value: string) => Array.from(Buffer.from(value, 'base64')),
       base64Encode: (value: ArrayLike<number>) => Buffer.from(Array.from(value, item => Number(item) & 255)).toString('base64'),
@@ -98,11 +106,11 @@ function makeWorkMediaBridge() {
     }
   };
   runInNewContext(source, context);
-  return { context, folders, properties };
+  return { context, folders, properties, cacheValues, scriptCache };
 }
 
 function attachedReadFixture(mimeType: string, bytes: Buffer, isPublic = false) {
-  const { context, folders, properties } = makeWorkMediaBridge();
+  const { context, folders, properties, cacheValues, scriptCache } = makeWorkMediaBridge();
   const originalGetOwnerWork = context.getOwnerWork_;
   const file = folders.get('canonical')!.createFile({ name: 'attached-media', mimeType, getBytes: () => [...bytes] });
   file.setSharing('private');
@@ -123,7 +131,7 @@ function attachedReadFixture(mimeType: string, bytes: Buffer, isPublic = false) 
   context.rowById_ = () => ({ active: 'true', updated_at: record.row.updated_at, file_id: 'public-projection' });
   context.parse_ = () => projection;
   const input = { workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 };
-  return { context, file, record, projection, properties, input, originalGetOwnerWork };
+  return { context, file, record, projection, properties, input, originalGetOwnerWork, cacheValues, scriptCache };
 }
 
 describe('API-only Owner standard Work media foundation', () => {
@@ -212,6 +220,8 @@ describe('API-only Owner standard Work media foundation', () => {
       visibility: 'private', is_public: false, deleted_at: '', folder_id: '', tags: [], icon: previousAsset.icon,
       preview_image: '', preview_images: [], content_blocks: [], versions: [] }, cxlAsset: previousAsset, mediaRecords: [mediaRecord] };
     const originalRecord = structuredClone(currentRecord);
+    context.mediaWorkOwnerSnapshotSeed_(originalRecord, OWNER_ID, context.mediaWorkOwnerSnapshotEpoch_(WORK_ID, true));
+    expect(context.mediaWorkOwnerSnapshotRead_(WORK_ID, OWNER_ID)).not.toBeNull();
     const indexRow = { _sheetRow: 2, id: WORK_ID, revision: 3, file_id: 'revision-3' };
     const events: string[] = [];
     context.config_ = () => ({ privateSheetId: 'private-index', privateId: 'canonical' });
@@ -223,7 +233,11 @@ describe('API-only Owner standard Work media foundation', () => {
     context.appendOwnerSearchChunks_ = () => undefined;
     context.privateMeta_ = () => ({ id: WORK_ID });
     context.shareRecordMedia_ = () => undefined;
-    context.putJsonRevision_ = () => { events.push('revision_write'); return 'revision-4'; };
+    context.putJsonRevision_ = () => {
+      events.push('revision_write');
+      expect(context.mediaWorkOwnerSnapshotRead_(WORK_ID, OWNER_ID)).toBeNull();
+      return 'revision-4';
+    };
     context.setPrivateIndexRow_ = () => { events.push('private_index'); throw new Error('index write failed'); };
     const markRetired = context.mediaWorkMarkRetired_;
     context.mediaWorkMarkRetired_ = (...args: unknown[]) => { events.push('retire'); return markRetired(...args); };
@@ -235,6 +249,7 @@ describe('API-only Owner standard Work media foundation', () => {
 
     expect(() => context.saveOwnerWork_(input, options)).toThrow('index write failed');
     expect(events).toEqual(['revision_write', 'private_index']);
+    expect(context.mediaWorkOwnerSnapshotRead_(WORK_ID, OWNER_ID)).toBeNull();
     expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!).state).toBe('attached');
     expect(file.getSharingAccess()).toBe('private');
 
@@ -248,6 +263,9 @@ describe('API-only Owner standard Work media foundation', () => {
     expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!)).toMatchObject({ state: 'retired', retiredFromRevision: 4 });
     expect(file.trashed).toBe(false);
     expect(file.getSharingAccess()).toBe('private');
+    context.getOwnerWork_ = () => saved.record;
+    expect(() => context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
   });
 
   it('keeps a shared media identity attached while any canonical reference remains', () => {
@@ -367,6 +385,90 @@ describe('API-only Owner standard Work media foundation', () => {
     expect(oauth).not.toHaveBeenCalled();
   });
 
+  it('seeds a server-side Owner authorization snapshot from a full Work detail fetch', () => {
+    const { context, file, cacheValues } = attachedReadFixture('image/gif', Buffer.from('GIF89a'));
+    const response = context.fetchCxlWorks_({ assetId: WORK_ID });
+    const snapshot = JSON.parse([...cacheValues.entries()].find(([key]) => key.startsWith('CXL_WORK_MEDIA_OWNER_SNAPSHOT_'))![1]);
+    expect(response.data).toHaveLength(1);
+    expect(snapshot).toMatchObject({ schemaVersion: 1, workId: WORK_ID, ownerId: OWNER_ID, category: 'prompts',
+      mediaRecords: { [MEDIA_ID]: { id: MEDIA_ID, delivery: 'vercel_proxy', drive_file_id: file.getId() } },
+      placements: { [MEDIA_ID]: { id: MEDIA_ID, purpose: 'icon' } } });
+    expect(JSON.stringify(response)).not.toContain(file.getId());
+  });
+
+  it('uses the seeded Owner snapshot and skips another Sheet/canonical Work read', () => {
+    const { context, file, input } = attachedReadFixture('image/png', Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    context.fetchCxlWorks_({ assetId: WORK_ID });
+    context.getOwnerWork_ = vi.fn(() => { throw new Error('canonical read should be skipped'); });
+    const blobRead = vi.spyOn(file, 'getBlob');
+    const response = context.doPost({ postData: { contents: JSON.stringify({ authorization: 'test-secret', ownerUserId: OWNER_ID,
+      action: 'media.work.ownerChunk', args: [input], includeTiming: true }) } });
+    const result = JSON.parse(response.text);
+    expect(result.ok).toBe(true);
+    expect(result.meta.timing.phases.owner_auth_cache).toEqual(expect.any(Number));
+    expect(result.meta.timing.phases).not.toHaveProperty('work_lookup');
+    expect(result.meta.timing.phases).not.toHaveProperty('canonical_work_read');
+    expect(context.getOwnerWork_).not.toHaveBeenCalled();
+    expect(blobRead).toHaveBeenCalledOnce();
+    expect(response.text).not.toContain(file.getId());
+    expect(response.text).not.toContain('CXL_WORK_MEDIA_OWNER_');
+  });
+
+  it('reuses one Owner snapshot across sequential chunks of the same media', () => {
+    const bytes = Buffer.alloc(2 * 1024 * 1024 + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47]).copy(bytes);
+    const { context, input } = attachedReadFixture('image/png', bytes);
+    const getOwnerWork = context.getOwnerWork_;
+    const canonicalRead = vi.fn(getOwnerWork);
+    context.getOwnerWork_ = canonicalRead;
+    context.mediaWorkReadChunk_(input, OWNER_ID, false);
+    context.mediaWorkReadChunk_({ ...input, chunkIndex: 1 }, OWNER_ID, false);
+    expect(canonicalRead).toHaveBeenCalledOnce();
+    expect(context.CacheService.getScriptCache().get(`CXL_WORK_MEDIA_OWNER_SNAPSHOT_${WORK_ID}`)).toContain('drive_file_id');
+  });
+
+  it('falls back to full canonical validation on cache miss, malformed snapshots, or expired snapshots', () => {
+    for (const cacheState of ['miss', 'malformed', 'expired', 'inconsistent', 'unavailable']) {
+      const { context, input, cacheValues } = attachedReadFixture('image/png', Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      if (cacheState !== 'miss') {
+        context.fetchCxlWorks_({ assetId: WORK_ID });
+        const key = `CXL_WORK_MEDIA_OWNER_SNAPSHOT_${WORK_ID}`;
+        if (cacheState === 'malformed') cacheValues.set(key, '{broken');
+        else if (cacheState === 'inconsistent') {
+          const cached = JSON.parse(cacheValues.get(key)!);
+          cached.workId = 'asset_another_work';
+          cacheValues.set(key, JSON.stringify(cached));
+        } else cacheValues.delete(key);
+      }
+      if (cacheState === 'unavailable') context.CacheService.getScriptCache = () => { throw new Error('cache offline'); };
+      const getOwnerWork = context.getOwnerWork_;
+      const canonicalRead = vi.fn(getOwnerWork);
+      context.getOwnerWork_ = canonicalRead;
+      expect(context.mediaWorkReadChunk_(input, OWNER_ID, false).totalChunks).toBe(1);
+      expect(canonicalRead).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('reads the manifest fresh on a cache hit and rejects a newly retired media record', () => {
+    const { context, input, properties } = attachedReadFixture('image/gif', Buffer.from('GIF89a'));
+    context.fetchCxlWorks_({ assetId: WORK_ID });
+    context.getOwnerWork_ = vi.fn(() => { throw new Error('cache hit expected'); });
+    const key = `CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`;
+    properties.set(key, JSON.stringify({ ...JSON.parse(properties.get(key)!), state: 'retired' }));
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
+    expect(context.getOwnerWork_).not.toHaveBeenCalled();
+  });
+
+  it('does not let a detail read that started before an update reseed its stale snapshot afterward', () => {
+    const { context, record, cacheValues } = attachedReadFixture('image/jpeg', Buffer.from([0xff, 0xd8, 0xff]));
+    const oldEpoch = context.mediaWorkOwnerSnapshotEpoch_(WORK_ID, true);
+    expect(context.mediaWorkOwnerSnapshotInvalidate_(WORK_ID)).toBe(true);
+    expect(context.mediaWorkOwnerSnapshotSeed_(record, OWNER_ID, oldEpoch)).toBe(false);
+    expect(cacheValues.has(`CXL_WORK_MEDIA_OWNER_SNAPSHOT_${WORK_ID}`)).toBe(false);
+    expect(context.mediaWorkOwnerSnapshotRead_(WORK_ID, OWNER_ID)).toBeNull();
+  });
+
   it('reads a small public file through the blob path only after current public projection authorization', () => {
     const bytes = Buffer.from('GIF87a');
     const { context, file, record, input } = attachedReadFixture('image/gif', bytes, true);
@@ -465,6 +567,8 @@ describe('API-only Owner standard Work media foundation', () => {
     record.mediaRecords[0].file_size = maxBytes;
     record.mediaRecords[0].sha256 = 'a'.repeat(64);
     vi.spyOn(file, 'getSize').mockReturnValue(maxBytes);
+    context.mediaWorkOwnerSnapshotInvalidate_(WORK_ID);
+    context.mediaWorkOwnerSnapshotSeed_(record, OWNER_ID, context.mediaWorkOwnerSnapshotEpoch_(WORK_ID, true));
     rangeFetch.mockImplementationOnce(() => ({ getResponseCode: () => 206,
       getContent: () => Array(2 * 1024 * 1024).fill(0) }));
     const maxChunk = context.mediaWorkReadChunk_({ ...input, chunkIndex: 4 }, OWNER_ID, false);

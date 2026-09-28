@@ -26,7 +26,7 @@ const GAS_READ_CODES = new Set([
   'MEDIA_READ_INVALID', 'MEDIA_READ_FAILED'
 ]);
 const WORK_MEDIA_TIMING_PHASES = new Set([
-  'work_lookup', 'canonical_work_read', 'association_validation', 'public_projection_validation',
+  'work_lookup', 'canonical_work_read', 'owner_auth_cache', 'association_validation', 'public_projection_validation',
   'file_metadata_validation', 'binary_fetch', 'response_construction'
 ]);
 

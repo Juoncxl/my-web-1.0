@@ -20,7 +20,7 @@ var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.up
   'media.poc.begin','media.poc.chunk','media.poc.finalize','media.poc.setPublic',
   'media.poc.ownerChunk','media.poc.publicChunk','media.poc.readDiagnostics','media.poc.cleanup'];
 var API_MAX_POST_CHARS_ = 5000000;
-var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','work_lookup','canonical_work_read','association_validation','public_projection_validation','file_metadata_validation','binary_fetch','total'];
+var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','work_lookup','canonical_work_read','association_validation','public_projection_validation','file_metadata_validation','binary_fetch','owner_auth_cache','total'];
 var API_TIMING_CONTEXT_ = null;
 var MEDIA_POC_CHUNK_BYTES_ = 2 * 1024 * 1024;
 var MEDIA_POC_MAX_BYTES_ = 10 * 1024 * 1024;
@@ -39,6 +39,11 @@ var CXL_WORK_MEDIA_MAX_CLEANUP_ITEMS_ = 5;
 var CXL_WORK_MEDIA_SESSION_PREFIX_ = 'CXL_WORK_MEDIA_UPLOAD_SESSION_';
 var CXL_WORK_MEDIA_INDEX_PREFIX_ = 'CXL_WORK_MEDIA_UPLOAD_INDEX_';
 var CXL_WORK_MEDIA_MANIFEST_PREFIX_ = 'CXL_WORK_MEDIA_MANIFEST_';
+var CXL_WORK_MEDIA_OWNER_SNAPSHOT_PREFIX_ = 'CXL_WORK_MEDIA_OWNER_SNAPSHOT_';
+var CXL_WORK_MEDIA_OWNER_EPOCH_PREFIX_ = 'CXL_WORK_MEDIA_OWNER_EPOCH_';
+var CXL_WORK_MEDIA_OWNER_BUSY_PREFIX_ = 'CXL_WORK_MEDIA_OWNER_BUSY_';
+var CXL_WORK_MEDIA_OWNER_SNAPSHOT_TTL_SECONDS_ = 60;
+var CXL_WORK_MEDIA_OWNER_EPOCH_TTL_SECONDS_ = 21600;
 var MEDIA_POC_READ_ACTIONS_ = ['media.poc.ownerChunk','media.poc.publicChunk'];
 var MEDIA_POC_READ_PHASES_ = ['request_received','manifest_validated','oauth_token_started','oauth_token_acquired','oauth_token_failed',
   'drive_fetch_started','drive_fetch_failed','drive_fetch_completed','drive_range_validated','response_constructed','read_failed'];
@@ -697,7 +702,12 @@ function fail_(message) { throw new Error(message); }
 
 function fetchCxlWorks_(options) {
   options=options||{};
-  if(options.assetId)return {data:[cxlAssetFromRecord_(getOwnerWork_(options.assetId))],error:null};
+  if(options.assetId){
+    var detailEpoch=mediaWorkOwnerSnapshotEpoch_(options.assetId,true);
+    var detailRecord=getOwnerWork_(options.assetId);
+    mediaWorkOwnerSnapshotSeed_(detailRecord,detailRecord&&detailRecord.row&&detailRecord.row.user_id,detailEpoch);
+    return {data:[cxlAssetFromRecord_(detailRecord)],error:null};
+  }
   if(options.detail==='full')apiFail_('FULL_LIST_NOT_SUPPORTED','Full Work reads require one assetId');
   var totalStarted=Date.now(),phaseStarted=totalStarted,index=listOwnerIndex_(),indexReadMs=Date.now()-phaseStarted,searchReadMs=0,summaryMs=0;
   ownerTimingPhase_('owner_index_read',indexReadMs);
@@ -983,6 +993,116 @@ function getOwnerWork_(id,includeReadTiming) {
   started=Date.now();
   try { return parse_(x.file_id); }
   finally { if(includeReadTiming)ownerTimingPhase_('canonical_work_read',Date.now()-started); }
+}
+
+function mediaWorkOwnerSnapshotKeys_(workId) {
+  var suffix=String(workId||'');
+  if(!/^asset_[A-Za-z0-9_-]{1,96}$/.test(suffix))return null;
+  return {snapshot:CXL_WORK_MEDIA_OWNER_SNAPSHOT_PREFIX_+suffix,epoch:CXL_WORK_MEDIA_OWNER_EPOCH_PREFIX_+suffix,
+    busy:CXL_WORK_MEDIA_OWNER_BUSY_PREFIX_+suffix};
+}
+
+function mediaWorkOwnerSnapshotCache_() {
+  try { return CacheService.getScriptCache(); } catch(_cacheError) { return null; }
+}
+
+function mediaWorkOwnerSnapshotEpoch_(workId,createIfMissing) {
+  var keys=mediaWorkOwnerSnapshotKeys_(workId),cache=mediaWorkOwnerSnapshotCache_();
+  if(!keys||!cache)return null;
+  try {
+    var epoch=cache.get(keys.epoch);
+    if(epoch||!createIfMissing)return epoch||null;
+    epoch=Utilities.getUuid();cache.put(keys.epoch,epoch,CXL_WORK_MEDIA_OWNER_EPOCH_TTL_SECONDS_);
+    return cache.get(keys.epoch)===epoch?epoch:null;
+  } catch(_epochError) { return null; }
+}
+
+function mediaWorkOwnerSnapshotRead_(workId,ownerId) {
+  var keys=mediaWorkOwnerSnapshotKeys_(workId),cache=mediaWorkOwnerSnapshotCache_();
+  if(!keys||!cache)return null;
+  try {
+    if(cache.get(keys.busy))return null;
+    var epoch=cache.get(keys.epoch),raw=cache.get(keys.snapshot);
+    if(!epoch||!raw)return null;
+    var snapshot=JSON.parse(raw);
+    if(!snapshot||snapshot.schemaVersion!==1||snapshot.epoch!==epoch||snapshot.workId!==workId
+      ||snapshot.ownerId!==ownerId||snapshot.category==='collab'||!snapshot.category
+      ||!Number.isFinite(Number(snapshot.revision))||typeof snapshot.updatedAt!=='string'
+      ||!snapshot.placements||typeof snapshot.placements!=='object'||Array.isArray(snapshot.placements)
+      ||!snapshot.mediaRecords||typeof snapshot.mediaRecords!=='object'||Array.isArray(snapshot.mediaRecords))return null;
+    var valid=true;
+    Object.keys(snapshot.mediaRecords).forEach(function(mediaId){
+      var item=snapshot.mediaRecords[mediaId];
+      if(!item||item.id!==mediaId||item.asset_id!==workId||item.delivery!=='vercel_proxy'
+        ||typeof item.drive_file_id!=='string'||!item.drive_file_id)valid=false;
+    });
+    Object.keys(snapshot.placements).forEach(function(mediaId){
+      var placement=snapshot.placements[mediaId];
+      if(!placement||placement.id!==mediaId||!Array.isArray(placement.references)||!placement.references.length)valid=false;
+    });
+    return valid?snapshot:null;
+  } catch(_cacheReadError) { return null; }
+}
+
+function mediaWorkOwnerSnapshotSeed_(record,ownerId,expectedEpoch) {
+  try {
+    if(!record||!record.row||!ownerId||!record.row.id||String(record.row.user_id||'')!==String(ownerId)
+      ||record.row.category==='collab'||!expectedEpoch)return false;
+    var keys=mediaWorkOwnerSnapshotKeys_(record.row.id),cache=mediaWorkOwnerSnapshotCache_();
+    if(!keys||!cache)return false;
+    var epoch=String(expectedEpoch);
+    if(cache.get(keys.busy)||cache.get(keys.epoch)!==epoch)return false;
+    var asset=cxlAssetFromRecord_(record),placements=mediaWorkReferenceMap_(asset),mediaRecords={};
+    (record.mediaRecords||[]).forEach(function(item){
+      if(item&&item.delivery==='vercel_proxy'&&item.asset_id===record.row.id&&item.id&&item.drive_file_id){
+        var compact={id:String(item.id),asset_id:String(item.asset_id),delivery:'vercel_proxy',purpose:String(item.purpose||''),
+          context_id:item.context_id||null,drive_file_id:String(item.drive_file_id),sort_order:Number(item.sort_order)||0,is_cover:!!item.is_cover};
+        if(item.file_size!==undefined)compact.file_size=Number(item.file_size);
+        if(item.mime_type!==undefined)compact.mime_type=String(item.mime_type);
+        if(item.sha256!==undefined)compact.sha256=String(item.sha256);
+        mediaRecords[item.id]=compact;
+      }
+    });
+    var snapshot={schemaVersion:1,epoch:epoch,workId:String(record.row.id),ownerId:String(ownerId),category:String(record.row.category||''),
+      revision:Number(record.revision)||0,updatedAt:String(record.row.updated_at||''),placements:placements,mediaRecords:mediaRecords};
+    if(cache.get(keys.busy)||cache.get(keys.epoch)!==epoch)return false;
+    cache.put(keys.snapshot,JSON.stringify(snapshot),CXL_WORK_MEDIA_OWNER_SNAPSHOT_TTL_SECONDS_);
+    return true;
+  } catch(_cacheWriteError) { return false; }
+}
+
+function mediaWorkOwnerSnapshotInvalidate_(workId) {
+  var keys=mediaWorkOwnerSnapshotKeys_(workId),cache=mediaWorkOwnerSnapshotCache_();
+  if(!keys)return true;
+  if(!cache)return false;
+  try {
+    cache.put(keys.epoch,Utilities.getUuid(),CXL_WORK_MEDIA_OWNER_EPOCH_TTL_SECONDS_);
+    try { cache.remove(keys.snapshot); } catch(_removeError) {}
+    return true;
+  } catch(_invalidateError) { return false; }
+}
+
+function mediaWorkOwnerSnapshotBeginMutation_(workId) {
+  var keys=mediaWorkOwnerSnapshotKeys_(workId),cache=mediaWorkOwnerSnapshotCache_();
+  if(!keys)return true;
+  if(!cache)return false;
+  try {
+    cache.put(keys.epoch,Utilities.getUuid(),CXL_WORK_MEDIA_OWNER_EPOCH_TTL_SECONDS_);
+    cache.put(keys.busy,'1',CXL_WORK_MEDIA_OWNER_EPOCH_TTL_SECONDS_);
+    try { cache.remove(keys.snapshot); } catch(_removeError) {}
+    return true;
+  } catch(_beginError) { return false; }
+}
+
+function mediaWorkOwnerSnapshotEndMutation_(workId) {
+  var keys=mediaWorkOwnerSnapshotKeys_(workId),cache=mediaWorkOwnerSnapshotCache_();
+  if(!keys||!cache)return false;
+  try {
+    cache.put(keys.epoch,Utilities.getUuid(),CXL_WORK_MEDIA_OWNER_EPOCH_TTL_SECONDS_);
+    try { cache.remove(keys.snapshot); } catch(_snapshotError) {}
+    try { cache.remove(keys.busy); } catch(_busyError) {}
+    return true;
+  } catch(_endError) { return false; }
 }
 
 function isPublic_(r) { return r.visibility==='public' && flag_(r.is_public) && !r.deleted_at; }
@@ -1395,23 +1515,39 @@ function mediaWorkReadChunk_(input,ownerUserId,isPublic) {
     ||!Number.isInteger(input.chunkIndex)||input.chunkIndex<0||input.chunkIndex>4)
     apiFail_('INVALID_MEDIA_READ_REQUEST','Invalid Work media read request');
 
-  var record;
-  try { record=getOwnerWork_(input.workId,true); }
-  catch(_workError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
+  var record=null,snapshot=null,ownerSnapshotEpoch=null;
+  if(!isPublic){var cacheReadStarted=Date.now();ownerSnapshotEpoch=mediaWorkOwnerSnapshotEpoch_(input.workId,true);
+    snapshot=mediaWorkOwnerSnapshotRead_(input.workId,ownerUserId);ownerTimingPhase_('owner_auth_cache',Date.now()-cacheReadStarted);}
+  if(isPublic||!snapshot){
+    try { record=getOwnerWork_(input.workId,true); }
+    catch(_workError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
+  }
   var associationStarted=Date.now(),canonical,placements,placement,media,manifest;
   try {
-    if(!record||!record.row||String(record.row.id)!==input.workId||String(record.row.user_id||'')!==String(ownerUserId))
-      apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-    if(record.row.category==='collab')apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-    canonical=cxlAssetFromRecord_(record);placements=mediaWorkReferenceMap_(canonical);placement=placements[input.mediaId];
-    media=(record.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.asset_id===input.workId&&item.delivery==='vercel_proxy';})[0];
+    if(isPublic){
+      if(!record||!record.row||String(record.row.id)!==input.workId||String(record.row.user_id||'')!==String(ownerUserId))
+        apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+      if(record.row.category==='collab')apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+      canonical=cxlAssetFromRecord_(record);placements=mediaWorkReferenceMap_(canonical);placement=placements[input.mediaId];
+      media=(record.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.asset_id===input.workId&&item.delivery==='vercel_proxy';})[0];
+    } else {
+      if(snapshot&&(snapshot.workId!==input.workId||snapshot.ownerId!==ownerUserId||snapshot.category==='collab'))
+        apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+      if(!snapshot&&(!record||!record.row||String(record.row.id)!==input.workId||String(record.row.user_id||'')!==String(ownerUserId)
+        ||record.row.category==='collab'))apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+      placements=snapshot?snapshot.placements:mediaWorkReferenceMap_(cxlAssetFromRecord_(record));placement=placements[input.mediaId];
+      media=snapshot?snapshot.mediaRecords[input.mediaId]:(record.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.asset_id===input.workId&&item.delivery==='vercel_proxy';})[0];
+    }
     manifest=mediaWorkReadJson_(mediaWorkManifestKey_(input.mediaId));
     if(!placement||!media||!manifest||manifest.mediaId!==input.mediaId||manifest.workId!==input.workId
       ||manifest.ownerUserId!==ownerUserId||manifest.delivery!=='vercel_proxy'||manifest.state!=='attached'
       ||String(manifest.drive_file_id||'')!==String(media.drive_file_id||'')
       ||media.purpose!==manifest.purpose||String(media.context_id||'')!==String(manifest.contextId||''))
       apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-  } finally { ownerTimingPhase_('association_validation',Date.now()-associationStarted); }
+    if(!isPublic&&!snapshot){var cacheSeedStarted=Date.now();mediaWorkOwnerSnapshotSeed_(record,ownerUserId,ownerSnapshotEpoch);ownerTimingPhase_('owner_auth_cache',Date.now()-cacheSeedStarted);}
+  } finally {
+    ownerTimingPhase_('association_validation',Date.now()-associationStarted);
+  }
 
   if(isPublic) {
     var publicStarted=Date.now();
@@ -1535,6 +1671,7 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
   var mediaIds=options.mediaIds===undefined?[]:options.mediaIds;
   if(!Array.isArray(mediaIds)||mediaIds.length>20||mediaIds.some(function(id,index){return !mediaPocUuid_(id)||mediaIds.indexOf(id)!==index;}))apiFail_('INVALID_MEDIA_UPLOAD_REQUEST','Work media attachment list is invalid');
   var requestId=String(options.requestId).toLowerCase(),assetInput=operation==='create'?payload:payload&&payload.updates,id=operation==='create'?'asset_'+requestId.replace(/-/g,'' ):String(payload&&payload.id||'');
+  if(operation==='update'&&!mediaWorkOwnerSnapshotInvalidate_(id))apiFail_('WORK_MEDIA_CACHE_INVALIDATION_FAILED','Work update could not safely invalidate its media authorization cache');
   validateCxlWritePayload_(assetInput,operation);
   var fingerprint=writeFingerprint_(operation,operation==='create'?assetInput:{id:id,updates:assetInput,expectedRevision:options.expectedRevision});
   ownerTimingPhase_('revision_idempotency_validation',Date.now()-phaseStarted);phaseStarted=Date.now();
@@ -1591,9 +1728,12 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
 
 function saveOwnerWork_(input,options) {
   options=options||{};var totalStarted=Date.now(),phaseStarted;
+  var updateOwnerSnapshot=!!(input&&input.writeOperation==='update'),ownerSnapshotMutationBegun=false;
+  if(updateOwnerSnapshot&&!mediaWorkOwnerSnapshotInvalidate_(input.id))apiFail_('WORK_MEDIA_CACHE_INVALIDATION_FAILED','Work update could not safely invalidate its media authorization cache');
   var lock=LockService.getScriptLock(); lock.waitLock(30000);
   ownerTimingPhase_('script_lock_wait',Date.now()-totalStarted);
   try {
+    if(updateOwnerSnapshot){if(!mediaWorkOwnerSnapshotBeginMutation_(input.id))apiFail_('WORK_MEDIA_CACHE_INVALIDATION_FAILED','Work update could not safely invalidate its media authorization cache');ownerSnapshotMutationBegun=true;}
     var lockWaitMs=Date.now()-totalStarted,setupStarted=Date.now(),c=config_(),sh=options.privateSheet||sheet_(c.privateSheetId),preloaded=options.preloadedIndexRow||null;
     var existing=input.id&&preloaded?rowAtSheetNumber_(sh,preloaded._sheetRow):null,record;
     if(input.id&&(!existing||String(existing.id)!==String(input.id)))existing=rowById_(sh,input.id);
@@ -1663,7 +1803,7 @@ function saveOwnerWork_(input,options) {
     if(!options.deferPublicSync&&publicAction==='upsert')syncPublic_(record);
     ownerTimingLog_('works.write.persistence',{lockWaitMs:lockWaitMs,loadAndValidateMs:loadAndValidateMs,searchPrepareMs:searchPrepareMs,searchChunkAppendMs:searchChunkAppendMs,driveRevisionWriteMs:driveRevisionWriteMs,privateIndexWriteMs:privateIndexWriteMs,staleChunkCleanupMs:staleChunkCleanupMs,totalMs:Date.now()-totalStarted});
     return {id:r.id,revision:record.revision,updatedAt:r.updated_at,record:record};
-  } finally {lock.releaseLock();}
+  } finally {if(ownerSnapshotMutationBegun)mediaWorkOwnerSnapshotEndMutation_(input.id);lock.releaseLock();}
 }
 
 function setRow_(sheet,headers,row,knownRow) { ensureHeaders_(sheet,headers);var found=arguments.length>=4?knownRow:rowById_(sheet,row.id); var arr=headers.map(function(k){return row[k]===undefined||row[k]===null?'':row[k];}); if(found) sheet.getRange(found._sheetRow,1,1,headers.length).setValues([arr]); else sheet.appendRow(arr); }

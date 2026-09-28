@@ -7,7 +7,15 @@ const kitDir = join(process.cwd(), 'apps-script', 'api-only-owner');
 const source = readFileSync(join(kitDir, 'Code.gs'), 'utf8');
 
 function makeBridge(secret = 'test-only-shared-secret', ownerId = 'test-owner') {
+  const cacheValues = new Map<string, string>();
+  const scriptCache = {
+    get: (key: string) => cacheValues.get(key) || null,
+    put: (key: string, value: string) => { cacheValues.set(key, String(value)); },
+    remove: (key: string) => { cacheValues.delete(key); }
+  };
   const context: Record<string, any> = {
+    CacheService: { getScriptCache: () => scriptCache },
+    Utilities: { getUuid: () => 'cache-test-uuid' },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (key: string) => ({
       CXL_API_SHARED_SECRET: secret,
       CXL_OWNER_USER_ID: ownerId
