@@ -25,7 +25,7 @@ describe('cacheable public Works snapshot route', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  it('serves only validated public summaries with short shared caching and an ETag', async () => {
+  it('serves only validated public summaries with resilient shared caching and an ETag', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
       data: [makeWork('visible'), makeWork('private', { visibility: 'private', isPublic: false })],
       meta: { timing: { phases: { snapshot_manifest_read: 2, snapshot_chunks_read: 3, snapshot_parse: 1, secret_phase: 999 } } }
@@ -35,7 +35,7 @@ describe('cacheable public Works snapshot route', () => {
     const result = await invoke();
 
     expect(result.statusCode).toBe(200);
-    expect(result.headers['Cache-Control']).toBe('public, max-age=0, s-maxage=30, stale-while-revalidate=120');
+    expect(result.headers['Cache-Control']).toBe('public, max-age=0, s-maxage=30, stale-while-revalidate=86400, stale-if-error=604800');
     expect(result.headers.ETag).toMatch(/^".+"$/);
     expect(result.headers['Server-Timing']).toContain('snapshot_manifest_read;dur=2.00');
     expect(result.headers['Server-Timing']).not.toContain('secret_phase');

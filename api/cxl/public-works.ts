@@ -5,7 +5,7 @@ import { fetchPublicWorksSnapshot } from './google.js';
 type Request = IncomingMessage;
 type Response = ServerResponse & { json?: (body: unknown) => void };
 
-const PUBLIC_CACHE_CONTROL = 'public, max-age=0, s-maxage=30, stale-while-revalidate=120';
+const PUBLIC_CACHE_CONTROL = 'public, max-age=0, s-maxage=30, stale-while-revalidate=86400, stale-if-error=604800';
 const SAFE_GAS_TIMING_PHASES = new Set(['snapshot_manifest_read', 'snapshot_chunks_read', 'snapshot_parse', 'total']);
 
 function send(res: Response, status: number, body: unknown, cacheControl = 'no-store') {
