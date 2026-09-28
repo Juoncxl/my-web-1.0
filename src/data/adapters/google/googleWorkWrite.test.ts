@@ -22,6 +22,29 @@ const hydratedAsset = {
   versions: [], media: [], collaboration: null
 } as unknown as Asset;
 
+const canonicalMediaAsset = {
+  ...hydratedAsset,
+  id: 'asset_media_work',
+  icon: { type: 'image', value: 'media:google-icon', mediaId: 'google-icon', mimeType: 'image/gif' },
+  previewImage: 'media:google-cover',
+  previewImages: ['media:google-cover'],
+  contentBlocks: [{ id: 'example-1', type: 'Image', title: 'Example', body: 'media:google-example', mediaId: 'google-example' }],
+  media: [
+    { id: 'google-icon', assetId: 'asset_media_work', purpose: 'icon', delivery: 'vercel_proxy', mimeType: 'image/gif', sortOrder: 0, isCover: false },
+    { id: 'google-cover', assetId: 'asset_media_work', purpose: 'gallery', delivery: 'vercel_proxy', mimeType: 'image/png', sortOrder: 0, isCover: true },
+    { id: 'google-example', assetId: 'asset_media_work', purpose: 'prompt_example', contextId: 'example-1', delivery: 'vercel_proxy', mimeType: 'image/jpeg', sortOrder: 0, isCover: false }
+  ],
+  isPublic: false,
+  visibility: 'private'
+} as unknown as Asset;
+
+function expectGoogleMediaHydrated(asset: Asset | null) {
+  expect(asset?.icon).toMatchObject({ type: 'image', value: expect.stringContaining('/api/cxl/media?scope=owner') });
+  expect(asset?.previewImage).toContain('/api/cxl/media?scope=owner');
+  expect(asset?.previewImages?.[0]).toContain('/api/cxl/media?scope=owner');
+  expect(asset?.contentBlocks?.[0].body).toContain('/api/cxl/media?scope=owner');
+}
+
 describe('Google Work update write DTO', () => {
   afterEach(() => vi.unstubAllGlobals());
   it('converts a full hydrated Asset to writable fields and keeps id/revision in their dedicated arguments', () => {
@@ -78,6 +101,40 @@ describe('Google Work update write DTO', () => {
     await googleDataAdapter.works.create(create, options);
 
     expect(transport).toHaveBeenCalledWith('works.create', [create, options]);
+  });
+
+  it('hydrates canonical media refs in a create response before returning it to client state', async () => {
+    const transport = vi.mocked(callGoogleBackend);
+    transport.mockClear();
+    transport.mockResolvedValueOnce({ data: canonicalMediaAsset, error: null } as any);
+    const requestId = '123e4567-e89b-42d3-a456-426614174000';
+
+    const result = await googleDataAdapter.works.create(canonicalMediaAsset as any, { requestId });
+
+    expectGoogleMediaHydrated(result.data);
+    expect(transport).toHaveBeenCalledWith('works.create', [expect.objectContaining({
+      icon: expect.objectContaining({ value: 'media:google-icon' }),
+      previewImage: 'media:google-cover',
+      contentBlocks: [expect.objectContaining({ body: 'media:google-example' })]
+    }), { requestId }]);
+  });
+
+  it('hydrates canonical media refs in an update response before returning it to client state', async () => {
+    const transport = vi.mocked(callGoogleBackend);
+    transport.mockClear();
+    transport.mockResolvedValueOnce({ data: canonicalMediaAsset, error: null } as any);
+
+    const result = await googleDataAdapter.works.update('asset_media_work', canonicalMediaAsset, {
+      requestId: '123e4567-e89b-42d3-a456-426614174000', expectedRevision: 8
+    });
+
+    expectGoogleMediaHydrated(result.data);
+    expect(transport.mock.calls[0][0]).toBe('works.update');
+    expect(transport.mock.calls[0][1][1]).toMatchObject({
+      icon: expect.objectContaining({ value: 'media:google-icon' }),
+      previewImage: 'media:google-cover',
+      contentBlocks: [expect.objectContaining({ body: 'media:google-example' })]
+    });
   });
 
   it('uploads local media with its independent mediaId before committing a create with the same requestId', async () => {
