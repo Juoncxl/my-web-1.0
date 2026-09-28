@@ -25,6 +25,10 @@ const GAS_READ_CODES = new Set([
   'INVALID_MEDIA_READ_REQUEST', 'MEDIA_READ_NOT_FOUND', 'MEDIA_READ_NOT_PUBLIC',
   'MEDIA_READ_INVALID', 'MEDIA_READ_FAILED'
 ]);
+const WORK_MEDIA_TIMING_PHASES = new Set([
+  'work_lookup', 'canonical_work_read', 'association_validation', 'public_projection_validation',
+  'file_metadata_validation', 'binary_fetch', 'response_construction'
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -83,7 +87,21 @@ function readCodeFromGas(raw: unknown): { status: number; code: string; message:
   return { status: 404, code: code || 'MEDIA_READ_NOT_FOUND', message: 'Media is unavailable' };
 }
 
-async function callGas(scope: 'owner' | 'public', workId: string, mediaId: string, chunkIndex: number) {
+function previewWorkMediaTiming(res: Response, raw: unknown, action: string) {
+  if (process.env.VERCEL_ENV !== 'preview' || !isRecord(raw) || !isRecord(raw.meta)
+    || !isRecord(raw.meta.timing)) return;
+  const timing = raw.meta.timing;
+  if (timing.action !== action || !isRecord(timing.phases)) return;
+  const metrics = Object.entries(timing.phases).flatMap(([phase, duration]) => WORK_MEDIA_TIMING_PHASES.has(phase)
+    && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0 && duration <= 600_000
+    ? [`${phase};dur=${duration.toFixed(2)}`] : []);
+  if (typeof timing.totalMs === 'number' && Number.isFinite(timing.totalMs)
+    && timing.totalMs >= 0 && timing.totalMs <= 600_000) metrics.push(`total;dur=${timing.totalMs.toFixed(2)}`);
+  if (metrics.length) res.setHeader('Server-Timing', metrics.join(', '));
+}
+
+async function callGas(scope: 'owner' | 'public', workId: string, mediaId: string, chunkIndex: number,
+  onResponse?: (raw: unknown, action: string) => void) {
   const endpoint = gasEndpoint();
   const secret = process.env.CXL_API_SHARED_SECRET || '';
   const ownerId = process.env.CXL_OWNER_USER_ID?.trim() || '';
@@ -91,7 +109,8 @@ async function callGas(scope: 'owner' | 'public', workId: string, mediaId: strin
 
   const action = scope === 'public' ? 'media.work.publicChunk' : 'media.work.ownerChunk';
   const payload = JSON.stringify({ authorization: secret, ownerUserId: ownerId, action,
-    args: [{ workId, mediaId, ref: `media:${mediaId}`, chunkIndex }] });
+    args: [{ workId, mediaId, ref: `media:${mediaId}`, chunkIndex }],
+    ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) });
   if (payload.length > GAS_POST_CHAR_LIMIT) throw Object.assign(new Error('request too large'), { safeStatus: 413 });
 
   let response: Awaited<ReturnType<typeof fetch>>;
@@ -108,6 +127,7 @@ async function callGas(scope: 'owner' | 'public', workId: string, mediaId: strin
   let raw: unknown;
   try { raw = await response.json(); }
   catch { throw Object.assign(new Error('invalid upstream response'), { safeStatus: 502 }); }
+  onResponse?.(raw, action);
   if (!response.ok || !isRecord(raw) || raw.ok !== true) {
     const mapped = readCodeFromGas(raw);
     throw Object.assign(new Error(mapped.message), { safeStatus: mapped.status, safeCode: mapped.code });
@@ -180,7 +200,8 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
   let metadata: ReturnType<typeof validateChunk> | undefined;
   try {
     for (let chunkIndex = 0; ; chunkIndex += 1) {
-      const data = await callGas(scope, workId, mediaId, chunkIndex);
+      const data = await callGas(scope, workId, mediaId, chunkIndex,
+        chunkIndex === 0 ? (raw, action) => previewWorkMediaTiming(res, raw, action) : undefined);
       const chunk = validateChunk(data, workId, mediaId, chunkIndex);
       if (metadata && (metadata.mimeType !== chunk.mimeType || metadata.totalFileSize !== chunk.totalFileSize
         || metadata.totalChunks !== chunk.totalChunks || metadata.sha256 !== chunk.sha256)) {

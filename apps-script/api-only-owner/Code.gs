@@ -20,7 +20,7 @@ var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.up
   'media.poc.begin','media.poc.chunk','media.poc.finalize','media.poc.setPublic',
   'media.poc.ownerChunk','media.poc.publicChunk','media.poc.readDiagnostics','media.poc.cleanup'];
 var API_MAX_POST_CHARS_ = 5000000;
-var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','total'];
+var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','work_lookup','canonical_work_read','association_validation','public_projection_validation','file_metadata_validation','binary_fetch','total'];
 var API_TIMING_CONTEXT_ = null;
 var MEDIA_POC_CHUNK_BYTES_ = 2 * 1024 * 1024;
 var MEDIA_POC_MAX_BYTES_ = 10 * 1024 * 1024;
@@ -975,7 +975,15 @@ function getFolders_() {
   return it.next().getBlob().getDataAsString('UTF-8').split(/\r?\n/).filter(Boolean).map(JSON.parse);
 }
 
-function getOwnerWork_(id) { var x=rowById_(sheet_(config_().privateSheetId),id); if(!x)fail_('ไม่พบงาน'); return parse_(x.file_id); }
+function getOwnerWork_(id,includeReadTiming) {
+  var started=Date.now(),x;
+  try { x=rowById_(sheet_(config_().privateSheetId),id); }
+  finally { if(includeReadTiming)ownerTimingPhase_('work_lookup',Date.now()-started); }
+  if(!x)fail_('ไม่พบงาน');
+  started=Date.now();
+  try { return parse_(x.file_id); }
+  finally { if(includeReadTiming)ownerTimingPhase_('canonical_work_read',Date.now()-started); }
+}
 
 function isPublic_(r) { return r.visibility==='public' && flag_(r.is_public) && !r.deleted_at; }
 
@@ -1388,65 +1396,87 @@ function mediaWorkReadChunk_(input,ownerUserId,isPublic) {
     apiFail_('INVALID_MEDIA_READ_REQUEST','Invalid Work media read request');
 
   var record;
-  try { record=getOwnerWork_(input.workId); }
+  try { record=getOwnerWork_(input.workId,true); }
   catch(_workError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
-  if(!record||!record.row||String(record.row.id)!==input.workId||String(record.row.user_id||'')!==String(ownerUserId))
-    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-  if(record.row.category==='collab')apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-
-  var canonical=cxlAssetFromRecord_(record),placements=mediaWorkReferenceMap_(canonical),placement=placements[input.mediaId];
-  var media=(record.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.asset_id===input.workId&&item.delivery==='vercel_proxy';})[0];
-  var manifest=mediaWorkReadJson_(mediaWorkManifestKey_(input.mediaId));
-  if(!placement||!media||!manifest||manifest.mediaId!==input.mediaId||manifest.workId!==input.workId
-    ||manifest.ownerUserId!==ownerUserId||manifest.delivery!=='vercel_proxy'||manifest.state!=='attached'
-    ||String(manifest.drive_file_id||'')!==String(media.drive_file_id||'')
-    ||media.purpose!==manifest.purpose||String(media.context_id||'')!==String(manifest.contextId||''))
-    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+  var associationStarted=Date.now(),canonical,placements,placement,media,manifest;
+  try {
+    if(!record||!record.row||String(record.row.id)!==input.workId||String(record.row.user_id||'')!==String(ownerUserId))
+      apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+    if(record.row.category==='collab')apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+    canonical=cxlAssetFromRecord_(record);placements=mediaWorkReferenceMap_(canonical);placement=placements[input.mediaId];
+    media=(record.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.asset_id===input.workId&&item.delivery==='vercel_proxy';})[0];
+    manifest=mediaWorkReadJson_(mediaWorkManifestKey_(input.mediaId));
+    if(!placement||!media||!manifest||manifest.mediaId!==input.mediaId||manifest.workId!==input.workId
+      ||manifest.ownerUserId!==ownerUserId||manifest.delivery!=='vercel_proxy'||manifest.state!=='attached'
+      ||String(manifest.drive_file_id||'')!==String(media.drive_file_id||'')
+      ||media.purpose!==manifest.purpose||String(media.context_id||'')!==String(manifest.contextId||''))
+      apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+  } finally { ownerTimingPhase_('association_validation',Date.now()-associationStarted); }
 
   if(isPublic) {
-    if(!isPublic_(record.row))apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
-    var publicRow;
-    try { publicRow=rowById_(sheet_(config_().publicSheetId),input.workId); }
-    catch(_publicIndexError) { publicRow=null; }
-    if(!publicRow||String(publicRow.active).toLowerCase()!=='true'||String(publicRow.updated_at||'')!==String(record.row.updated_at||''))
-      apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
-    var projection;
-    try { projection=parse_(publicRow.file_id); } catch(_projectionError) { projection=null; }
-    if(!projection||projection.id!==input.workId||String(projection.updated_at||'')!==String(record.row.updated_at||''))
-      apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
-    if(projection.category==='collab')apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
-    var projectedAsset=projection.cxlAsset&&typeof projection.cxlAsset==='object'?projection.cxlAsset:{
-      id:projection.id,icon:projection.icon,previewImage:projection.preview_image,previewImages:projection.preview_images,
-      contentBlocks:projection.content_blocks
-    };
-    var publicPlacement=mediaWorkReferenceMap_(projectedAsset)[input.mediaId];
-    var publicMedia=(projection.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.delivery==='vercel_proxy';})[0];
-    if(!publicPlacement||!publicMedia)
-      apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+    var publicStarted=Date.now();
+    try {
+      if(!isPublic_(record.row))apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+      var publicRow;
+      try { publicRow=rowById_(sheet_(config_().publicSheetId),input.workId); }
+      catch(_publicIndexError) { publicRow=null; }
+      if(!publicRow||String(publicRow.active).toLowerCase()!=='true'||String(publicRow.updated_at||'')!==String(record.row.updated_at||''))
+        apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+      var projection;
+      try { projection=parse_(publicRow.file_id); } catch(_projectionError) { projection=null; }
+      if(!projection||projection.id!==input.workId||String(projection.updated_at||'')!==String(record.row.updated_at||''))
+        apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+      if(projection.category==='collab')apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+      var projectedAsset=projection.cxlAsset&&typeof projection.cxlAsset==='object'?projection.cxlAsset:{
+        id:projection.id,icon:projection.icon,previewImage:projection.preview_image,previewImages:projection.preview_images,
+        contentBlocks:projection.content_blocks
+      };
+      var publicPlacement=mediaWorkReferenceMap_(projectedAsset)[input.mediaId];
+      var publicMedia=(projection.mediaRecords||[]).filter(function(item){return item&&item.id===input.mediaId&&item.delivery==='vercel_proxy';})[0];
+      if(!publicPlacement||!publicMedia)
+        apiFail_('MEDIA_READ_NOT_PUBLIC','Work media is unavailable');
+    } finally { ownerTimingPhase_('public_projection_validation',Date.now()-publicStarted); }
   } else if(String(manifest.ownerUserId)!==String(ownerUserId)) {
     apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
   }
 
-  if(manifest.purpose==='collab'||manifest.purpose==='collab_reference'||manifest.purpose==='unassigned')
-    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-  var file;
-  try { file=DriveApp.getFileById(manifest.drive_file_id); }
-  catch(_fileError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
-  if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE)
-    apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
-  if(file.getSize()!==Number(manifest.totalFileSize)||media.file_size!==undefined&&Number(media.file_size)!==Number(manifest.totalFileSize)
-    ||media.mime_type!==undefined&&String(media.mime_type)!==String(manifest.mimeType)
-    ||media.sha256!==undefined&&String(media.sha256).toLowerCase()!==String(manifest.sha256||'').toLowerCase()
-    ||!MEDIA_POC_ALLOWED_MIME_.includes(String(manifest.mimeType||''))||!/^([a-f0-9]{64})$/i.test(String(manifest.sha256||'')))
-    apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+  var metadataStarted=Date.now(),file,totalSize,count;
+  try {
+    if(manifest.purpose==='collab'||manifest.purpose==='collab_reference'||manifest.purpose==='unassigned')
+      apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+    try { file=DriveApp.getFileById(manifest.drive_file_id); }
+    catch(_fileError) { apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable'); }
+    if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE)
+      apiFail_('MEDIA_READ_NOT_FOUND','Work media is unavailable');
+    if(file.getSize()!==Number(manifest.totalFileSize)||media.file_size!==undefined&&Number(media.file_size)!==Number(manifest.totalFileSize)
+      ||media.mime_type!==undefined&&String(media.mime_type)!==String(manifest.mimeType)
+      ||media.sha256!==undefined&&String(media.sha256).toLowerCase()!==String(manifest.sha256||'').toLowerCase()
+      ||!MEDIA_POC_ALLOWED_MIME_.includes(String(manifest.mimeType||''))||!/^([a-f0-9]{64})$/i.test(String(manifest.sha256||'')))
+      apiFail_('MEDIA_READ_INVALID','Work media is invalid');
 
-  var totalSize=Number(manifest.totalFileSize),count=Math.ceil(totalSize/CXL_WORK_MEDIA_CHUNK_BYTES_);
-  if(totalSize<1||totalSize>CXL_WORK_MEDIA_MAX_BYTES_||count<1||count>5||Number(manifest.totalChunks)!==count||input.chunkIndex>=count)
-    apiFail_('INVALID_MEDIA_READ_REQUEST','Invalid Work media chunk index');
+    totalSize=Number(manifest.totalFileSize);count=Math.ceil(totalSize/CXL_WORK_MEDIA_CHUNK_BYTES_);
+    if(totalSize<1||totalSize>CXL_WORK_MEDIA_MAX_BYTES_||count<1||count>5||Number(manifest.totalChunks)!==count||input.chunkIndex>=count)
+      apiFail_('INVALID_MEDIA_READ_REQUEST','Invalid Work media chunk index');
+  } finally { ownerTimingPhase_('file_metadata_validation',Date.now()-metadataStarted); }
   var start=input.chunkIndex*CXL_WORK_MEDIA_CHUNK_BYTES_,expectedLength=Math.min(CXL_WORK_MEDIA_CHUNK_BYTES_,totalSize-start);
-  var chunk=mediaPocDriveChunk_(manifest.drive_file_id,start,expectedLength,totalSize,'media.work.'+(isPublic?'publicChunk':'ownerChunk'),input.chunkIndex);
-  return {workId:input.workId,mediaId:input.mediaId,ref:input.ref,mimeType:manifest.mimeType,totalFileSize:totalSize,
-    totalChunks:count,chunkIndex:input.chunkIndex,sha256:manifest.sha256,chunkSha256:mediaPocSha256_(chunk),base64:Utilities.base64Encode(chunk)};
+  var binaryStarted=Date.now(),chunk;
+  try {
+    if(count===1&&totalSize<=CXL_WORK_MEDIA_CHUNK_BYTES_&&input.chunkIndex===0){
+      var blob,blobMime;
+      try { blob=file.getBlob();chunk=blob.getBytes();blobMime=typeof blob.getContentType==='function'?blob.getContentType():null; }
+      catch(_blobError) { apiFail_('MEDIA_READ_FAILED','Work media bytes could not be read'); }
+      if(!Array.isArray(chunk)||chunk.length!==totalSize)apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+      if(typeof blobMime==='string'&&blobMime.trim()&&blobMime.split(';')[0].trim().toLowerCase()!==manifest.mimeType)
+        apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+    } else chunk=mediaPocDriveChunk_(manifest.drive_file_id,start,expectedLength,totalSize,'media.work.'+(isPublic?'publicChunk':'ownerChunk'),input.chunkIndex);
+  } finally { ownerTimingPhase_('binary_fetch',Date.now()-binaryStarted); }
+  var responseStarted=Date.now();
+  try {
+    var chunkSha256=mediaPocSha256_(chunk);
+    if(count===1&&chunkSha256!==String(manifest.sha256).toLowerCase())apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+    return {workId:input.workId,mediaId:input.mediaId,ref:input.ref,mimeType:manifest.mimeType,totalFileSize:totalSize,
+      totalChunks:count,chunkIndex:input.chunkIndex,sha256:manifest.sha256,chunkSha256:chunkSha256,base64:Utilities.base64Encode(chunk)};
+  } finally { ownerTimingPhase_('response_construction',Date.now()-responseStarted); }
 }
 
 function mediaWorkRepairCommitted_(record,workId,ownerUserId) {

@@ -28,14 +28,16 @@ function makeWorkMediaBridge() {
     bytes: number[];
     sharing = 'anyone';
     trashed = false;
-    constructor(name: string, bytes: ArrayLike<number>) {
+    mimeType: string | null;
+    constructor(name: string, bytes: ArrayLike<number>, mimeType: string | null = null) {
       this.id = `drive-file-${++nextFileId}`;
       this.name = name;
       this.bytes = Array.from(bytes, value => Number(value) & 255);
+      this.mimeType = mimeType;
     }
     getId() { return this.id; }
     getSize() { return this.bytes.length; }
-    getBlob() { return { getBytes: () => [...this.bytes] }; }
+    getBlob() { return { getBytes: () => [...this.bytes], getContentType: () => this.mimeType }; }
     getSharingAccess() { return this.sharing; }
     setSharing(access: string) { this.sharing = access; }
     setTrashed(value: boolean) { this.trashed = value; }
@@ -50,8 +52,8 @@ function makeWorkMediaBridge() {
       let index = 0;
       return { hasNext: () => index < matches.length, next: () => matches[index++] };
     }
-    createFile(blob: { name?: string; getBytes: () => number[] }) {
-      const file = new FakeFile(String(blob.name || ''), blob.getBytes());
+    createFile(blob: { name?: string; getBytes: () => number[]; mimeType?: string }) {
+      const file = new FakeFile(String(blob.name || ''), blob.getBytes(), blob.mimeType || null);
       this.files.push(file);
       return file;
     }
@@ -97,6 +99,31 @@ function makeWorkMediaBridge() {
   };
   runInNewContext(source, context);
   return { context, folders, properties };
+}
+
+function attachedReadFixture(mimeType: string, bytes: Buffer, isPublic = false) {
+  const { context, folders, properties } = makeWorkMediaBridge();
+  const originalGetOwnerWork = context.getOwnerWork_;
+  const file = folders.get('canonical')!.createFile({ name: 'attached-media', mimeType, getBytes: () => [...bytes] });
+  file.setSharing('private');
+  const icon = { type: 'image', value: `media:${MEDIA_ID}`, mediaId: MEDIA_ID };
+  const asset = { id: WORK_ID, icon, previewImage: '', previewImages: [], contentBlocks: [] };
+  const record = { row: { id: WORK_ID, user_id: OWNER_ID, category: 'prompts', visibility: isPublic ? 'public' : 'private',
+    is_public: isPublic, deleted_at: '', updated_at: '2026-09-28T00:00:00.000Z', icon },
+    cxlAsset: asset, mediaRecords: [{ id: MEDIA_ID, asset_id: WORK_ID, drive_file_id: file.getId(), delivery: 'vercel_proxy',
+      purpose: 'icon', context_id: null, file_size: bytes.length, mime_type: mimeType, sha256: sha256(bytes) }] };
+  const projection = { id: WORK_ID, updated_at: record.row.updated_at, cxlAsset: asset,
+    mediaRecords: [{ id: MEDIA_ID, delivery: 'vercel_proxy', purpose: 'icon' }] };
+  properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ mediaId: MEDIA_ID, workId: WORK_ID,
+    ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: bytes.length, mimeType, sha256: sha256(bytes),
+    purpose: 'icon', contextId: null, totalChunks: Math.ceil(bytes.length / (2 * 1024 * 1024)),
+    delivery: 'vercel_proxy', state: 'attached' }));
+  context.getOwnerWork_ = () => record;
+  context.sheet_ = () => ({});
+  context.rowById_ = () => ({ active: 'true', updated_at: record.row.updated_at, file_id: 'public-projection' });
+  context.parse_ = () => projection;
+  const input = { workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 };
+  return { context, file, record, projection, properties, input, originalGetOwnerWork };
 }
 
 describe('API-only Owner standard Work media foundation', () => {
@@ -318,6 +345,167 @@ describe('API-only Owner standard Work media foundation', () => {
     context.parse_ = () => ({ ...projection, cxlAsset: { ...asset, icon: { type: 'emoji', value: '✨' } } });
     expect(() => context.mediaWorkReadChunk_({ workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 }, OWNER_ID, true))
       .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
+  });
+
+  it.each([
+    ['image/jpeg', Buffer.from([0xff, 0xd8, 0xff, 0x00])],
+    ['image/png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    ['image/webp', Buffer.from('RIFF0000WEBP')],
+    ['image/gif', Buffer.from('GIF89a')]
+  ])('reads a small %s Owner file from its validated private DriveApp blob without Range fetch', (mimeType, bytes) => {
+    const { context, file, input } = attachedReadFixture(mimeType, bytes);
+    const blobRead = vi.spyOn(file, 'getBlob');
+    const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
+    const oauth = vi.spyOn(context.ScriptApp, 'getOAuthToken');
+
+    const result = context.mediaWorkReadChunk_(input, OWNER_ID, false);
+
+    expect(result).toMatchObject({ mimeType, totalFileSize: bytes.length, totalChunks: 1, chunkIndex: 0,
+      sha256: sha256(bytes), chunkSha256: sha256(bytes), base64: bytes.toString('base64') });
+    expect(blobRead).toHaveBeenCalledOnce();
+    expect(rangeFetch).not.toHaveBeenCalled();
+    expect(oauth).not.toHaveBeenCalled();
+  });
+
+  it('reads a small public file through the blob path only after current public projection authorization', () => {
+    const bytes = Buffer.from('GIF87a');
+    const { context, file, record, input } = attachedReadFixture('image/gif', bytes, true);
+    const blobRead = vi.spyOn(file, 'getBlob');
+    const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
+
+    expect(context.mediaWorkReadChunk_(input, OWNER_ID, true)).toMatchObject({ mimeType: 'image/gif', base64: bytes.toString('base64') });
+    expect(blobRead).toHaveBeenCalledOnce();
+    expect(rangeFetch).not.toHaveBeenCalled();
+
+    record.row.visibility = 'private';
+    record.row.is_public = false;
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, true))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
+    expect(blobRead).toHaveBeenCalledOnce();
+  });
+
+  it('uses the blob path at the exact 2 MiB single-chunk boundary', () => {
+    const bytes = Buffer.alloc(2 * 1024 * 1024);
+    const { context, file, input } = attachedReadFixture('image/png', bytes);
+    const blobRead = vi.spyOn(file, 'getBlob');
+    const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
+    expect(context.mediaWorkReadChunk_(input, OWNER_ID, false)).toMatchObject({ totalChunks: 1,
+      totalFileSize: bytes.length, chunkSha256: sha256(bytes) });
+    expect(blobRead).toHaveBeenCalledOnce();
+    expect(rangeFetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps Owner association and retired-manifest denial before any binary read', () => {
+    const { context, file, record, properties, input } = attachedReadFixture('image/gif', Buffer.from('GIF89a'));
+    const blobRead = vi.spyOn(file, 'getBlob');
+    const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
+
+    (record.cxlAsset as { icon: { type: string; value: string; mediaId?: string } }).icon = { type: 'emoji', value: '✨' };
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
+    record.cxlAsset.icon = { type: 'image', value: `media:${MEDIA_ID}`, mediaId: MEDIA_ID };
+    const key = `CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`;
+    properties.set(key, JSON.stringify({ ...JSON.parse(properties.get(key)!), state: 'retired' }));
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
+    expect(blobRead).not.toHaveBeenCalled();
+    expect(rangeFetch).not.toHaveBeenCalled();
+  });
+
+  it('denies an Owner identity or media-record association mismatch before reading bytes', () => {
+    const { context, file, record, input } = attachedReadFixture('image/gif', Buffer.from('GIF89a'));
+    const blobRead = vi.spyOn(file, 'getBlob');
+    expect(() => context.mediaWorkReadChunk_(input, 'different-owner', false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
+    record.mediaRecords[0].asset_id = 'asset_other';
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_FOUND' }));
+    expect(blobRead).not.toHaveBeenCalled();
+  });
+
+  it('fails safely when a single-chunk blob returns a different byte length, MIME, or bytes', () => {
+    const bytes = Buffer.from('GIF89a');
+    const { context, file, input } = attachedReadFixture('image/gif', bytes);
+    const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
+
+    vi.spyOn(file, 'getBlob').mockReturnValueOnce({ getBytes: () => [...bytes, 0], getContentType: () => 'image/gif' });
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_INVALID' }));
+    file.mimeType = 'image/png';
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_INVALID' }));
+    file.mimeType = 'image/gif';
+    vi.spyOn(file, 'getBlob').mockReturnValueOnce({ getBytes: () => [...Buffer.from('GIF87a')], getContentType: () => 'image/gif' });
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_INVALID' }));
+    vi.spyOn(file, 'getBlob').mockImplementationOnce(() => { throw new Error('private drive detail'); });
+    expect(() => context.mediaWorkReadChunk_(input, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_FAILED' }));
+    expect(rangeFetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps multi-chunk and 10 MiB reads on the Drive Range path', () => {
+    const bytes = Buffer.alloc(2 * 1024 * 1024 + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+    const { context, file, record, properties, input } = attachedReadFixture('image/png', bytes);
+    const blobRead = vi.spyOn(file, 'getBlob');
+    const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
+
+    const first = context.mediaWorkReadChunk_(input, OWNER_ID, false);
+    const last = context.mediaWorkReadChunk_({ ...input, chunkIndex: 1 }, OWNER_ID, false);
+    expect(first).toMatchObject({ totalChunks: 2, totalFileSize: bytes.length, chunkIndex: 0 });
+    expect(last).toMatchObject({ totalChunks: 2, chunkIndex: 1, base64: 'AA==' });
+    expect(rangeFetch).toHaveBeenCalledTimes(2);
+    expect(blobRead).not.toHaveBeenCalled();
+
+    const maxBytes = 10 * 1024 * 1024;
+    const key = `CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`;
+    properties.set(key, JSON.stringify({ ...JSON.parse(properties.get(key)!), totalFileSize: maxBytes, totalChunks: 5,
+      sha256: 'a'.repeat(64) }));
+    record.mediaRecords[0].file_size = maxBytes;
+    record.mediaRecords[0].sha256 = 'a'.repeat(64);
+    vi.spyOn(file, 'getSize').mockReturnValue(maxBytes);
+    rangeFetch.mockImplementationOnce(() => ({ getResponseCode: () => 206,
+      getContent: () => Array(2 * 1024 * 1024).fill(0) }));
+    const maxChunk = context.mediaWorkReadChunk_({ ...input, chunkIndex: 4 }, OWNER_ID, false);
+    expect(maxChunk).toMatchObject({ totalFileSize: maxBytes, totalChunks: 5, chunkIndex: 4 });
+    expect(rangeFetch).toHaveBeenCalledTimes(3);
+    expect((rangeFetch.mock.calls[2][1] as { headers: { Range: string } }).headers.Range).toBe('bytes=8388608-10485759');
+    expect(blobRead).not.toHaveBeenCalled();
+  });
+
+  it('emits only safe standard Work media timing fields when Preview requests includeTiming', () => {
+    const bytes = Buffer.from('GIF89a');
+    const { context, file, record, input, originalGetOwnerWork } = attachedReadFixture('image/gif', bytes);
+    context.getOwnerWork_ = originalGetOwnerWork;
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({});
+    context.rowById_ = () => ({ file_id: 'canonical-work' });
+    context.parse_ = () => record;
+
+    const response = context.doPost({ postData: { contents: JSON.stringify({ authorization: 'test-secret', ownerUserId: OWNER_ID,
+      action: 'media.work.ownerChunk', args: [input], includeTiming: true }) } });
+    const result = JSON.parse(response.text);
+    expect(result.ok).toBe(true);
+    expect(result.meta.timing.action).toBe('media.work.ownerChunk');
+    expect(Object.keys(result.meta.timing.phases)).toEqual(expect.arrayContaining([
+      'work_lookup', 'canonical_work_read', 'association_validation', 'file_metadata_validation',
+      'binary_fetch', 'response_construction'
+    ]));
+    expect(result.meta.timing.totalMs).toEqual(expect.any(Number));
+    expect(JSON.stringify(result.meta.timing)).not.toMatch(/drive-file|canonical-work|test-secret|owner-1|media:|GIF89a/);
+    expect(file.getSharingAccess()).toBe('private');
+  });
+
+  it('includes public projection validation timing only after a public read succeeds', () => {
+    const { context, input } = attachedReadFixture('image/jpeg', Buffer.from([0xff, 0xd8, 0xff, 0x00]), true);
+    const response = context.doPost({ postData: { contents: JSON.stringify({ authorization: 'test-secret', ownerUserId: OWNER_ID,
+      action: 'media.work.publicChunk', args: [input], includeTiming: true }) } });
+    const result = JSON.parse(response.text);
+    expect(result.ok).toBe(true);
+    expect(result.meta.timing.phases.public_projection_validation).toEqual(expect.any(Number));
+    expect(result.meta.timing.phases.binary_fetch).toEqual(expect.any(Number));
+    expect(JSON.stringify(result.meta.timing)).not.toMatch(/drive-file|test-secret|owner-1|media:/);
   });
 
   it('cleans only expired Work-media orphans and leaves POC and unrelated Drive files alone', () => {
