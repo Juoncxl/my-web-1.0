@@ -10,6 +10,7 @@ import { SettingsSecuritySection } from './settings/SettingsSecuritySection';
 import { SettingsTabs } from './settings/SettingsTabs';
 import type { LegacySummary, SettingsMessage, SettingsTab } from './settings/SettingsTypes';
 import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
+import { callGoogleBackend } from '../data/adapters/google/googleTransport';
 
 const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
 
@@ -33,6 +34,17 @@ export const SettingsModal: React.FC = () => {
   const [isImportingLegacy, setIsImportingLegacy] = useState(false);
   const [legacySummary, setLegacySummary] = useState<LegacySummary>({ assets: 0, folders: 0 });
   const [backupMsg, setBackupMsg] = useState<SettingsMessage | null>(null);
+  const [isRebuildingPublicSnapshot, setIsRebuildingPublicSnapshot] = useState(false);
+
+  const handleRebuildPublicSnapshot = async () => {
+    setIsRebuildingPublicSnapshot(true); setBackupMsg(null);
+    try {
+      const result = await callGoogleBackend<{ works: number }>('public.snapshot.rebuild', []);
+      setBackupMsg({ type: 'success', text: `อัปเดตข้อมูลสาธารณะสำเร็จ (${result.works} ผลงาน)` });
+    } catch (error: unknown) {
+      setBackupMsg({ type: 'error', text: errorMessage(error, 'สร้างข้อมูลสาธารณะไม่สำเร็จ') });
+    } finally { setIsRebuildingPublicSnapshot(false); }
+  };
 
   const revokeTemporaryAvatarPreview = () => {
     const previous = temporaryAvatarPreview.current;
@@ -163,6 +175,15 @@ export const SettingsModal: React.FC = () => {
           : <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />}
       </header>
       <div className="cv-settings-content">
+        {isVercelOwnerAuth && <section className="mx-6 mb-5 rounded-xl border border-violet-200 bg-violet-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">ข้อมูลผลงานสาธารณะ</h3>
+          <p className="mt-1 text-xs text-slate-600">สร้างหรือซ่อม snapshot ที่ใช้แสดงผลงานหน้าแรกและหน้า Creator</p>
+          <button type="button" onClick={() => void handleRebuildPublicSnapshot()} disabled={isRebuildingPublicSnapshot}
+            className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+            {isRebuildingPublicSnapshot ? 'กำลังอัปเดต…' : 'อัปเดตข้อมูลสาธารณะ'}
+          </button>
+          {backupMsg && <p role="status" className={`mt-2 text-xs ${backupMsg.type === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>{backupMsg.text}</p>}
+        </section>}
         {!isVercelOwnerAuth && activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
         {!isVercelOwnerAuth && activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
@@ -170,3 +191,4 @@ export const SettingsModal: React.FC = () => {
     </div>
   </div>;
 };
+

@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
@@ -12,12 +11,10 @@ const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','sett
 const MEDIA_UPLOAD_ACTIONS = new Set(['media.upload.begin','media.upload.chunk','media.upload.finalize']);
 const MEDIA_CLEANUP_ACTION = 'media.cleanup';
 const MEDIA_REPAIR_ACTION = 'media.work.repairDeliveryChunks';
-const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
+const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch','public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update']);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
-const PUBLIC_TIMING_ACTION = 'works.list';
-const PUBLIC_TIMING_PHASES = new Set(['public_sheet_open','public_index_read','public_creator_map_read','public_summary_parse','public_projection','response_construction']);
 
 function send(res: Response, status: number, body: unknown) {
   res.statusCode = status;
@@ -35,17 +32,6 @@ function previewOwnerServerTiming(res: Response, raw: unknown, requestedAction: 
     && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
     ? [`${phase};dur=${duration.toFixed(2)}`] : []);
   metrics.push(`cxl_action;desc="${requestedAction}"`, `total;dur=${timing.totalMs.toFixed(2)}`);
-  res.setHeader('Server-Timing', metrics.join(', '));
-}
-function previewPublicServerTiming(res: Response, raw: unknown) {
-  if (process.env.VERCEL_ENV !== 'preview' || !record(raw) || !record(raw.meta) || !record(raw.meta.timing)) return;
-  const timing = raw.meta.timing;
-  if (timing.action !== PUBLIC_TIMING_ACTION || typeof timing.totalMs !== 'number'
-    || !Number.isFinite(timing.totalMs) || timing.totalMs < 0 || !record(timing.phases)) return;
-  const metrics = Object.entries(timing.phases).flatMap(([phase, duration]) => PUBLIC_TIMING_PHASES.has(phase)
-    && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
-    ? [`${phase};dur=${duration.toFixed(2)}`] : []);
-  metrics.push(`cxl_action;desc="${PUBLIC_TIMING_ACTION}"`, `total;dur=${timing.totalMs.toFixed(2)}`);
   res.setHeader('Server-Timing', metrics.join(', '));
 }
 function validOptions(value: unknown): value is FetchAssetsOptions {
@@ -74,6 +60,7 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
   const ownerId = process.env.CXL_OWNER_USER_ID;
   if (!url || !anonKey || !ownerId || !accessToken) return null;
   try {
+    const { createClient } = await import('@supabase/supabase-js');
     const client = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
     const { data, error } = await client.auth.getUser(accessToken);
     return !error && data.user?.id === ownerId ? data.user.id : null;
@@ -93,23 +80,6 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started }));
   }
 }
-function publicGasUrl(action: string, params: Record<string, string>): URL | null {
-  const endpoint = gasEndpoint(process.env.CXL_GAS_PUBLIC_URL);
-  if (!endpoint) return null;
-  const url = new URL(endpoint);
-  url.searchParams.set('cxlApi', action);
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  return url;
-}
-async function publicGasData(url: URL, res?: Response): Promise<unknown> {
-  const action = url.searchParams.get('cxlApi') || 'public.read';
-  const includeTiming = process.env.VERCEL_ENV === 'preview' && action === PUBLIC_TIMING_ACTION;
-  if (includeTiming) url.searchParams.set('includeTiming', '1');
-  const raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } }, action);
-  if (includeTiming && res) previewPublicServerTiming(res, raw);
-  if (!record(raw) || raw.ok !== true) throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed');
-  return raw.data;
-}
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
   if (action === 'profiles.getCreator') return args.length === 1 && typeof args[0] === 'string' && args[0].length <= 128;
   if (action === 'profiles.getPublic') return args.length === 1 && Array.isArray(args[0]) && args[0].length <= 100
@@ -117,6 +87,14 @@ function validPublicActionArgs(action: string, args: unknown[]): boolean {
   if (action === 'settings.readCreatorSpace') return args.length === 1 && typeof args[0] === 'string'
     && /^cxlc_[a-f0-9]{32}$/i.test(args[0]);
   return false;
+}
+function publicOwnerGasRequest(action: string, args: unknown[], ownerUserId?: string) {
+  const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
+  const secret = process.env.CXL_API_SHARED_SECRET;
+  const configuredOwnerId = ownerUserId || process.env.CXL_OWNER_USER_ID?.trim();
+  if (!endpoint || !secret || !configuredOwnerId) throw Object.assign(new Error('Google owner API is not configured on the server'), { status: 503 });
+  return gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authorization: secret, ownerUserId: configuredOwnerId, action, args }) }, action);
 }
 function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
@@ -166,6 +144,7 @@ function validWorkWriteOptions(action: string, value: unknown): boolean {
     && (action !== 'works.update' || (Number.isInteger(value.expectedRevision) && Number(value.expectedRevision) >= 1));
 }
 function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, authMode: 'supabase' | 'vercel'): boolean {
+  if (action === 'public.snapshot.rebuild') return authMode === 'vercel' && args.length === 0;
   if (action === 'folders.fetch') return authMode === 'vercel'
     ? args.length === 0
     : args.length === 1 && (args[0] === undefined || args[0] === ownerId);
@@ -181,6 +160,7 @@ function ownerErrorStatus(code: unknown): number {
   if (code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'UNSUPPORTED_ACTION') return 400;
   if (code === 'REVISION_CONFLICT' || code === 'PUBLIC_SYNC_PENDING' || code === 'IDEMPOTENCY_KEY_REUSED' || code === 'CREATOR_MAPPING_CONFLICT') return 409;
   if (code === 'WORK_NOT_FOUND') return 404;
+  if (code === 'PUBLIC_SNAPSHOT_NOT_READY' || code === 'PUBLIC_SNAPSHOT_NOT_CONFIGURED' || code === 'PUBLIC_SNAPSHOT_WRITE_FAILED') return 503;
   if (code === 'WORK_NOT_OWNED') return 403;
   if (code === 'UNSUPPORTED_MEDIA_MUTATION' || code === 'UNSUPPORTED_COLLAB_DRAFT') return 422;
   if (code === 'CREATOR_MAPPING_MISSING' || code === 'CREATOR_MAPPING_AMBIGUOUS' || code === 'FOLDER_SCHEMA_INVALID') return 503;
@@ -215,16 +195,16 @@ export default async function handler(req: Request, res: Response) {
   if (PUBLIC_ACTIONS.has(action)) {
     if (!validPublicActionArgs(action, body.args)) return send(res, 400, { ok: false, error: `Invalid ${action} request` });
     try {
-      const params: Record<string, string> = {};
-      if (action === 'profiles.getCreator') params.slug = String(body.args[0]).trim().replace(/^@+/, '').toLowerCase();
-      if (action === 'profiles.getPublic') params.ids = JSON.stringify([...new Set(body.args[0] as string[])]);
-      if (action === 'settings.readCreatorSpace') params.publicCreatorId = String(body.args[0]);
-      const url = publicGasUrl(action, params);
-      if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
-      return send(res, 200, { ok: true, data: await publicGasData(url) });
+      const response = await publicOwnerGasRequest(`public.${action}`, body.args);
+      if (!record(response) || response.ok !== true) return send(res, ownerErrorStatus(record(response) ? response.code : undefined), {
+        ok: false, error: record(response) && typeof response.error === 'string' ? response.error.slice(0, 300) : 'Google public read failed',
+        ...(record(response) && typeof response.code === 'string' ? { code: response.code } : {})
+      });
+      return send(res, 200, { ok: true, data: response.data });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Google public read failed';
-      const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
+      const status = record(error) && typeof error.status === 'number' ? error.status
+        : (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
       return send(res, status, { ok: false, error: message.slice(0, 300) });
     }
   }
@@ -256,7 +236,7 @@ export default async function handler(req: Request, res: Response) {
     if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
     if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
-    if ((action === 'works.create' || action === 'works.update' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
+    if ((action === 'works.create' || action === 'works.update' || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
       && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
       return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
     }
@@ -367,16 +347,15 @@ export default async function handler(req: Request, res: Response) {
       }
       raw = raw.data.data;
     } else {
-      if (publicCreatorSlug) {
-        const url = publicGasUrl('works.creator', { slug: publicCreatorSlug });
-        if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
-        raw = await publicGasData(url);
-      } else {
-        const url = publicGasUrl(options.assetId ? 'works.detail' : 'works.list', options.assetId ? { id: options.assetId } : {});
-        if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
-        raw = await publicGasData(url, res);
-        raw = options.assetId ? [raw] : raw;
+      const bridgeAction = publicCreatorSlug ? 'public.works.creator' : options.assetId ? 'public.works.detail' : 'public.works.list';
+      const bridgeArgs = publicCreatorSlug ? [publicCreatorSlug] : options.assetId ? [options.assetId] : [{}];
+      const response = await publicOwnerGasRequest(bridgeAction, bridgeArgs, ownerUserId);
+      if (!record(response) || response.ok !== true) {
+        const error = new Error(record(response) && typeof response.error === 'string' ? response.error : 'Google public API response is malformed') as Error & { apiCode?: unknown };
+        if (record(response)) error.apiCode = response.code;
+        throw error;
       }
+      raw = options.assetId ? [response.data] : response.data;
     }
     const works = validateAssetList(raw);
     const scopedOptions = { ...options, ...(ownerScope ? { search: undefined } : {}), publicOnly: publicCreatorSlug ? true : options.publicOnly,
@@ -386,7 +365,9 @@ export default async function handler(req: Request, res: Response) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Works read failed';
     const code = error instanceof Error ? (error as Error & { apiCode?: unknown }).apiCode : undefined;
-    const status = code ? ownerErrorStatus(code) : (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
+    const status = code ? ownerErrorStatus(code) : record(error) && typeof error.status === 'number' ? error.status
+      : (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
     return send(res, status, { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}) });
   }
 }
+

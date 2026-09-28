@@ -4,13 +4,21 @@ This project is a separate server-to-server endpoint for Vercel. Keep the existi
 
 ## Exposed surface
 
-- `doPost`: accepts the Works/folder contracts, Preview-only standard Work `media.upload.*` actions, and isolated `media.poc.*` actions after shared-secret and configured Owner identity checks.
+- `doPost`: accepts the Owner Works/folder contracts, public reads over the Vercel server bridge, the Vercel Owner-only public snapshot rebuild, Preview-only standard Work `media.upload.*` actions, and isolated `media.poc.*` actions after shared-secret and configured Owner identity checks.
 - `doGet`: returns a JSON `Method not allowed` envelope. It does not serve HTML.
 - Every helper function ends in `_`, so it is not callable through `google.script.run`.
 
 GO 7A.2 read validation is complete. This source contains the GO 7B.1 write, GO 7B.2 read/hydration, and GO 7B.3 replace/remove plus orphan-cleanup implementations; none of GO 7B is live validated yet. Vercel media actions remain Preview-only, and the runtime still needs Preview configuration and live validation at GO 7B.4.
 
 Apps Script `ContentService` does not expose a method to set an arbitrary HTTP status code. Error replies therefore carry a `httpStatus` and stable `code` in the JSON envelope; the Vercel Owner proxy translates `OWNER_API_UNAUTHORIZED` to HTTP 401. Malformed JSON and unknown actions fail closed before any action dispatch.
+
+## Public read snapshot recovery
+
+Vercel routes public Works list/detail/creator reads and public profile/settings reads to this API-only endpoint with `CXL_API_SHARED_SECRET` and the configured Owner key. Those credentials are added only by the Vercel server. The browser remains anonymous for these reads and receives only sanitized public data. Home, Creator Works, profiles, and Creator Space settings read a checksummed, chunked Script Properties snapshot; normal requests do not open a Spreadsheet or read Drive. Public Work detail checks the snapshot first, then reads only that Work's canonical JSON for its full detail.
+
+After a public Work projection or deactivation commits, the write path rebuilds the snapshot. If this follow-up fails, the Owner write returns `PUBLIC_SYNC_PENDING` and the previous snapshot remains active. A Vercel Owner can rebuild it from **Settings → Update public data**. The action requires a verified Owner session, same-origin/CSRF validation, and the Vercel-to-GAS shared secret. It bulk reads the Public spreadsheet and does not write canonical Work JSON or media.
+
+For this recovery change, deploy the source in `apps-script/api-only-owner/Code.gs` to the existing API-only Owner Apps Script project. Do not deploy this file to the Owner Web App or Public GAS project. After Vercel Preview is Ready, sign in as Owner, open Settings, and select **Update public data** once for the existing portfolio. Then test a fresh anonymous Preview open. Public GAS is no longer used for Works/profile/settings reads; the separate legacy media endpoint may still use its configured Public GAS URL.
 
 ## Script Properties
 
@@ -100,3 +108,4 @@ Before using this source for Owner list reads, deploy the API-only project updat
 `works.fetch` summary/list reads then use the Private Index only. A single `assetId` request reads that one canonical Drive JSON. A `detail: "full"` request without `assetId` is rejected to prevent returning to per-Work Drive reads.
 
 Successful writes append a new search chunk generation and point the Private Index at its token. Search and readiness use only that current token; older chunks may remain until maintenance and do not affect matches. From the API-only Apps Script editor, run `compactOwnerSearchIndex_` with no arguments when old chunks need cleanup. Each run deletes at most 20 stale or orphaned rows under the Script Lock and reports `deleted` and `remaining`; repeat until `remaining: 0`. This manual maintenance is optional for Work saves and search correctness. `verifyOwnerSummaryReadiness_` reports `staleExtraChunks` separately without treating old generations as a read blocker. No trigger or new schema is required.
+

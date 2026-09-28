@@ -24,7 +24,7 @@ export async function callGoogleBackend<T>(action: string, args: unknown[], useV
   const requestArgs = useVercelOwnerAuth && action === 'folders.fetch' ? [] : args;
   if (typeof fetch !== 'function') throw new GoogleBackendUnavailableError();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
-  if (useVercelOwnerAuth && ['works.create', 'works.update', 'media.upload.begin', 'media.upload.chunk', 'media.upload.finalize'].includes(action)) {
+  if (useVercelOwnerAuth && ['works.create', 'works.update', 'public.snapshot.rebuild', 'media.upload.begin', 'media.upload.chunk', 'media.upload.finalize'].includes(action)) {
     const csrfPrefix = '__Host-cxl_csrf=';
     const cookie = typeof document === 'undefined' ? '' : document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(csrfPrefix));
     if (!cookie) throw new Error('Owner write request is missing its CSRF token');
@@ -48,3 +48,4 @@ export async function callGoogleBackend<T>(action: string, args: unknown[], useV
   }
   return result.data as T;
 }
+

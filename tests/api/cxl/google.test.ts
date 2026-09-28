@@ -39,7 +39,7 @@ describe('Vercel Google Works read proxy', () => {
     expect((await invoke({ action: 'works.fetch', args: [{ arbitrary: true }] })).statusCode).toBe(400);
   });
 
-  it('uses public GAS list for anonymous reads and applies public filters server-side', async () => {
+  it('uses the API-only Owner bridge for anonymous reads without browser auth', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [
       makeAsset('visible', { tags: ['target'] }), makeAsset('private', { visibility: 'private', isPublic: false })
     ] }) });
@@ -47,67 +47,31 @@ describe('Vercel Google Works read proxy', () => {
     const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true, search: 'target' }] });
     expect(result.statusCode).toBe(200);
     expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['visible']);
-    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.list');
+    expect(fetchMock.mock.calls[0][0]).toContain('/owner/exec');
+    const gasRequest = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(gasRequest).toMatchObject({ action: 'public.works.list', ownerUserId: 'owner-1', authorization: 'server-only-secret', args: [{}] });
+    expect(JSON.stringify(result.json)).not.toContain('server-only-secret');
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
 
-  it('keeps anonymous public reads working when owner identity is not configured', async () => {
+  it('requires server-side Owner bridge configuration, not a browser Owner session', async () => {
     vi.stubEnv('CXL_OWNER_USER_ID', '');
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [makeAsset('public')] }) });
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true }] });
 
-    expect(result.statusCode).toBe(200);
-    expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['public']);
-    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.list');
-    expect(fetchMock.mock.calls[0][0]).toContain('/public/exec');
+    expect(result.statusCode).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('uses the public detail endpoint for an explicit Asset ID', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: makeAsset('one') }) });
+  it('uses API-only Owner public detail for an explicit Asset ID', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: makeAsset('asset_one') }) });
     vi.stubGlobal('fetch', fetchMock);
-    const result = await invoke({ action: 'works.fetch', args: [{ assetId: 'one', publicOnly: true }] });
+    const result = await invoke({ action: 'works.fetch', args: [{ assetId: 'asset_one', publicOnly: true }] });
     expect(result.statusCode).toBe(200);
-    expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['one']);
-    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.detail');
-  });
-
-  it('surfaces only allowlisted Public works.list timings on Preview responses', async () => {
-    vi.stubEnv('VERCEL_ENV', 'preview');
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
-      data: [makeAsset('public-work')], meta: { timing: { action: 'works.list', totalMs: 30_000, phases: {
-        public_sheet_open: 25_000, public_index_read: 4_000, public_creator_map_read: 700,
-        private_sheet_id: 999, 'media:payload': 888
-      } }, secret: 'never forwarded' } }) });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true, detail: 'summary', limit: 48 }] });
-
-    const upstream = new URL(fetchMock.mock.calls[0][0]);
-    expect(upstream.searchParams.get('cxlApi')).toBe('works.list');
-    expect(upstream.searchParams.get('includeTiming')).toBe('1');
-    expect(result.statusCode).toBe(200);
-    expect(result.headers['Server-Timing']).toContain('public_sheet_open;dur=25000.00');
-    expect(result.headers['Server-Timing']).toContain('public_creator_map_read;dur=700.00');
-    expect(result.headers['Server-Timing']).toContain('total;dur=30000.00');
-    expect(result.headers['Server-Timing']).not.toMatch(/private_sheet_id|media:|secret|never/i);
-    expect(result.json.data.data[0].id).toBe('public-work');
-    expect(JSON.stringify(result.json)).not.toMatch(/meta|never forwarded|secret/);
-  });
-
-  it('does not request or expose Public GAS timing outside Preview', async () => {
-    vi.stubEnv('VERCEL_ENV', 'production');
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
-      data: [makeAsset('public-work')], meta: { timing: { action: 'works.list', totalMs: 10, phases: { public_sheet_open: 9 } } } }) });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true, detail: 'summary', limit: 48 }] });
-
-    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.has('includeTiming')).toBe(false);
-    expect(result.headers['Server-Timing']).toBeUndefined();
-    expect(result.json.data.data[0].id).toBe('public-work');
-    expect(JSON.stringify(result.json)).not.toContain('meta');
+    expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['asset_one']);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ action: 'public.works.detail', args: ['asset_one'] });
   });
 
   it('verifies owner session and injects the server secret only on the server-to-GAS request', async () => {
@@ -230,9 +194,8 @@ describe('Vercel Google Works read proxy', () => {
     const result = await invoke({ action: 'works.fetch', args: [{ creatorSlug: '@Creator-One', search: 'work' }] });
     expect(result.statusCode).toBe(200);
     expect(result.json.data.data.map((asset: { id: string }) => asset.id)).toEqual(['creator-work']);
-    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.creator');
-    expect(fetchMock.mock.calls[0][0]).toContain('slug=creator-one');
-    expect(fetchMock.mock.calls[0][1].method).toBe('GET');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ action: 'public.works.creator', args: ['creator-one'] });
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
 
@@ -262,6 +225,27 @@ describe('Vercel Google Works read proxy', () => {
     expect([noCsrf.statusCode, badOrigin.statusCode, accepted.statusCode]).toEqual([403, 403, 200]);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).ownerUserId).toBe('owner-1');
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).args[0].userId).toBe('owner-1');
+  });
+
+  it('allows only a Vercel Owner session to request the bounded snapshot rebuild', async () => {
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { works: 28, creators: 1, snapshotVersion: 1 } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const anonymous = await invoke({ action: 'public.snapshot.rebuild', args: [] });
+    const missingCsrf = await invoke({ action: 'public.snapshot.rebuild', args: [] }, undefined, 'POST', { cookie, origin: 'https://cxl.example' });
+    const accepted = await invoke({ action: 'public.snapshot.rebuild', args: [] }, undefined, 'POST', { cookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' });
+
+    expect(anonymous.statusCode).toBe(401);
+    expect(missingCsrf.statusCode).toBe(403);
+    expect(accepted.statusCode).toBe(200);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ action: 'public.snapshot.rebuild', authorization: 'server-only-secret', ownerUserId: 'owner-1', args: [] });
+    expect(JSON.stringify(accepted.json)).not.toContain('server-only-secret');
   });
 
   it('exposes sanitized GAS phase timings in Preview response headers without changing the data body', async () => {
@@ -324,15 +308,14 @@ describe('Vercel Google Works read proxy', () => {
     expect(gasRequest.ownerUserId).toBe('owner-1');
   });
 
-  it('keeps anonymous public Works reads unchanged in Vercel auth mode without Owner config', async () => {
+  it('keeps anonymous browser reads free of Owner session auth in Vercel auth mode', async () => {
     vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
     vi.stubEnv('CXL_OWNER_USER_ID', '');
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [makeAsset('public')] }) });
     vi.stubGlobal('fetch', fetchMock);
     const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true }] });
-    expect(result.statusCode).toBe(200);
-    expect(result.json.data.data).toHaveLength(1);
-    expect(fetchMock.mock.calls[0][0]).toContain('/public/exec');
+    expect(result.statusCode).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('proxies only the supported public profile/settings read contracts', async () => {
@@ -345,11 +328,9 @@ describe('Vercel Google Works read proxy', () => {
     expect((await invoke({ action: 'profiles.getCreator', args: ['@Creator-One'] })).statusCode).toBe(200);
     expect((await invoke({ action: 'profiles.getPublic', args: [['cxlc_0123456789abcdef0123456789abcdef', 'cxlc_0123456789abcdef0123456789abcdef']] })).statusCode).toBe(200);
     expect((await invoke({ action: 'settings.readCreatorSpace', args: ['cxlc_0123456789abcdef0123456789abcdef'] })).statusCode).toBe(200);
-    expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=profiles.getCreator');
-    expect(fetchMock.mock.calls[0][0]).toContain('slug=creator-one');
-    const ids = new URL(fetchMock.mock.calls[1][0]).searchParams.get('ids');
-    expect(JSON.parse(ids || '[]')).toEqual(['cxlc_0123456789abcdef0123456789abcdef']);
-    expect(fetchMock.mock.calls[2][0]).toContain('cxlApi=settings.readCreatorSpace');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ action: 'public.profiles.getCreator', args: ['@Creator-One'] });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ action: 'public.profiles.getPublic', args: [['cxlc_0123456789abcdef0123456789abcdef', 'cxlc_0123456789abcdef0123456789abcdef']] });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ action: 'public.settings.readCreatorSpace', args: ['cxlc_0123456789abcdef0123456789abcdef'] });
     expect(fetchMock.mock.calls.every(call => call[1].headers.Authorization === undefined)).toBe(true);
   });
 
@@ -363,9 +344,9 @@ describe('Vercel Google Works read proxy', () => {
   });
 
   it('normalizes unavailable configuration and malformed GAS responses', async () => {
-    vi.stubEnv('CXL_GAS_PUBLIC_URL', '');
+    vi.stubEnv('CXL_GAS_OWNER_URL', '');
     expect((await invoke({ action: 'works.fetch', args: [{}] })).statusCode).toBe(503);
-    vi.stubEnv('CXL_GAS_PUBLIC_URL', 'https://script.google.com/macros/s/public/exec');
+    vi.stubEnv('CXL_GAS_OWNER_URL', 'https://script.google.com/macros/s/owner/exec');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => 'not-json' }));
     const bad = await invoke({ action: 'works.fetch', args: [{}] });
     expect(bad.statusCode).toBe(502);
@@ -526,3 +507,4 @@ describe('Vercel Google Works read proxy', () => {
     expect((await invoke(action, undefined, 'POST', headers)).statusCode).toBe(404);
   });
 });
+
