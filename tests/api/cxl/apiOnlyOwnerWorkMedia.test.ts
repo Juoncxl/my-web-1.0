@@ -546,36 +546,55 @@ describe('API-only Owner standard Work media foundation', () => {
     expect(rangeFetch).not.toHaveBeenCalled();
   });
 
-  it('keeps multi-chunk and 10 MiB reads on the Drive Range path', () => {
-    const bytes = Buffer.alloc(2 * 1024 * 1024 + 1);
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
-    const { context, file, record, properties, input } = attachedReadFixture('image/png', bytes);
-    const blobRead = vi.spyOn(file, 'getBlob');
+  it.each([2097153, 4194625, 5242880, 10485760])(
+    'assembles %i bytes from blob slices with exact boundaries and checksums', size => {
+      const bytes = Buffer.alloc(size);
+      for (let i = 0; i < size; i++) bytes[i] = (i * 17 + Math.floor(i / 2097152)) & 255;
+      const { context, file, input, record } = attachedReadFixture('image/gif', bytes, true);
+      const blobRead = vi.spyOn(file, 'getBlob');
+      const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch').mockImplementation(() => { throw new Error('Range forbidden'); });
+      const oauth = vi.spyOn(context.ScriptApp, 'getOAuthToken');
+      const rangeHelper = vi.spyOn(context, 'mediaPocDriveChunk_');
+      const count = Math.ceil(size / 2097152);
+      for (const isPublic of [false, true]) {
+        const chunks: Buffer[] = [];
+        for (let index = 0; index < count; index++) {
+          const result = context.mediaWorkReadChunk_({ ...input, chunkIndex: index }, OWNER_ID, isPublic);
+          const expected = bytes.subarray(index * 2097152, Math.min((index + 1) * 2097152, size));
+          expect(result).toEqual({ workId: WORK_ID, mediaId: MEDIA_ID, ref: input.ref, mimeType: 'image/gif',
+            totalFileSize: size, totalChunks: count, chunkIndex: index, sha256: sha256(bytes),
+            chunkSha256: sha256(expected), base64: expected.toString('base64') });
+          chunks.push(Buffer.from(result.base64, 'base64'));
+        }
+        expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
+      }
+      expect(blobRead).toHaveBeenCalledTimes(count * 2);
+      expect(rangeFetch).not.toHaveBeenCalled();
+      expect(rangeHelper).not.toHaveBeenCalled();
+      expect(oauth).not.toHaveBeenCalled();
+      record.row.visibility = 'private'; record.row.is_public = false;
+      expect(() => context.mediaWorkReadChunk_({ ...input, chunkIndex: count - 1 }, OWNER_ID, true))
+        .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
+      expect(blobRead).toHaveBeenCalledTimes(count * 2);
+    }, 20000);
+
+  it('rejects invalid full blobs and failures on later chunks without falling back to Range', () => {
+    const bytes = Buffer.alloc(2097153);
+    const { context, file, input } = attachedReadFixture('image/gif', bytes);
     const rangeFetch = vi.spyOn(context.UrlFetchApp, 'fetch');
-
-    const first = context.mediaWorkReadChunk_(input, OWNER_ID, false);
-    const last = context.mediaWorkReadChunk_({ ...input, chunkIndex: 1 }, OWNER_ID, false);
-    expect(first).toMatchObject({ totalChunks: 2, totalFileSize: bytes.length, chunkIndex: 0 });
-    expect(last).toMatchObject({ totalChunks: 2, chunkIndex: 1, base64: 'AA==' });
-    expect(rangeFetch).toHaveBeenCalledTimes(2);
-    expect(blobRead).not.toHaveBeenCalled();
-
-    const maxBytes = 10 * 1024 * 1024;
-    const key = `CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`;
-    properties.set(key, JSON.stringify({ ...JSON.parse(properties.get(key)!), totalFileSize: maxBytes, totalChunks: 5,
-      sha256: 'a'.repeat(64) }));
-    record.mediaRecords[0].file_size = maxBytes;
-    record.mediaRecords[0].sha256 = 'a'.repeat(64);
-    vi.spyOn(file, 'getSize').mockReturnValue(maxBytes);
-    context.mediaWorkOwnerSnapshotInvalidate_(WORK_ID);
-    context.mediaWorkOwnerSnapshotSeed_(record, OWNER_ID, context.mediaWorkOwnerSnapshotEpoch_(WORK_ID, true));
-    rangeFetch.mockImplementationOnce(() => ({ getResponseCode: () => 206,
-      getContent: () => Array(2 * 1024 * 1024).fill(0) }));
-    const maxChunk = context.mediaWorkReadChunk_({ ...input, chunkIndex: 4 }, OWNER_ID, false);
-    expect(maxChunk).toMatchObject({ totalFileSize: maxBytes, totalChunks: 5, chunkIndex: 4 });
-    expect(rangeFetch).toHaveBeenCalledTimes(3);
-    expect((rangeFetch.mock.calls[2][1] as { headers: { Range: string } }).headers.Range).toBe('bytes=8388608-10485759');
-    expect(blobRead).not.toHaveBeenCalled();
+    const blobRead = vi.spyOn(file, 'getBlob');
+    for (const badBlob of [
+      { getBytes: () => [0], getContentType: () => 'image/gif' },
+      { getBytes: () => file.bytes, getContentType: () => 'image/png' }
+    ]) {
+      blobRead.mockReturnValueOnce(badBlob);
+      expect(() => context.mediaWorkReadChunk_({ ...input, chunkIndex: 1 }, OWNER_ID, false))
+        .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_INVALID' }));
+    }
+    blobRead.mockImplementationOnce(() => { throw new Error('sensitive detail'); });
+    expect(() => context.mediaWorkReadChunk_({ ...input, chunkIndex: 1 }, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_FAILED' }));
+    expect(rangeFetch).not.toHaveBeenCalled();
   });
 
   it('emits only safe standard Work media timing fields when Preview requests includeTiming', () => {

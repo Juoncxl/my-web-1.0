@@ -10,7 +10,7 @@ const CARD_INTERACTIVE_TARGET_SELECTOR = [
   '[data-card-action]'
 ].join(', ');
 
-/** Keep card navigation on its visual/body surfaces while allowing child controls to act independently. */
+/** Exclude child controls before article capture activates card navigation. */
 export function shouldOpenAssetCardFromTarget(target: EventTarget | null): boolean {
   if (!target || typeof target !== 'object') return true;
 

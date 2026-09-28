@@ -226,7 +226,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     if (resolvedCreatorProfile) onPreviewCreator?.(resolvedCreatorProfile, event.currentTarget);
   };
 
-  const handleCardSurfaceClick = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleCardSurfaceClick = (event: React.MouseEvent<HTMLElement>) => {
     if (shouldOpenAssetCardFromTarget(event.target)) onClick(asset);
   };
 
@@ -239,6 +239,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   return (
     <>
     <article
+      onClickCapture={handleCardSurfaceClick}
       onKeyDown={event => {
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
@@ -250,7 +251,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       aria-label={`เปิดผลงาน ${cardTitle}`}
       className={`cv-asset-card group ${display.isCollaborationFocused ? 'is-collaboration-card' : 'is-standard-card'} ${presentationMode === 'profile-compact' ? 'is-profile-compact' : ''} ${isTrashMode ? 'is-trash' : ''} ${(onLike || onBookmark) && !isTrashMode ? 'has-quick-actions' : ''}`}
     >
-      <div className="cv-card-visual" onClick={handleCardSurfaceClick}>
+      <div className="cv-card-visual">
       <div className={`cv-card-cover ${mainImage ? 'has-image' : 'has-fallback'}`}>
         {mainImage ? (
           <img src={mainImage} alt="" className="cv-card-cover-image" referrerPolicy="no-referrer" />
@@ -305,7 +306,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       </div>}
       </div>
 
-      <div className="cv-card-body" onClick={handleCardSurfaceClick}>
+      <div className="cv-card-body">
         <div className="cv-card-title-row">
           <div className="cv-card-icon" aria-hidden="true">{!iconFailed && isValidWorkIcon(asset.icon)
             ? asset.icon.type === 'emoji' || asset.icon.type === 'kaomoji'
@@ -340,7 +341,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             <div ref={menuRef} className="cv-card-menu-wrap">
               <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
               {menuOpen && (
-                <div className="cv-card-menu" onClick={event => event.stopPropagation()}>
+                <div data-card-action className="cv-card-menu" onClick={event => event.stopPropagation()}>
                   {!isTrashMode && !isOwner && onFork && <button type="button" onClick={handleMenuAction(() => onFork(asset))}><GitFork className="w-3.5 h-3.5" />Fork เข้าคลังของฉัน</button>}
                   {!isTrashMode && !isOwner && onReport && <button type="button" onClick={handleMenuAction(() => onReport(asset))}><Flag className="w-3.5 h-3.5" />รายงานผลงาน</button>}
                   {!isTrashMode && isOwner && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}

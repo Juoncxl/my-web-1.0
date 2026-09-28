@@ -1597,14 +1597,14 @@ function mediaWorkReadChunk_(input,ownerUserId,isPublic) {
   var start=input.chunkIndex*CXL_WORK_MEDIA_CHUNK_BYTES_,expectedLength=Math.min(CXL_WORK_MEDIA_CHUNK_BYTES_,totalSize-start);
   var binaryStarted=Date.now(),chunk;
   try {
-    if(count===1&&totalSize<=CXL_WORK_MEDIA_CHUNK_BYTES_&&input.chunkIndex===0){
-      var blob,blobMime;
-      try { blob=file.getBlob();chunk=blob.getBytes();blobMime=typeof blob.getContentType==='function'?blob.getContentType():null; }
-      catch(_blobError) { apiFail_('MEDIA_READ_FAILED','Work media bytes could not be read'); }
-      if(!Array.isArray(chunk)||chunk.length!==totalSize)apiFail_('MEDIA_READ_INVALID','Work media is invalid');
-      if(typeof blobMime==='string'&&blobMime.trim()&&blobMime.split(';')[0].trim().toLowerCase()!==manifest.mimeType)
-        apiFail_('MEDIA_READ_INVALID','Work media is invalid');
-    } else chunk=mediaPocDriveChunk_(manifest.drive_file_id,start,expectedLength,totalSize,'media.work.'+(isPublic?'publicChunk':'ownerChunk'),input.chunkIndex);
+    var blob,blobMime,bytes;
+    try { blob=file.getBlob();bytes=blob.getBytes();blobMime=typeof blob.getContentType==='function'?blob.getContentType():null; }
+    catch(_blobError) { apiFail_('MEDIA_READ_FAILED','Work media bytes could not be read'); }
+    if(!Array.isArray(bytes)||bytes.length!==totalSize)apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+    if(typeof blobMime==='string'&&blobMime.trim()&&blobMime.split(';')[0].trim().toLowerCase()!==manifest.mimeType)
+      apiFail_('MEDIA_READ_INVALID','Work media is invalid');
+    chunk=bytes.slice(start,Math.min(start+CXL_WORK_MEDIA_CHUNK_BYTES_,totalSize));
+    if(chunk.length!==expectedLength)apiFail_('MEDIA_READ_INVALID','Work media is invalid');
   } finally { ownerTimingPhase_('binary_fetch',Date.now()-binaryStarted); }
   var responseStarted=Date.now();
   try {
