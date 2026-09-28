@@ -128,7 +128,10 @@ describe('Owner scoped read lifecycle', () => {
     expect(assetHookSource).toContain('cxlDataService.works.fetch');
     expect(assetHookSource).toContain('readLifecycle.current.isCurrent(ticket)');
     expect(assetHookSource).toContain('readWithBoundedRetry');
-    expect(assetHookSource).toContain('isInitialLoad && isVercelOwnerAuth');
+    expect(assetHookSource).toContain('retryOwnerInitialRead');
+    expect(assetHookSource).toContain('retryPublicInitialSummaryRead');
+    expect(assetHookSource).toContain("loadOptions.publicOnly === true");
+    expect(assetHookSource).toContain("loadOptions.detail !== 'full'");
 
     expect(folderHookSource).toContain('useLayoutEffect(() => {');
     expect(folderHookSource).toContain('readLifecycle.current.transition(requestScopeKey)');
