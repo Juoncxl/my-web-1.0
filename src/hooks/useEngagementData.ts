@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cxlDataService } from '../data/cxlDataService';
 import { uniqueAssetIds } from '../lib/assetSelectors';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 
 type ReportError = (message: string) => void;
 
@@ -13,7 +14,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
   const likeRequestSequence = useRef(0);
 
   const refreshBookmarks = useCallback(async () => {
-    if (!currentUserId) return;
+    if (!currentUserId || isVercelOwnerAuth) return;
 
     const requestId = ++bookmarkRequestSequence.current;
     const requestScope = scopeSequence.current;
@@ -33,7 +34,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
   }, [currentUserId, reportError]);
 
   const refreshLikes = useCallback(async () => {
-    if (!currentUserId) return;
+    if (!currentUserId || isVercelOwnerAuth) return;
 
     const requestId = ++likeRequestSequence.current;
     const requestScope = scopeSequence.current;
@@ -59,7 +60,7 @@ export function useEngagementData(currentUserId: string | undefined, reportError
       setBookmarkedAssetIds([]);
       setLikedAssetIds([]);
     }
-    if (currentUserId) {
+    if (currentUserId && !isVercelOwnerAuth) {
       void refreshBookmarks();
       void refreshLikes();
     }
@@ -68,6 +69,9 @@ export function useEngagementData(currentUserId: string | undefined, reportError
   const toggleBookmark = useCallback(async (assetId: string) => {
     if (!currentUserId) {
       return { success: false, isBookmarked: false, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
+    }
+    if (isVercelOwnerAuth) {
+      return { success: false, isBookmarked: false, error: 'บุ๊กมาร์กยังไม่รองรับในโหมด Owner นี้' };
     }
     const shouldBookmark = !bookmarkedAssetIds.includes(assetId);
     const result = await cxlDataService.engagement.setBookmark(currentUserId, assetId, shouldBookmark);
@@ -83,6 +87,9 @@ export function useEngagementData(currentUserId: string | undefined, reportError
   const toggleLike = useCallback(async (assetId: string) => {
     if (!currentUserId) {
       return { success: false, isLiked: false, likesCount: null, error: 'กรุณาเข้าสู่ระบบก่อนดำเนินการ' };
+    }
+    if (isVercelOwnerAuth) {
+      return { success: false, isLiked: false, likesCount: null, error: 'การกดถูกใจยังไม่รองรับในโหมด Owner นี้' };
     }
     const shouldLike = !likedAssetIds.includes(assetId);
     const result = await cxlDataService.engagement.setWorkLike(currentUserId, assetId, shouldLike);
@@ -104,3 +111,4 @@ export function useEngagementData(currentUserId: string | undefined, reportError
     toggleLike
   };
 }
+

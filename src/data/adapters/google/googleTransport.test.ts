@@ -57,6 +57,24 @@ describe('Google server transport boundary', () => {
     expect(result.data?.[0].previewImages).toEqual([galleryUrl]);
   });
 
+  it('loads the anonymous public summary feed through the cacheable GET route without cookies', async () => {
+    const publicWork = { id: 'asset_public', userId: 'creator-1', authorName: 'Creator', title: 'Public',
+      icon: { type: 'emoji', value: '✨' }, category: 'character', content: 'public content', contentBlocks: [],
+      previewImage: '', previewImages: [], media: [], isPublic: true, visibility: 'public', status: 'finished',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '', deletedAt: null, tags: [] };
+    const privateWork = { ...publicWork, id: 'asset_private', visibility: 'private', isPublic: false };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200,
+      json: async () => ({ ok: true, data: { data: [publicWork, privateWork], error: null } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await googleDataAdapter.works.fetch({ publicOnly: true });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/cxl/public-works', {
+      method: 'GET', credentials: 'omit', headers: { Accept: 'application/json' }
+    });
+    expect(result.data?.map(asset => asset.id)).toEqual(['asset_public']);
+    expect(result.data?.[0].content).toBe('public content');
+  });
+
   it('sends Owner write and folder requests with the current session token but no server secret', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, data: { data: null, error: null } }) });
     vi.stubGlobal('fetch', fetchMock);

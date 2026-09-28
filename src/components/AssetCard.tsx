@@ -140,9 +140,13 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const [menuOpen, setMenuOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   const [iconFailed, setIconFailed] = useState(false);
+  const [coverFailed, setCoverFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setIconFailed(false), [asset.id, asset.icon?.type, asset.icon?.value]);
+  useEffect(() => {
+    setIconFailed(false);
+    setCoverFailed(false);
+  }, [asset.id, asset.icon?.type, asset.icon?.value, asset.previewImage || asset.previewImages?.[0]]);
 
   useEffect(() => {
     const closeWhenAnotherMenuOpens = (event: Event) => {
@@ -252,9 +256,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       className={`cv-asset-card group ${display.isCollaborationFocused ? 'is-collaboration-card' : 'is-standard-card'} ${presentationMode === 'profile-compact' ? 'is-profile-compact' : ''} ${isTrashMode ? 'is-trash' : ''} ${(onLike || onBookmark) && !isTrashMode ? 'has-quick-actions' : ''}`}
     >
       <div className="cv-card-visual">
-      <div className={`cv-card-cover ${mainImage ? 'has-image' : 'has-fallback'}`}>
-        {mainImage ? (
-          <img src={mainImage} alt="" className="cv-card-cover-image" loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+      <div className={`cv-card-cover ${mainImage && !coverFailed ? 'has-image' : 'has-fallback'}`}>
+        {mainImage && !coverFailed ? (
+          <img src={mainImage} alt="" className="cv-card-cover-image" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setCoverFailed(true)} />
         ) : (
           <div className={`cv-card-fallback cv-fallback-${asset.category}`} aria-hidden="true">
             <span className="cv-fallback-kicker">CXL / {categoryLabel}</span>
@@ -368,3 +372,4 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     </>
   );
 };
+

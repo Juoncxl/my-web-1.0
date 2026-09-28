@@ -10,4 +10,12 @@ describe('AssetCard public icon rendering', () => {
     expect(source).toContain('!iconFailed && isValidWorkIcon(asset.icon)');
     expect(source).toContain(': categoryMeta.emoji}</div>');
   });
+
+  it('replaces failed legacy cover images with the existing gradient and title fallback', () => {
+    expect(source).toContain('onError={() => setCoverFailed(true)}');
+    expect(source).toContain("mainImage && !coverFailed ? 'has-image' : 'has-fallback'");
+    expect(source).toContain('{mainImage && !coverFailed ? (');
+    expect(source).toContain('cv-card-fallback cv-fallback-');
+  });
 });
+

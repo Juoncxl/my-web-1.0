@@ -88,13 +88,14 @@ function validPublicActionArgs(action: string, args: unknown[]): boolean {
     && /^cxlc_[a-f0-9]{32}$/i.test(args[0]);
   return false;
 }
-function publicOwnerGasRequest(action: string, args: unknown[], ownerUserId?: string) {
+export function publicOwnerGasRequest(action: string, args: unknown[], ownerUserId?: string, includeTiming = false) {
   const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
   const secret = process.env.CXL_API_SHARED_SECRET;
   const configuredOwnerId = ownerUserId || process.env.CXL_OWNER_USER_ID?.trim();
   if (!endpoint || !secret || !configuredOwnerId) throw Object.assign(new Error('Google owner API is not configured on the server'), { status: 503 });
   return gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ authorization: secret, ownerUserId: configuredOwnerId, action, args }) }, action);
+    body: JSON.stringify({ authorization: secret, ownerUserId: configuredOwnerId, action, args,
+      ...(includeTiming && process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
 }
 function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
@@ -172,7 +173,7 @@ function ownerErrorStatus(code: unknown): number {
   if (code === 'INVALID_FOLDER' || code === 'INVALID_WORK' || code === 'INVALID_REQUEST_ID' || code === 'REVISION_REQUIRED') return 400;
   return 502;
 }
-function validateAssetList(value: unknown): Asset[] {
+export function validateAssetList(value: unknown): Asset[] {
   if (!Array.isArray(value) || value.some(item => !record(item)
     || typeof item.id !== 'string' || typeof item.title !== 'string' || typeof item.category !== 'string'
     || typeof item.status !== 'string' || typeof item.visibility !== 'string' || typeof item.isPublic !== 'boolean'
@@ -181,6 +182,41 @@ function validateAssetList(value: unknown): Asset[] {
     throw new Error('Google Works response does not match the CXL Asset list shape');
   }
   return value as Asset[];
+}
+
+/** Read the anonymous, sanitized public snapshot for the cacheable GET route. */
+export async function fetchPublicWorksSnapshot() {
+  const handlerStartedAt = Date.now();
+  const gasStartedAt = Date.now();
+  const raw = await publicOwnerGasRequest('public.works.list', [{}], undefined, true);
+  const gasElapsedMs = Date.now() - gasStartedAt;
+  const validationStartedAt = Date.now();
+  if (!record(raw) || raw.ok !== true) {
+    const error = Object.assign(new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed'), {
+      status: record(raw) && typeof raw.httpStatus === 'number' ? raw.httpStatus : ownerErrorStatus(record(raw) ? raw.code : undefined)
+    });
+    throw error;
+  }
+  const works = filterGoogleWorks(validateAssetList(raw.data), { publicOnly: true, detail: 'summary' }).map(work => {
+    const sanitized = { ...work, userId: '', collaboration: null, versions: [] };
+    delete sanitized.folderId;
+    delete sanitized.revision;
+    delete sanitized.qaStorageKey;
+    delete sanitized.linkedAssetIds;
+    return sanitized;
+  });
+  const responseValidationMs = Date.now() - validationStartedAt;
+  const gasTiming = process.env.VERCEL_ENV === 'preview' && record(raw.meta) && record(raw.meta.timing)
+    ? raw.meta.timing : undefined;
+  return {
+    works,
+    timing: {
+      handlerStartToGasMs: gasStartedAt - handlerStartedAt,
+      gasElapsedMs,
+      responseValidationMs,
+      gas: gasTiming
+    }
+  };
 }
 
 export default async function handler(req: Request, res: Response) {

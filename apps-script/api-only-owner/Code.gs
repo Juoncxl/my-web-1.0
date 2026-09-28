@@ -44,7 +44,7 @@ var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.up
   'media.poc.begin','media.poc.chunk','media.poc.finalize','media.poc.setPublic',
   'media.poc.ownerChunk','media.poc.publicChunk','media.poc.readDiagnostics','media.poc.cleanup'];
 var API_MAX_POST_CHARS_ = 5000000;
-var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','work_lookup','canonical_work_read','association_validation','public_projection_validation','file_metadata_validation','binary_fetch','owner_auth_cache','total'];
+var OWNER_TIMING_PHASES_ = ['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read','chunk_receive','chunk_persist','finalize_lookup','final_assembly','checksum_validation','binary_validation','canonical_drive_write','owner_media_read','public_media_authorization','public_media_read','staging_cleanup','work_lookup','canonical_work_read','association_validation','public_projection_validation','file_metadata_validation','binary_fetch','owner_auth_cache','snapshot_manifest_read','snapshot_chunks_read','snapshot_parse','total'];
 var API_TIMING_CONTEXT_ = null;
 var MEDIA_POC_CHUNK_BYTES_ = 2 * 1024 * 1024;
 var MEDIA_POC_MAX_BYTES_ = 10 * 1024 * 1024;
@@ -363,15 +363,19 @@ function publicReadSnapshotChecksum_(value) {
 
 function publicReadSnapshotGeneration_(generation) {
   if(!/^[a-f0-9-]{16,64}$/i.test(String(generation||'')))apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');
-  var props=props_(),base=PUBLIC_READ_SNAPSHOT_PREFIX_+generation+'_',manifest;
-  try{manifest=JSON.parse(props.getProperty(base+'M')||'');}catch(_error){manifest=null;}
+  var props=props_(),base=PUBLIC_READ_SNAPSHOT_PREFIX_+generation+'_',manifest,phaseStarted=Date.now();
+  var allProperties=props.getProperties();
+  try{manifest=JSON.parse(allProperties[base+'M']||'');}catch(_error){manifest=null;}
+  ownerTimingPhase_('snapshot_manifest_read',Date.now()-phaseStarted);
   if(!manifest||Number(manifest.version)!==PUBLIC_READ_SNAPSHOT_VERSION_||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>PUBLIC_READ_SNAPSHOT_MAX_CHUNKS_
     ||typeof manifest.sha256!=='string'||!/^[a-f0-9]{64}$/i.test(manifest.sha256))apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');
-  var pieces=[];for(var i=0;i<manifest.chunks;i++){var piece=props.getProperty(base+i);if(typeof piece!=='string')apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');pieces.push(piece);}
-  var serialized=pieces.join('');if(publicReadSnapshotChecksum_(serialized)!==manifest.sha256)apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');
-  var snapshot;try{snapshot=JSON.parse(serialized);}catch(_error){apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');}
+  phaseStarted=Date.now();var pieces=[];for(var i=0;i<manifest.chunks;i++){var piece=allProperties[base+i];if(typeof piece!=='string')apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');pieces.push(piece);}
+  var serialized=pieces.join('');ownerTimingPhase_('snapshot_chunks_read',Date.now()-phaseStarted);
+  phaseStarted=Date.now();if(publicReadSnapshotChecksum_(serialized)!==manifest.sha256)apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');
+  var snapshot;try{snapshot=JSON.parse(serialized);}catch(_error){snapshot=null;}
   if(!snapshot||Number(snapshot.version)!==PUBLIC_READ_SNAPSHOT_VERSION_||!Array.isArray(snapshot.works)||!Array.isArray(snapshot.creators)||!snapshot.settings||typeof snapshot.settings!=='object')
     apiFail_('PUBLIC_SNAPSHOT_NOT_READY','Public read snapshot is unavailable');
+  ownerTimingPhase_('snapshot_parse',Date.now()-phaseStarted);
   return snapshot;
 }
 
@@ -2263,3 +2267,4 @@ function writeFingerprint_(operation,value) {
   var digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,JSON.stringify({operation:operation,value:value}),Utilities.Charset.UTF_8);
   return Utilities.base64Encode(digest);
 }
+

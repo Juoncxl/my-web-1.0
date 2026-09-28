@@ -29,6 +29,7 @@ import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 import { isGoogleWorksReadBackend } from './data/cxlDataService';
+import { isVercelOwnerAuth } from './lib/auth/ownerAuthBackend';
 import { CATEGORIES, STATUS_PRESETS } from './lib/constants';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
@@ -198,6 +199,7 @@ function MainApp() {
     toggleBookmark,
     toggleLike
   } = useEngagementData(resolvedUserId, reportOperationError);
+  const engagementActionsAvailable = !isVercelOwnerAuth;
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
   const visibleOperationError = operationError || assetLoadError;
 
@@ -547,8 +549,8 @@ function MainApp() {
     onOpenAsset: handleOpenAssetView,
     onEditAsset: handleEditVaultAsset,
     onDeleteAsset: handleDeleteVaultAsset,
-    onLike: handleLikeAsset,
-    onBookmark: handleToggleBookmark,
+    onLike: engagementActionsAvailable ? handleLikeAsset : undefined,
+    onBookmark: engagementActionsAvailable ? handleToggleBookmark : undefined,
     onFork: handleForkAsset,
     onReport: handleOpenReport,
     onRestore: handleRestoreAsset,
@@ -580,8 +582,8 @@ function MainApp() {
           bookmarkedAssetIds={bookmarkedAssetIds}
           likedAssetIds={likedAssetIds}
           recentlyViewedIds={recentlyViewedIds}
-          onLike={handleLikeAsset}
-          onBookmark={handleToggleBookmark}
+          onLike={engagementActionsAvailable ? handleLikeAsset : undefined}
+          onBookmark={engagementActionsAvailable ? handleToggleBookmark : undefined}
           onDeleteAsset={handleDeleteVaultAsset}
           onRestoreAsset={handleRestoreAsset}
           onPermanentDeleteAsset={handlePermanentDeleteAsset}
@@ -642,8 +644,8 @@ function MainApp() {
         onDelete={handleSoftDeleteAsset}
         onPermanentDelete={handlePermanentDeleteAsset}
         onRestore={handleRestoreAsset}
-        onLike={handleLikeAsset}
-        onBookmark={handleToggleBookmark}
+        onLike={engagementActionsAvailable ? handleLikeAsset : undefined}
+        onBookmark={engagementActionsAvailable ? handleToggleBookmark : undefined}
         onFork={handleForkAsset}
         onReport={handleOpenReport}
         onSelectLinkedAsset={(linkedId) => {
@@ -740,3 +742,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+

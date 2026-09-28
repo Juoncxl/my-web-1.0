@@ -1,4 +1,4 @@
-import type { CxlDataService } from '../../cxlDataService';
+import type { CxlDataService, FetchAssetsOptions } from '../../cxlDataService';
 import {
   assertNoInlineMedia,
   assertNoInlineWorkMedia,
@@ -10,6 +10,7 @@ import {
   prepareAssetMedia
 } from '../../../lib/workMedia';
 import { callGoogleBackend } from './googleTransport';
+import { filterGoogleWorks } from '../../googleWorksRead';
 import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
 import { hydrateGoogleWorkMediaResult, prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
 
@@ -47,10 +48,29 @@ async function saveGoogleWork(action: 'works.create' | 'works.update', idOrAsset
   }
 }
 
+async function fetchPublicSnapshot(options: FetchAssetsOptions = {}) {
+  const response = await fetch('/api/cxl/public-works', {
+    method: 'GET',
+    credentials: 'omit',
+    headers: { Accept: 'application/json' }
+  });
+  const result = await response.json().catch(() => null) as { ok?: boolean; data?: { data?: unknown; error?: string }; error?: string } | null;
+  if (!response.ok || !result?.ok || !Array.isArray(result.data?.data)) {
+    return { data: [], error: result?.error || 'Google public Works snapshot failed' };
+  }
+  const summaries = filterGoogleWorks(result.data.data as import('../../../types').Asset[], { ...options, publicOnly: true, detail: undefined });
+  return hydrateGoogleWorkMediaResult({ data: summaries, error: null });
+}
+
 /** Inactive Google implementation of the current CXL data contract. */
 export const googleDataAdapter = {
   works: {
     fetch: (async (...args: Parameters<CxlDataService['works']['fetch']>) => {
+      const options = (args[0] || {}) as FetchAssetsOptions;
+      const isCacheablePublicList = options.publicOnly === true && !options.assetId && !options.creatorSlug
+        && !options.userId && !options.currentUserId && !options.includeDeleted && !options.onlyDeleted
+        && options.folderId === undefined && options.detail !== 'full';
+      if (isCacheablePublicList) return fetchPublicSnapshot(options);
       const result = await callGoogleBackend<Awaited<ReturnType<CxlDataService['works']['fetch']>>>('works.fetch', args);
       return hydrateGoogleWorkMediaResult(result);
     }) as CxlDataService['works']['fetch'],
@@ -120,3 +140,4 @@ export const googleDataAdapter = {
   },
   reports: { submit: remote<CxlDataService['reports']['submit']>('reports.submit') }
 } satisfies CxlDataService;
+
