@@ -374,6 +374,10 @@ export function updateImagePromptExamples(draft: CreatorContentCanvasDraft, imag
   return next;
 }
 
+export function removeImagePromptExample(images: string[], index: number): string[] {
+  return images.filter((_, itemIndex) => itemIndex !== index);
+}
+
 function isLocalImageSource_(value: string): boolean {
   return /^data:image\//i.test(value) || /^blob:/i.test(value);
 }

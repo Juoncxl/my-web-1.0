@@ -7807,6 +7807,7 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 }
 
 .csp-work-modal .csp-content-example-strip button {
+  position: relative;
   overflow: hidden;
   aspect-ratio: 1;
   border: 1px solid var(--cv-line);
@@ -7814,6 +7815,22 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   padding: 0;
   background: var(--cv-control-surface);
   cursor: pointer;
+}
+
+.csp-work-modal .csp-content-example-delete {
+  position: absolute;
+  top: .35rem;
+  right: .35rem;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 999px;
+  background: rgb(24 24 27 / 88%);
+  color: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+  pointer-events: none;
 }
 
 .csp-work-modal .csp-content-example-strip img {
