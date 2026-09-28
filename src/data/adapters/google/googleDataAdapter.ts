@@ -13,6 +13,7 @@ import { callGoogleBackend } from './googleTransport';
 import { filterGoogleWorks } from '../../googleWorksRead';
 import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
 import { hydrateGoogleWorkMediaResult, prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
+import { warmAfterPublicWorkMutation } from '../../../lib/publicWorksCache';
 
 type Operation = (...args: any[]) => any;
 type GoogleWorkWriteResult = Awaited<ReturnType<CxlDataService['works']['create']>>;
@@ -39,9 +40,11 @@ async function saveGoogleWork(action: 'works.create' | 'works.update', idOrAsset
     if (isUpdate) {
       const [id, updates, writeOptions] = toGoogleWorkUpdateRequest(String(idOrAsset), prepared.asset, options);
       const result = await callGoogleBackend<GoogleWorkWriteResult>(action, [id, updates, { ...writeOptions, ...(mediaIds.length ? { mediaIds } : {}) }]);
+      warmAfterPublicWorkMutation(action, result, updates);
       return hydrateGoogleWorkMediaResult(result);
     }
     const result = await callGoogleBackend<GoogleWorkWriteResult>(action, [prepared.asset, { ...options, ...(mediaIds.length ? { mediaIds } : {}) }]);
+    warmAfterPublicWorkMutation(action, result);
     return hydrateGoogleWorkMediaResult(result);
   } catch (error) {
     return { data: null, error: error instanceof Error ? error.message : `Google ${action} failed` };

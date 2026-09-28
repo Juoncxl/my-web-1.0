@@ -11,6 +11,7 @@ import { SettingsTabs } from './settings/SettingsTabs';
 import type { LegacySummary, SettingsMessage, SettingsTab } from './settings/SettingsTypes';
 import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 import { callGoogleBackend } from '../data/adapters/google/googleTransport';
+import { rebuildPublicSnapshotAndWarm } from '../lib/publicWorksCache';
 
 const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
 
@@ -39,7 +40,7 @@ export const SettingsModal: React.FC = () => {
   const handleRebuildPublicSnapshot = async () => {
     setIsRebuildingPublicSnapshot(true); setBackupMsg(null);
     try {
-      const result = await callGoogleBackend<{ works: number }>('public.snapshot.rebuild', []);
+      const result = await rebuildPublicSnapshotAndWarm(() => callGoogleBackend<{ works: number }>('public.snapshot.rebuild', []));
       setBackupMsg({ type: 'success', text: `อัปเดตข้อมูลสาธารณะสำเร็จ (${result.works} ผลงาน)` });
     } catch (error: unknown) {
       setBackupMsg({ type: 'error', text: errorMessage(error, 'สร้างข้อมูลสาธารณะไม่สำเร็จ') });
