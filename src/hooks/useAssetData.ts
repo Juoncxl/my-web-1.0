@@ -48,6 +48,9 @@ export function useAssetData(
     if (!ticket) return;
     const isInitialLoad = !hasLoadedAssets.current;
     const isCurrentRequest = () => requestId === requestSequence.current && readLifecycle.current.isCurrent(ticket);
+    const retryOwnerInitialRead = isInitialLoad && isVercelOwnerAuth && Boolean(loadIdentityUserId) && !loadOptions.publicOnly;
+    const retryPublicInitialSummaryRead = isInitialLoad && loadOptions.publicOnly === true
+      && !loadOptions.assetId && loadOptions.detail !== 'full';
 
     if (isInitialLoad) setIsLoadingAssets(true);
 
@@ -56,7 +59,7 @@ export function useAssetData(
         ...loadOptions,
         currentUserId: loadIdentityUserId,
       }), {
-        enabled: isInitialLoad && isVercelOwnerAuth && Boolean(loadIdentityUserId) && !loadOptions.publicOnly,
+        enabled: retryOwnerInitialRead || retryPublicInitialSummaryRead,
         isCurrent: isCurrentRequest,
         getError: value => value.error,
         onRetry: () => reportError(null)
