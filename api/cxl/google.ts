@@ -11,7 +11,8 @@ const ALLOWED_OPTIONS = new Set(['userId','currentUserId','creatorSlug','assetId
 const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','settings.readCreatorSpace']);
 const MEDIA_UPLOAD_ACTIONS = new Set(['media.upload.begin','media.upload.chunk','media.upload.finalize']);
 const MEDIA_CLEANUP_ACTION = 'media.cleanup';
-const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION]);
+const MEDIA_REPAIR_ACTION = 'media.work.repairDeliveryChunks';
+const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update']);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
@@ -154,7 +155,7 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   if (action === 'works.create') return args.length === 2 && record(args[0]) && validWorkWriteOptions(action, args[1]);
   if (action === 'works.update') return args.length === 3 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0])
     && record(args[1]) && validWorkWriteOptions(action, args[2]);
-  if (action === MEDIA_CLEANUP_ACTION) return args.length === 0;
+  if (action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) return args.length === 0;
   if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
 }
@@ -211,6 +212,8 @@ export default async function handler(req: Request, res: Response) {
     }
   }
   if (OWNER_ACTIONS.has(action)) {
+    if (action === MEDIA_REPAIR_ACTION && process.env.VERCEL_ENV !== 'preview')
+      return send(res, 404, { ok: false, error: 'Work media repair is available only in Preview' });
     if ((MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || ((action === 'works.create' || action === 'works.update')
       && record(body.args[action === 'works.create' ? 1 : 2]) && Array.isArray((body.args[action === 'works.create' ? 1 : 2] as Record<string, unknown>).mediaIds)
       && ((body.args[action === 'works.create' ? 1 : 2] as Record<string, unknown>).mediaIds as unknown[]).length > 0))
@@ -218,6 +221,8 @@ export default async function handler(req: Request, res: Response) {
       return send(res, 404, { ok: false, error: 'Google Work media writes are available only in Preview' });
     }
     const authMode = selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND);
+    if (action === MEDIA_REPAIR_ACTION && authMode !== 'vercel')
+      return send(res, 503, { ok: false, error: 'Owner session authentication is required for Work media repair' });
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     const ownerUserId = process.env.CXL_OWNER_USER_ID?.trim() || '';
@@ -234,7 +239,7 @@ export default async function handler(req: Request, res: Response) {
     if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
     if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
-    if ((action === 'works.create' || action === 'works.update' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION) && authMode === 'vercel'
+    if ((action === 'works.create' || action === 'works.update' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
       && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
       return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
     }
@@ -253,15 +258,24 @@ export default async function handler(req: Request, res: Response) {
           ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
       previewOwnerServerTiming(res, raw, action);
       if (!record(raw) || raw.ok !== true) {
+        if (action === MEDIA_REPAIR_ACTION) return send(res, 502, { ok: false, error: 'Work media repair failed' });
         const code = record(raw) ? raw.code : undefined;
         const message = record(raw) && typeof raw.error === 'string' ? raw.error : 'Google owner API response is malformed';
         return send(res, ownerErrorStatus(code), { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}),
           ...(record(raw) && raw.privateSaved === true ? { privateSaved: true, workId: typeof raw.workId === 'string' ? raw.workId : undefined } : {}) });
       }
+      if (action === MEDIA_REPAIR_ACTION) {
+        const counts = raw.data;
+        if (!record(counts) || !['processed','repaired','skipped','remaining'].every(key => Number.isInteger(counts[key]) && Number(counts[key]) >= 0)
+          || Object.keys(counts).some(key => !['processed','repaired','skipped','remaining'].includes(key)))
+          return send(res, 502, { ok: false, error: 'Work media repair response is invalid' });
+        return send(res, 200, { ok: true, data: { processed: counts.processed, repaired: counts.repaired, skipped: counts.skipped, remaining: counts.remaining } });
+      }
       return send(res, 200, { ok: true, data: raw.data });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Google owner request failed';
       const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
+      if (action === MEDIA_REPAIR_ACTION) return send(res, status, { ok: false, error: status === 504 ? 'Work media repair timed out' : 'Work media repair failed' });
       return send(res, status, { ok: false, error: message.slice(0, 300) });
     }
   }

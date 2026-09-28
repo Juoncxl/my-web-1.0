@@ -54,6 +54,11 @@ beforeEach(() => {
 });
 
 describe('AssetCard article capture navigation', () => {
+  it('defers off-screen cover decoding without changing its source', () => {
+    const { article } = render();
+    const cover = findPath(article, node => node.props.className === 'cv-card-cover-image')!.at(-1)!;
+    expect(cover.props).toMatchObject({ src: asset.previewImage, loading: 'lazy', decoding: 'async' });
+  });
   it.each(['cv-card-cover-image', 'cv-card-cover', 'cv-card-body', 'cv-card-snippet'])('opens once from %s', className => {
     const { article, actions } = render();
     click(findPath(article, node => String(node.props.className || '').split(' ').includes(className))!);

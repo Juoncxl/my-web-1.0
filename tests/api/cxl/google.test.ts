@@ -457,4 +457,35 @@ describe('Vercel Google Works read proxy', () => {
     expect(production.statusCode).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('restricts delivery repair to Preview Owner session and returns counts only', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const cookie = `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`;
+    const headers = { cookie, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' };
+    const action = { action: 'media.work.repairDeliveryChunks', args: [] };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
+      data: { processed: 1, repaired: 1, skipped: 0, remaining: 2 } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await invoke(action)).statusCode).toBe(401);
+    expect((await invoke(action, undefined, 'POST', { cookie, origin: 'https://cxl.example' })).statusCode).toBe(403);
+    expect((await invoke({ ...action, args: [{ mediaId: 'secret' }] }, undefined, 'POST', headers)).statusCode).toBe(400);
+    const accepted = await invoke(action, undefined, 'POST', headers);
+    expect(accepted).toMatchObject({ statusCode: 200, json: { ok: true,
+      data: { processed: 1, repaired: 1, skipped: 0, remaining: 2 } } });
+    expect(JSON.stringify(accepted.json)).not.toMatch(/owner-1|drive-file|asset_|secret/);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ action: action.action, args: [], authorization: 'server-only-secret' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
+      data: { processed: 1, repaired: 1, skipped: 0, remaining: 0, driveFileId: 'private-file' } }) });
+    const unsafe = await invoke(action, undefined, 'POST', headers);
+    expect(unsafe.statusCode).toBe(502);
+    expect(JSON.stringify(unsafe.json)).not.toContain('private-file');
+    vi.stubEnv('VERCEL_ENV', 'production');
+    expect((await invoke(action, undefined, 'POST', headers)).statusCode).toBe(404);
+  });
 });

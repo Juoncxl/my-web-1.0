@@ -254,7 +254,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       <div className="cv-card-visual">
       <div className={`cv-card-cover ${mainImage ? 'has-image' : 'has-fallback'}`}>
         {mainImage ? (
-          <img src={mainImage} alt="" className="cv-card-cover-image" referrerPolicy="no-referrer" />
+          <img src={mainImage} alt="" className="cv-card-cover-image" loading="lazy" decoding="async" referrerPolicy="no-referrer" />
         ) : (
           <div className={`cv-card-fallback cv-fallback-${asset.category}`} aria-hidden="true">
             <span className="cv-fallback-kicker">CXL / {categoryLabel}</span>

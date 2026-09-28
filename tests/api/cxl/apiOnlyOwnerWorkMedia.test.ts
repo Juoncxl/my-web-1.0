@@ -28,6 +28,7 @@ function makeWorkMediaBridge() {
     bytes: number[];
     sharing = 'anyone';
     trashed = false;
+    blobReads = 0;
     mimeType: string | null;
     constructor(name: string, bytes: ArrayLike<number>, mimeType: string | null = null) {
       this.id = `drive-file-${++nextFileId}`;
@@ -36,11 +37,16 @@ function makeWorkMediaBridge() {
       this.mimeType = mimeType;
     }
     getId() { return this.id; }
+    getName() { return this.name; }
     getSize() { return this.bytes.length; }
-    getBlob() { return { getBytes: () => [...this.bytes], getContentType: () => this.mimeType }; }
+    getBlob() { this.blobReads += 1; return { getBytes: () => [...this.bytes], getContentType: () => this.mimeType }; }
     getSharingAccess() { return this.sharing; }
     setSharing(access: string) { this.sharing = access; }
     setTrashed(value: boolean) { this.trashed = value; }
+    moveTo(folder: FakeFolder) {
+      for (const current of folders.values()) current.files = current.files.filter(file => file !== this);
+      folder.files.push(this);
+    }
   }
   class FakeFolder {
     files: FakeFile[] = [];
@@ -122,7 +128,7 @@ function attachedReadFixture(mimeType: string, bytes: Buffer, isPublic = false) 
       purpose: 'icon', context_id: null, file_size: bytes.length, mime_type: mimeType, sha256: sha256(bytes) }] };
   const projection = { id: WORK_ID, updated_at: record.row.updated_at, cxlAsset: asset,
     mediaRecords: [{ id: MEDIA_ID, delivery: 'vercel_proxy', purpose: 'icon' }] };
-  properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ mediaId: MEDIA_ID, workId: WORK_ID,
+  properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID, workId: WORK_ID,
     ownerUserId: OWNER_ID, drive_file_id: file.getId(), totalFileSize: bytes.length, mimeType, sha256: sha256(bytes),
     purpose: 'icon', contextId: null, totalChunks: Math.ceil(bytes.length / (2 * 1024 * 1024)),
     delivery: 'vercel_proxy', state: 'attached' }));
@@ -131,7 +137,7 @@ function attachedReadFixture(mimeType: string, bytes: Buffer, isPublic = false) 
   context.rowById_ = () => ({ active: 'true', updated_at: record.row.updated_at, file_id: 'public-projection' });
   context.parse_ = () => projection;
   const input = { workId: WORK_ID, mediaId: MEDIA_ID, ref: `media:${MEDIA_ID}`, chunkIndex: 0 };
-  return { context, file, record, projection, properties, input, originalGetOwnerWork, cacheValues, scriptCache };
+  return { context, file, folders, record, projection, properties, input, originalGetOwnerWork, cacheValues, scriptCache };
 }
 
 describe('API-only Owner standard Work media foundation', () => {
@@ -726,5 +732,147 @@ describe('API-only Owner standard Work media foundation', () => {
     const deleted = context.mediaWorkCleanup_(OWNER_ID);
     expect(deleted.deletedMedia).toBe(1);
     expect(file.trashed).toBe(true);
+  });
+
+  it.each([3, 5])('retains %i private delivery chunks after multi-chunk finalize', count => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const size = count === 3 ? 4 * 1024 * 1024 + 13 : 10 * 1024 * 1024;
+    const bytes = Buffer.alloc(size, 7);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+    context.mediaWorkBegin_({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID, workId: WORK_ID, totalFileSize: size,
+      rawChunkSize: 2 * 1024 * 1024, totalChunks: count, mimeType: 'image/png', sha256: sha256(bytes),
+      purpose: 'gallery', contextId: null, sortOrder: 0, isCover: true }, OWNER_ID);
+    for (let i = 0; i < count; i++) {
+      const part = bytes.subarray(i * 2 * 1024 * 1024, Math.min((i + 1) * 2 * 1024 * 1024, size));
+      context.mediaWorkChunk_({ uploadId: UPLOAD_ID, chunkIndex: i, base64: part.toString('base64'), sha256: sha256(part) });
+    }
+    context.mediaWorkFinalize_({ uploadId: UPLOAD_ID });
+    const manifest = JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!);
+    expect(manifest.deliveryChunks).toHaveLength(count);
+    expect(manifest.deliveryChunks.map((part: { index: number }) => part.index)).toEqual(Array.from({ length: count }, (_, i) => i));
+    expect(folders.get('staging')!.files.filter(file => !file.trashed)).toHaveLength(0);
+    expect(folders.get('canonical')!.files.filter(file => !file.trashed)).toHaveLength(count + 1);
+    for (const part of manifest.deliveryChunks) {
+      const file = folders.get('canonical')!.files.find(item => item.id === part.driveFileId)!;
+      expect(file.getSharingAccess()).toBe('private');
+      expect(file.getSize()).toBe(part.byteLength);
+      expect(sha256(Buffer.from(file.bytes))).toBe(part.sha256);
+    }
+    expect(JSON.stringify(context.mediaWorkFinalize_({ uploadId: UPLOAD_ID }))).not.toContain('drive-file');
+  });
+
+  it('does not publish partial delivery metadata and can resume an interrupted transfer', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const bytes = Buffer.alloc(2 * 1024 * 1024 + 1, 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+    context.mediaWorkBegin_({ uploadId: UPLOAD_ID, mediaId: MEDIA_ID, workId: WORK_ID, totalFileSize: bytes.length,
+      rawChunkSize: 2 * 1024 * 1024, totalChunks: 2, mimeType: 'image/png', sha256: sha256(bytes),
+      purpose: 'icon', contextId: null, sortOrder: 0, isCover: false }, OWNER_ID);
+    for (let i = 0; i < 2; i++) {
+      const part = bytes.subarray(i * 2 * 1024 * 1024, (i + 1) * 2 * 1024 * 1024);
+      context.mediaWorkChunk_({ uploadId: UPLOAD_ID, chunkIndex: i, base64: part.toString('base64'), sha256: sha256(part) });
+    }
+    const second = folders.get('staging')!.files[1];
+    const originalMove = second.moveTo.bind(second);
+    second.moveTo = () => { throw new Error('temporary Drive failure'); };
+    expect(() => context.mediaWorkFinalize_({ uploadId: UPLOAD_ID })).toThrow();
+    expect(properties.has(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)).toBe(false);
+    second.moveTo = originalMove;
+    expect(context.mediaWorkFinalize_({ uploadId: UPLOAD_ID }).finalized).toBe(true);
+    expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!).deliveryChunks).toHaveLength(2);
+  });
+
+  it('reads only the selected private delivery file and keeps legacy multi-chunk fallback', () => {
+    const bytes = Buffer.alloc(4 * 1024 * 1024 + 11, 1);
+    Buffer.from('GIF89a').copy(bytes);
+    const fixture = attachedReadFixture('image/gif', bytes, true);
+    const { context, file, folders, properties, input, record } = fixture;
+    const legacy = context.mediaWorkReadChunk_(input, OWNER_ID, false);
+    expect(Buffer.from(legacy.base64, 'base64')).toEqual(bytes.subarray(0, 2 * 1024 * 1024));
+    const manifest = JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!);
+    manifest.deliveryChunks = Array.from({ length: 3 }, (_, index) => {
+      const partBytes = bytes.subarray(index * 2 * 1024 * 1024, Math.min((index + 1) * 2 * 1024 * 1024, bytes.length));
+      const part = folders.get('canonical')!.createFile({ name: `cxl-work-media-chunk-${UPLOAD_ID}-0${index}.bin`, getBytes: () => [...partBytes] });
+      part.setSharing('private');
+      return { index, driveFileId: part.getId(), byteLength: partBytes.length, sha256: sha256(partBytes) };
+    });
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify(manifest));
+    const before = file.blobReads;
+    const fetch = vi.fn(() => { throw new Error('Range must not be used'); });
+    context.UrlFetchApp.fetch = fetch;
+    const chunk = context.mediaWorkReadChunk_({ ...input, chunkIndex: 2 }, OWNER_ID, false);
+    expect(Buffer.from(chunk.base64, 'base64')).toEqual(bytes.subarray(4 * 1024 * 1024));
+    const publicChunk = context.mediaWorkReadChunk_({ ...input, chunkIndex: 2 }, OWNER_ID, true);
+    expect(publicChunk.chunkSha256).toBe(chunk.chunkSha256);
+    expect(file.blobReads).toBe(before);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(folders.get('canonical')!.files.find(part => part.id === manifest.deliveryChunks[2].driveFileId)!.blobReads).toBe(2);
+    record.row.is_public = false; record.row.visibility = 'private';
+    expect(() => context.mediaWorkReadChunk_({ ...input, chunkIndex: 2 }, OWNER_ID, true))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_NOT_PUBLIC' }));
+    manifest.deliveryChunks[2].sha256 = '0'.repeat(64);
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify(manifest));
+    expect(() => context.mediaWorkReadChunk_({ ...input, chunkIndex: 2 }, OWNER_ID, false))
+      .toThrow(expect.objectContaining({ apiCode: 'MEDIA_READ_INVALID' }));
+  }, 20000);
+
+  it('repairs an existing attached multi-chunk Work once and returns safe counts', () => {
+    const bytes = Buffer.alloc(2 * 1024 * 1024 + 9, 3);
+    Buffer.from('GIF89a').copy(bytes);
+    const { context, folders, file, record, properties, input } = attachedReadFixture('image/gif', bytes);
+    context.config_ = () => ({ privateSheetId: 'private-index' });
+    context.sheet_ = () => ({});
+    context.rowById_ = () => ({ file_id: 'canonical-work' });
+    context.parse_ = () => record;
+    const first = context.mediaWorkRepairDelivery_(OWNER_ID);
+    expect(first).toEqual({ processed: 1, repaired: 1, skipped: 0, remaining: 0 });
+    const manifest = JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!);
+    expect(manifest.deliveryChunks).toHaveLength(2);
+    const before = file.blobReads;
+    const read = context.mediaWorkReadChunk_({ ...input, chunkIndex: 1 }, OWNER_ID, false);
+    expect(Buffer.from(read.base64, 'base64')).toEqual(bytes.subarray(2 * 1024 * 1024));
+    expect(file.blobReads).toBe(before);
+    expect(context.mediaWorkRepairDelivery_(OWNER_ID)).toEqual({ processed: 1, repaired: 0, skipped: 0, remaining: 0 });
+    expect(folders.get('canonical')!.files.filter(part => !part.trashed)).toHaveLength(3);
+    expect(JSON.stringify(first)).not.toMatch(/drive-file|asset_|123e4567/);
+  });
+
+  it('trashes retired delivery chunks with the canonical file after existing TTL', () => {
+    const bytes = Buffer.alloc(2 * 1024 * 1024 + 1, 1);
+    Buffer.from('GIF89a').copy(bytes);
+    const { context, folders, file, record, properties } = attachedReadFixture('image/gif', bytes);
+    file.name = `cxl-work-media-${MEDIA_ID}.gif`;
+    const manifest = JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!);
+    manifest.deliveryChunks = Array.from({ length: 2 }, (_, index) => {
+      const partBytes = bytes.subarray(index * 2 * 1024 * 1024, (index + 1) * 2 * 1024 * 1024);
+      const part = folders.get('canonical')!.createFile({ name: `cxl-work-media-chunk-${UPLOAD_ID}-0${index}.bin`, getBytes: () => [...partBytes] });
+      part.setSharing('private');
+      return { index, driveFileId: part.getId(), byteLength: partBytes.length, sha256: sha256(partBytes) };
+    });
+    context.mediaWorkCleanupCanonicalRecord_ = () => ({ safe: true, record });
+    expect(context.mediaWorkCleanupManifest_(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, manifest, OWNER_ID, Date.now()))
+      .toMatchObject({ processed: true });
+    expect(folders.get('canonical')!.files.every(part => !part.trashed)).toBe(true);
+    manifest.state = 'retired'; manifest.retireAfter = Date.now() - 1;
+    properties.set(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, JSON.stringify(manifest));
+    context.mediaWorkCleanupCanonicalRecord_ = () => ({ safe: true, record: null });
+    const result = context.mediaWorkCleanupManifest_(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`, manifest, OWNER_ID, Date.now());
+    expect(result).toMatchObject({ processed: true, deleted: true });
+    expect(folders.get('canonical')!.files.every(part => part.trashed)).toBe(true);
+    expect(JSON.parse(properties.get(`CXL_WORK_MEDIA_MANIFEST_${MEDIA_ID}`)!).deliveryChunks).toBeUndefined();
+  });
+
+  it('keeps an expired upload record if a partial delivery file cannot be safely removed', () => {
+    const { context, folders, properties } = makeWorkMediaBridge();
+    const size = 2 * 1024 * 1024 + 1;
+    const unsafe = folders.get('canonical')!.createFile({ name: `cxl-work-media-chunk-${UPLOAD_ID}-00.bin`, getBytes: () => Array(size - 1).fill(0) });
+    const session = { uploadId: UPLOAD_ID, mediaId: MEDIA_ID, workId: WORK_ID, ownerUserId: OWNER_ID,
+      expiresAt: Date.now() - 1, status: 'uploading', totalFileSize: size, rawChunkSize: 2 * 1024 * 1024,
+      totalChunks: 2, mimeType: 'image/gif', sha256: 'a'.repeat(64), purpose: 'icon' };
+    properties.set(`CXL_WORK_MEDIA_UPLOAD_SESSION_${UPLOAD_ID}`, JSON.stringify(session));
+    expect(context.mediaWorkCleanupSession_(`CXL_WORK_MEDIA_UPLOAD_SESSION_${UPLOAD_ID}`, session, Date.now(), OWNER_ID))
+      .toEqual({ processed: false });
+    expect(properties.has(`CXL_WORK_MEDIA_UPLOAD_SESSION_${UPLOAD_ID}`)).toBe(true);
+    expect(unsafe.trashed).toBe(false);
   });
 });
