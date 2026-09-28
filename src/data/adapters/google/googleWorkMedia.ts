@@ -187,9 +187,10 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
   };
 }
 
-export function hydrateGoogleWorkMediaResult<T extends { data?: Asset[] | null }>(result: T): T {
-  if (!Array.isArray(result.data)) return result;
-  return { ...result, data: result.data.map(hydrateGoogleWorkMedia) };
+export function hydrateGoogleWorkMediaResult<T extends { data?: Asset | Asset[] | null }>(result: T): T {
+  if (Array.isArray(result.data)) return { ...result, data: result.data.map(hydrateGoogleWorkMedia) } as T;
+  if (result.data && typeof result.data === 'object') return { ...result, data: hydrateGoogleWorkMedia(result.data) } as T;
+  return result;
 }
 
 /** Upload one file at a time, with one <=2 MiB chunk request in flight. */

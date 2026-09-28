@@ -14,10 +14,11 @@ import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
 import { hydrateGoogleWorkMediaResult, prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
 
 type Operation = (...args: any[]) => any;
+type GoogleWorkWriteResult = Awaited<ReturnType<CxlDataService['works']['create']>>;
 const remote = <T extends Operation>(action: string): T =>
   ((...args: Parameters<T>) => callGoogleBackend<Awaited<ReturnType<T>>>(action, args)) as T;
 
-async function saveGoogleWork<T>(action: 'works.create' | 'works.update', idOrAsset: string | GoogleWorkAssetInput, updateOrOptions?: Partial<GoogleWorkAssetInput> | { requestId?: string; expectedRevision?: number }, maybeOptions?: { requestId?: string; expectedRevision?: number }) {
+async function saveGoogleWork(action: 'works.create' | 'works.update', idOrAsset: string | GoogleWorkAssetInput, updateOrOptions?: Partial<GoogleWorkAssetInput> | { requestId?: string; expectedRevision?: number }, maybeOptions?: { requestId?: string; expectedRevision?: number }): Promise<GoogleWorkWriteResult> {
   try {
     const isUpdate = action === 'works.update';
     const rawAsset = (isUpdate ? updateOrOptions : idOrAsset) as GoogleWorkAssetInput;
@@ -36,9 +37,11 @@ async function saveGoogleWork<T>(action: 'works.create' | 'works.update', idOrAs
     }
     if (isUpdate) {
       const [id, updates, writeOptions] = toGoogleWorkUpdateRequest(String(idOrAsset), prepared.asset, options);
-      return await callGoogleBackend<T>(action, [id, updates, { ...writeOptions, ...(mediaIds.length ? { mediaIds } : {}) }]);
+      const result = await callGoogleBackend<GoogleWorkWriteResult>(action, [id, updates, { ...writeOptions, ...(mediaIds.length ? { mediaIds } : {}) }]);
+      return hydrateGoogleWorkMediaResult(result);
     }
-    return await callGoogleBackend<T>(action, [prepared.asset, { ...options, ...(mediaIds.length ? { mediaIds } : {}) }]);
+    const result = await callGoogleBackend<GoogleWorkWriteResult>(action, [prepared.asset, { ...options, ...(mediaIds.length ? { mediaIds } : {}) }]);
+    return hydrateGoogleWorkMediaResult(result);
   } catch (error) {
     return { data: null, error: error instanceof Error ? error.message : `Google ${action} failed` };
   }
