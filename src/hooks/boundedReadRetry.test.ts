@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { isTransientReadFailure, readWithBoundedRetry } from './boundedReadRetry';
 
-describe('bounded Owner read recovery', () => {
+describe('bounded Works bootstrap read recovery', () => {
   it('retries a transient failure once and returns the successful result', async () => {
     const read = vi.fn().mockRejectedValueOnce(Object.assign(new Error('gateway'), { status: 504 })).mockResolvedValue('works');
     await expect(readWithBoundedRetry(read, { enabled: true, isCurrent: () => true, delayMs: 0 })).resolves.toBe('works');
@@ -13,6 +13,20 @@ describe('bounded Owner read recovery', () => {
     await expect(readWithBoundedRetry(read, { enabled: true, isCurrent: () => true, delayMs: 0 })).rejects.toMatchObject({ status: 401 });
     expect(read).toHaveBeenCalledOnce();
     expect(isTransientReadFailure(Object.assign(new Error('invalid request'), { status: 400 }))).toBe(false);
+    expect(isTransientReadFailure(Object.assign(new Error('forbidden'), { status: 403 }))).toBe(false);
+  });
+
+  it('lets a successful public initial retry replace the error state with cards', async () => {
+    const read = vi.fn().mockRejectedValueOnce(Object.assign(new Error('gateway'), { status: 504 }))
+      .mockResolvedValue({ data: ['public-card'], error: null });
+    let error: string | null = 'could not load';
+    const result = await readWithBoundedRetry<{ data: string[]; error: string | null }>(read, { enabled: true, isCurrent: () => true, delayMs: 0,
+      getError: (value: { error: string | null }) => value.error, onRetry: () => { error = null; } });
+    if (!result.error) error = null;
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(result.data).toEqual(['public-card']);
+    expect(error).toBeNull();
   });
 
   it('does not loop after the bounded retry fails', async () => {
@@ -38,3 +52,4 @@ describe('bounded Owner read recovery', () => {
     expect(read).toHaveBeenCalledOnce();
   });
 });
+

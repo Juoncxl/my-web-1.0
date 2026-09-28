@@ -132,6 +132,7 @@ describe('Owner scoped read lifecycle', () => {
     expect(assetHookSource).toContain('retryPublicInitialSummaryRead');
     expect(assetHookSource).toContain("loadOptions.publicOnly === true");
     expect(assetHookSource).toContain("loadOptions.detail !== 'full'");
+    expect(assetHookSource).toMatch(/setAssets\(res\.data\);[\s\S]*reportError\(null\);/);
 
     expect(folderHookSource).toContain('useLayoutEffect(() => {');
     expect(folderHookSource).toContain('readLifecycle.current.transition(requestScopeKey)');
@@ -142,3 +143,4 @@ describe('Owner scoped read lifecycle', () => {
     expect(folderHookSource).toContain('isInitialLoad && isVercelOwnerAuth');
   });
 });
+

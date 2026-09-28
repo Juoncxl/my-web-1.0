@@ -73,6 +73,43 @@ describe('Vercel Google Works read proxy', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=works.detail');
   });
 
+  it('surfaces only allowlisted Public works.list timings on Preview responses', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
+      data: [makeAsset('public-work')], meta: { timing: { action: 'works.list', totalMs: 30_000, phases: {
+        public_sheet_open: 25_000, public_index_read: 4_000, public_creator_map_read: 700,
+        private_sheet_id: 999, 'media:payload': 888
+      } }, secret: 'never forwarded' } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true, detail: 'summary', limit: 48 }] });
+
+    const upstream = new URL(fetchMock.mock.calls[0][0]);
+    expect(upstream.searchParams.get('cxlApi')).toBe('works.list');
+    expect(upstream.searchParams.get('includeTiming')).toBe('1');
+    expect(result.statusCode).toBe(200);
+    expect(result.headers['Server-Timing']).toContain('public_sheet_open;dur=25000.00');
+    expect(result.headers['Server-Timing']).toContain('public_creator_map_read;dur=700.00');
+    expect(result.headers['Server-Timing']).toContain('total;dur=30000.00');
+    expect(result.headers['Server-Timing']).not.toMatch(/private_sheet_id|media:|secret|never/i);
+    expect(result.json.data.data[0].id).toBe('public-work');
+    expect(JSON.stringify(result.json)).not.toMatch(/meta|never forwarded|secret/);
+  });
+
+  it('does not request or expose Public GAS timing outside Preview', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true,
+      data: [makeAsset('public-work')], meta: { timing: { action: 'works.list', totalMs: 10, phases: { public_sheet_open: 9 } } } }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await invoke({ action: 'works.fetch', args: [{ publicOnly: true, detail: 'summary', limit: 48 }] });
+
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.has('includeTiming')).toBe(false);
+    expect(result.headers['Server-Timing']).toBeUndefined();
+    expect(result.json.data.data[0].id).toBe('public-work');
+    expect(JSON.stringify(result.json)).not.toContain('meta');
+  });
+
   it('verifies owner session and injects the server secret only on the server-to-GAS request', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { data: [makeAsset('private', { visibility: 'private', isPublic: false })], error: null } }) });
     vi.stubGlobal('fetch', fetchMock);
@@ -489,3 +526,4 @@ describe('Vercel Google Works read proxy', () => {
     expect((await invoke(action, undefined, 'POST', headers)).statusCode).toBe(404);
   });
 });
+

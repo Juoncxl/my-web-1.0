@@ -1,5 +1,5 @@
-export const OWNER_READ_RETRY_DELAY_MS = 500;
-export const OWNER_READ_MAX_RETRIES = 1;
+export const BOOTSTRAP_READ_RETRY_DELAY_MS = 500;
+export const BOOTSTRAP_READ_MAX_RETRIES = 1;
 
 type RetryOptions<T> = {
   enabled: boolean;
@@ -24,24 +24,25 @@ export function isTransientReadFailure(error: unknown): boolean {
 
 const wait = (delayMs: number) => new Promise<void>(resolve => setTimeout(resolve, delayMs));
 
-/** Runs one scope-guarded retry for transient Owner bootstrap reads only. */
+/** Runs at most one scope-guarded retry for an enabled initial Works read. */
 export async function readWithBoundedRetry<T>(read: () => Promise<T>, options: RetryOptions<T>): Promise<T> {
   let retries = 0;
   while (true) {
     try {
       const value = await read();
       const failure = options.getError?.(value);
-      if (!failure || !options.enabled || retries >= OWNER_READ_MAX_RETRIES || !options.isCurrent() || !isTransientReadFailure(failure)) return value;
+      if (!failure || !options.enabled || retries >= BOOTSTRAP_READ_MAX_RETRIES || !options.isCurrent() || !isTransientReadFailure(failure)) return value;
       retries += 1;
       options.onRetry?.();
-      await wait(options.delayMs ?? OWNER_READ_RETRY_DELAY_MS);
+      await wait(options.delayMs ?? BOOTSTRAP_READ_RETRY_DELAY_MS);
       if (!options.isCurrent()) return value;
     } catch (error) {
-      if (!options.enabled || retries >= OWNER_READ_MAX_RETRIES || !options.isCurrent() || !isTransientReadFailure(error)) throw error;
+      if (!options.enabled || retries >= BOOTSTRAP_READ_MAX_RETRIES || !options.isCurrent() || !isTransientReadFailure(error)) throw error;
       retries += 1;
       options.onRetry?.();
-      await wait(options.delayMs ?? OWNER_READ_RETRY_DELAY_MS);
+      await wait(options.delayMs ?? BOOTSTRAP_READ_RETRY_DELAY_MS);
       if (!options.isCurrent()) throw error;
     }
   }
 }
+

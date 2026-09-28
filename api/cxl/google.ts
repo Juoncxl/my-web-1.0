@@ -16,6 +16,8 @@ const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch', ..
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update']);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
+const PUBLIC_TIMING_ACTION = 'works.list';
+const PUBLIC_TIMING_PHASES = new Set(['public_sheet_open','public_index_read','public_creator_map_read','public_summary_parse','public_projection','response_construction']);
 
 function send(res: Response, status: number, body: unknown) {
   res.statusCode = status;
@@ -33,6 +35,17 @@ function previewOwnerServerTiming(res: Response, raw: unknown, requestedAction: 
     && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
     ? [`${phase};dur=${duration.toFixed(2)}`] : []);
   metrics.push(`cxl_action;desc="${requestedAction}"`, `total;dur=${timing.totalMs.toFixed(2)}`);
+  res.setHeader('Server-Timing', metrics.join(', '));
+}
+function previewPublicServerTiming(res: Response, raw: unknown) {
+  if (process.env.VERCEL_ENV !== 'preview' || !record(raw) || !record(raw.meta) || !record(raw.meta.timing)) return;
+  const timing = raw.meta.timing;
+  if (timing.action !== PUBLIC_TIMING_ACTION || typeof timing.totalMs !== 'number'
+    || !Number.isFinite(timing.totalMs) || timing.totalMs < 0 || !record(timing.phases)) return;
+  const metrics = Object.entries(timing.phases).flatMap(([phase, duration]) => PUBLIC_TIMING_PHASES.has(phase)
+    && typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
+    ? [`${phase};dur=${duration.toFixed(2)}`] : []);
+  metrics.push(`cxl_action;desc="${PUBLIC_TIMING_ACTION}"`, `total;dur=${timing.totalMs.toFixed(2)}`);
   res.setHeader('Server-Timing', metrics.join(', '));
 }
 function validOptions(value: unknown): value is FetchAssetsOptions {
@@ -88,8 +101,12 @@ function publicGasUrl(action: string, params: Record<string, string>): URL | nul
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return url;
 }
-async function publicGasData(url: URL): Promise<unknown> {
-  const raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } }, url.searchParams.get('cxlApi') || 'public.read');
+async function publicGasData(url: URL, res?: Response): Promise<unknown> {
+  const action = url.searchParams.get('cxlApi') || 'public.read';
+  const includeTiming = process.env.VERCEL_ENV === 'preview' && action === PUBLIC_TIMING_ACTION;
+  if (includeTiming) url.searchParams.set('includeTiming', '1');
+  const raw = await gasJson(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } }, action);
+  if (includeTiming && res) previewPublicServerTiming(res, raw);
   if (!record(raw) || raw.ok !== true) throw new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed');
   return raw.data;
 }
@@ -357,7 +374,7 @@ export default async function handler(req: Request, res: Response) {
       } else {
         const url = publicGasUrl(options.assetId ? 'works.detail' : 'works.list', options.assetId ? { id: options.assetId } : {});
         if (!url) return send(res, 503, { ok: false, error: 'Google public API is not configured on the server' });
-        raw = await publicGasData(url);
+        raw = await publicGasData(url, res);
         raw = options.assetId ? [raw] : raw;
       }
     }
@@ -373,3 +390,4 @@ export default async function handler(req: Request, res: Response) {
     return send(res, status, { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}) });
   }
 }
+
