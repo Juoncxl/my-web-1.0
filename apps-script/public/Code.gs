@@ -275,4 +275,3 @@ function publicMediaRefFromRecord_(record,id,ref,thumbnail) {
   var f=DriveApp.getFileById(m.drive_file_id),blob=thumbnail?f.getThumbnail():null;blob=blob||f.getBlob();
   return 'data:'+blob.getContentType()+';base64,'+Utilities.base64Encode(blob.getBytes());
 }
-

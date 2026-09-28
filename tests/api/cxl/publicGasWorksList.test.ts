@@ -123,4 +123,3 @@ describe('Public GAS works.list summary path', () => {
     expect(withoutTiming.meta).toBeUndefined();
   });
 });
-

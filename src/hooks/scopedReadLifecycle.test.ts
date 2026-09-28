@@ -143,4 +143,3 @@ describe('Owner scoped read lifecycle', () => {
     expect(folderHookSource).toContain('isInitialLoad && isVercelOwnerAuth');
   });
 });
-

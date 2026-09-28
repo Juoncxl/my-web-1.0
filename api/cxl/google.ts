@@ -390,4 +390,3 @@ export default async function handler(req: Request, res: Response) {
     return send(res, status, { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}) });
   }
 }
-

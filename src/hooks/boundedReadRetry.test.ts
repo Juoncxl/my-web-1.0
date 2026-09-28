@@ -52,4 +52,3 @@ describe('bounded Works bootstrap read recovery', () => {
     expect(read).toHaveBeenCalledOnce();
   });
 });
-

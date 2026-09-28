@@ -526,4 +526,3 @@ describe('Vercel Google Works read proxy', () => {
     expect((await invoke(action, undefined, 'POST', headers)).statusCode).toBe(404);
   });
 });
-
