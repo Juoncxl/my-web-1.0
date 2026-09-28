@@ -17,7 +17,7 @@ import confetti from 'canvas-confetti';
 
 const brandMicroMarkUrl = new URL('./assets/brand/brand-micro-mark.svg', import.meta.url).href;
 import { useAssetData } from './hooks/useAssetData';
-import { isCurrentDetailOpen } from './hooks/assetDetailRead';
+import { hydrateAssetDetailInBackground, openAssetDetailImmediately, type DetailHydrationState } from './hooks/assetDetailRead';
 import { useFolderData } from './hooks/useFolderData';
 import { useEngagementData } from './hooks/useEngagementData';
 import { useRecentlyViewed } from './hooks/useRecentlyViewed';
@@ -29,6 +29,7 @@ import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 import { isGoogleWorksReadBackend } from './data/cxlDataService';
+import { CATEGORIES, STATUS_PRESETS } from './lib/constants';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
 const CreatorSpacePage = React.lazy(() => import('./pages/CreatorSpacePage').then(module => ({ default: module.CreatorSpacePage })));
@@ -39,8 +40,40 @@ const MoveToFolderModal = React.lazy(() => import('./components/MoveToFolderModa
 const ReportModal = React.lazy(() => import('./components/ReportModal').then(module => ({ default: module.ReportModal })));
 const CreatorWorkWorkspace = React.lazy(() => import('./components/creator/CreatorWorkWorkspace').then(module => ({ default: module.CreatorWorkWorkspace })));
 
+function WorkDetailSummaryFallback({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  const cover = asset.previewImage || asset.previewImages?.[0] || '';
+  const categoryLabel = CATEGORIES[asset.category]?.name || asset.category;
+  const statusLabel = STATUS_PRESETS[asset.status || 'finished']?.name || asset.status || 'finished';
+  return <div className="work-detail-backdrop" data-work-detail-loading-shell>
+    <section className="work-detail-modal" role="dialog" aria-modal="true" aria-labelledby="work-detail-loading-title" aria-busy="true">
+      <header className="work-detail-header work-detail-header-actions-only">
+        <div className="work-detail-header-actions">
+          <button type="button" onClick={onClose} aria-label="ปิดรายละเอียดผลงาน"><X aria-hidden="true" /></button>
+        </div>
+      </header>
+      <div className="work-detail-body">
+        <div className="work-detail-grid">
+          <div className="work-detail-media-column" data-work-detail-section="media">
+            <div className={`work-detail-cover ${cover ? 'has-image' : 'has-fallback'}`}>
+              {cover ? <img src={cover} alt={`ภาพปก ${asset.title}`} referrerPolicy="no-referrer" />
+                : <div className="work-detail-mark">{asset.icon?.type === 'image' ? <img src={asset.icon.value} alt="" /> : <span>{asset.icon?.value || '✦'}</span>}</div>}
+            </div>
+          </div>
+          <div className="work-detail-copy">
+            <div className="work-detail-meta"><span>{categoryLabel}</span><span>{statusLabel}</span></div>
+            <h2 id="work-detail-loading-title">{asset.title}</h2>
+            <div className="work-detail-creator"><div className="work-detail-avatar">{asset.authorAvatar ? <img src={asset.authorAvatar} alt="" /> : 'CX'}</div><strong>{asset.authorName || 'ผู้สร้างผลงาน'}</strong></div>
+            {asset.shortDescription && <section className="work-detail-summary"><strong>คำอธิบายสั้น</strong><p>{asset.shortDescription}</p></section>}
+          </div>
+        </div>
+        <p role="status" aria-live="polite">กำลังเปิดรายละเอียดผลงาน…</p>
+      </div>
+    </section>
+  </div>;
+}
+
 function MainApp() {
-  const { 
+  const {
     currentUser, 
     isAuthOpen,
     setIsAuthOpen,
@@ -185,6 +218,19 @@ function MainApp() {
     openMoveToFolder,
     closeMoveToFolder
   } = useAssetModalState(assets);
+  const [detailHydration, setDetailHydration] = useState<DetailHydrationState>(null);
+
+  const hydrateDetail = useCallback((assetId: string) => {
+    void hydrateAssetDetailInBackground<Asset>({
+      assetId,
+      sequence: detailOpenSequence,
+      scopeKey: latestDetailOpenScopeKey.current,
+      getCurrentScopeKey: () => latestDetailOpenScopeKey.current,
+      load: assetId => loadAssetDetail(assetId, { suppressError: true }),
+      setState: setDetailHydration,
+      clearState: () => setDetailHydration(current => current?.assetId === assetId ? null : current)
+    });
+  }, [loadAssetDetail]);
 
   // Simple UI-only state stays local to App; asset selections live in the
   // focused asset modal hook above.
@@ -215,16 +261,9 @@ function MainApp() {
   }, [legacyProfileRedirect]);
 
   // Track recently viewed items while keeping the selected asset canonical.
-  const handleOpenAssetView = useCallback(async (asset: Asset) => {
-    const request = {
-      sequence: ++detailOpenSequence.current,
-      scopeKey: latestDetailOpenScopeKey.current
-    };
-    await loadAssetDetail(asset.id);
-    if (!isCurrentDetailOpen(request, detailOpenSequence.current, latestDetailOpenScopeKey.current)) return;
-    openAssetView(asset.id);
-    trackRecentlyViewed(asset.id);
-  }, [loadAssetDetail, openAssetView, trackRecentlyViewed]);
+  const handleOpenAssetView = useCallback((asset: Asset) => {
+    openAssetDetailImmediately(asset.id, openAssetView, trackRecentlyViewed, hydrateDetail);
+  }, [hydrateDetail, openAssetView, trackRecentlyViewed]);
 
   const handleViewChange = useCallback((view: 'feed' | 'vault') => {
     if (view === 'feed') {
@@ -590,9 +629,12 @@ function MainApp() {
       </React.Suspense>
 
       {/* Modals */}
-      <React.Suspense fallback={null}>
+      <React.Suspense fallback={viewingAsset ? <WorkDetailSummaryFallback asset={viewingAsset} onClose={closeAssetView} /> : null}>
       {viewingAsset && <WorkDetailModal
         asset={viewingAsset}
+        detailHydration={detailHydration?.assetId === viewingAsset.id
+          ? { status: detailHydration.status, onRetry: () => hydrateDetail(viewingAsset.id) }
+          : undefined}
         isOpen={!!viewingAsset}
         onClose={closeAssetView}
         preserveHeaderNavigation={Boolean(workRoute?.[1])}

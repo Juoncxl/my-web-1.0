@@ -124,7 +124,7 @@ export function useAssetData(
     return result;
   }, [currentUser]);
 
-  const loadAssetDetail = useCallback(async (assetId: string): Promise<Asset | null> => {
+  const loadAssetDetail = useCallback(async (assetId: string, options?: { suppressError?: boolean }): Promise<Asset | null> => {
     const ticket = readLifecycle.current.capture(requestScopeKey);
     return loadAssetDetailWithBoundedRetry<Asset>({
       sequence: detailRequestSequence,
@@ -142,7 +142,7 @@ export function useAssetData(
         detail: 'full',
         limit: 1
       }),
-      reportError,
+      reportError: options?.suppressError ? () => undefined : reportError,
       commit: (detailedAsset, isCurrent) => setAssets(previous => {
         if (!isCurrent()) return previous;
         return previous.some(asset => asset.id === detailedAsset.id)

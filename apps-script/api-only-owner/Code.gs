@@ -704,7 +704,7 @@ function fetchCxlWorks_(options) {
   options=options||{};
   if(options.assetId){
     var detailEpoch=mediaWorkOwnerSnapshotEpoch_(options.assetId,true);
-    var detailRecord=getOwnerWork_(options.assetId);
+    var detailRecord=getOwnerWork_(options.assetId,true);
     mediaWorkOwnerSnapshotSeed_(detailRecord,detailRecord&&detailRecord.row&&detailRecord.row.user_id,detailEpoch);
     return {data:[cxlAssetFromRecord_(detailRecord)],error:null};
   }

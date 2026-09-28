@@ -199,6 +199,7 @@ describe('API-only Owner chunked search index', () => {
     context.getOwnerWork_ = vi.fn(() => ({ cxlAsset: work, revision: 3, mediaRecords: [] }));
     expect(context.fetchCxlWorks_({ assetId: 'detail', detail: 'full' }).data[0].id).toBe('detail');
     expect(context.getOwnerWork_).toHaveBeenCalledTimes(1);
+    expect(context.getOwnerWork_).toHaveBeenCalledWith('detail', true);
     expect(() => context.fetchCxlWorks_({ detail: 'full' })).toThrow(/Full Work reads require one assetId/);
     expect(context.getOwnerWork_).toHaveBeenCalledTimes(1);
   });

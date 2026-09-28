@@ -152,6 +152,8 @@ export interface WorkDetailModalProps {
   interactionMode?: 'live' | 'preview';
   /** Keep the app header outside the backdrop so direct Work routes can navigate away. */
   preserveHeaderNavigation?: boolean;
+  /** Detail reads fill long-form fields after the summary shell is already visible. */
+  detailHydration?: { status: 'loading' | 'error'; onRetry: () => void };
 }
 
 /** The one canonical Work presentation for both legacy and newly-created data. */
@@ -180,7 +182,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   coverImage = '',
   coverImageSelected = true,
   interactionMode = 'live',
-  preserveHeaderNavigation = false
+  preserveHeaderNavigation = false,
+  detailHydration
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codeView, setCodeView] = useState<CodeView>('split');
@@ -427,6 +430,14 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         </div>
       </header>}
 
+      {detailHydration?.status === 'loading' && <div className="work-detail-hydration-state" role="status" aria-live="polite">
+        <span className="work-detail-hydration-spinner" aria-hidden="true" />กำลังโหลดรายละเอียดเพิ่มเติม…
+      </div>}
+      {detailHydration?.status === 'error' && <div className="work-detail-hydration-state is-error" role="status">
+        โหลดรายละเอียดเพิ่มเติมไม่สำเร็จ
+        <button type="button" onClick={detailHydration.onRetry}>ลองอีกครั้ง</button>
+      </div>}
+
       <div className="work-detail-body">
         <div className="work-detail-grid">
           <div className="work-detail-media-column" data-work-detail-section="media">
@@ -571,9 +582,13 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <button type="button" className="work-detail-linked-collaboration-card" onClick={() => onSelectLinkedAsset?.(visibleLinkedCollaboration.id)}><WorkMark icon={visibleLinkedCollaboration.icon} /><span><strong>{visibleLinkedCollaboration.publicCollaboration?.name || visibleLinkedCollaboration.title}</strong><small>{visibleLinkedCollaboration.shortDescription || 'ดูข้อมูลคอลแลป'}</small></span><b>ดูคอลแลป →</b></button>
         </section>}
 
-        {mainBlocks.length === 0 && !legacyContent.trim() && !uiCode && !display.isCollaborationFocused && <section className="work-detail-section work-detail-empty-state" data-work-detail-section="main-content-empty">
+        {mainBlocks.length === 0 && !legacyContent.trim() && !uiCode && !display.isCollaborationFocused && !detailHydration && <section className="work-detail-section work-detail-empty-state" data-work-detail-section="main-content-empty">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>เนื้อหาหลัก</strong><span>ยังไม่มีข้อมูลเนื้อหาสำหรับแสดง</span></div></div></div>
           <p>ยังไม่มีข้อมูลเนื้อหาในผลงานชิ้นนี้</p>
+        </section>}
+        {mainBlocks.length === 0 && !legacyContent.trim() && !uiCode && !display.isCollaborationFocused && detailHydration?.status === 'loading' && <section className="work-detail-section work-detail-empty-state" data-work-detail-section="main-content-loading" aria-busy="true">
+          <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>เนื้อหาหลัก</strong><span>กำลังโหลดข้อมูลผลงาน</span></div></div></div>
+          <div className="work-detail-content-skeleton" aria-hidden="true"><span /><span /><span /></div>
         </section>}
 
         {uiCode && <section className="work-detail-section work-detail-code" data-work-detail-section="ui-code">

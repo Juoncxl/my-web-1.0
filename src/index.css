@@ -2650,6 +2650,15 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
 .work-detail-image-placeholder { display: grid; min-height: 7rem; place-items: center; border: 1px dashed var(--cv-iridescent-border); border-radius: .55rem; padding: .7rem; background: var(--cv-surface-soft); color: var(--cv-muted); text-align: center; }
 .work-detail-image-placeholder svg { width: 1.4rem; height: 1.4rem; color: var(--cv-ocean); }
 .work-detail-image-placeholder p { margin: .25rem 0 0; font-size: .62rem; }
+.work-detail-hydration-state { display: flex; align-items: center; justify-content: flex-end; gap: .45rem; padding: .35rem 1rem; color: var(--cv-muted); font-size: .72rem; }
+.work-detail-hydration-state.is-error { justify-content: flex-start; color: var(--cv-danger, #a33); }
+.work-detail-hydration-state button { border: 0; padding: .1rem .25rem; background: transparent; color: var(--cv-purple-dark); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
+.work-detail-hydration-spinner { width: .75rem; height: .75rem; border: 2px solid var(--cv-line); border-top-color: var(--cv-purple); border-radius: 50%; animation: work-detail-hydration-spin .8s linear infinite; }
+.work-detail-content-skeleton { display: grid; gap: .55rem; border: 1px solid var(--cv-line); border-radius: .65rem; padding: .8rem; background: var(--cv-surface-soft); }
+.work-detail-content-skeleton span { height: .65rem; border-radius: .35rem; background: var(--cv-line); opacity: .55; }
+.work-detail-content-skeleton span:nth-child(2) { width: 86%; }
+.work-detail-content-skeleton span:nth-child(3) { width: 63%; }
+@keyframes work-detail-hydration-spin { to { transform: rotate(360deg); } }
 .work-detail-divider { position: relative; display: grid; place-items: center; min-height: 1.5rem; color: var(--cv-purple); font-size: .7rem; }
 .work-detail-divider::before { content: ''; position: absolute; left: 0; right: 0; height: 1px; background: var(--cv-line); }
 .work-detail-divider span { position: relative; padding: 0 .55rem; background: var(--cv-glass-surface-strong); }

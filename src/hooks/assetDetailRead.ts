@@ -4,6 +4,44 @@ import { readWithBoundedRetry } from './boundedReadRetry';
 type DetailReadResult<TAsset> = { data: TAsset[]; error: string | null };
 type SequenceRef = { current: number };
 
+export type DetailHydrationState = { assetId: string; status: 'loading' | 'error' } | null;
+
+export function openAssetDetailImmediately(
+  assetId: string,
+  open: (assetId: string) => void,
+  trackRecentlyViewed: (assetId: string) => void,
+  hydrate: (assetId: string) => void
+): void {
+  open(assetId);
+  trackRecentlyViewed(assetId);
+  hydrate(assetId);
+}
+
+type BackgroundDetailHydrationOptions<TAsset> = {
+  assetId: string;
+  sequence: SequenceRef;
+  scopeKey: string;
+  getCurrentScopeKey: () => string;
+  load: (assetId: string) => Promise<TAsset | null>;
+  setState: (state: Exclude<DetailHydrationState, null>) => void;
+  clearState: () => void;
+};
+
+/** Keep the summary surface responsive while a scoped full detail read runs. */
+export async function hydrateAssetDetailInBackground<TAsset>(options: BackgroundDetailHydrationOptions<TAsset>): Promise<void> {
+  const request = { sequence: ++options.sequence.current, scopeKey: options.scopeKey };
+  const isCurrent = () => isCurrentDetailOpen(request, options.sequence.current, options.getCurrentScopeKey());
+  options.setState({ assetId: options.assetId, status: 'loading' });
+  try {
+    const detail = await options.load(options.assetId);
+    if (!isCurrent()) return;
+    if (detail) options.clearState();
+    else options.setState({ assetId: options.assetId, status: 'error' });
+  } catch {
+    if (isCurrent()) options.setState({ assetId: options.assetId, status: 'error' });
+  }
+}
+
 export function isCurrentDetailOpen(
   request: { sequence: number; scopeKey: string },
   currentSequence: number,
