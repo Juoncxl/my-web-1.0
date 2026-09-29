@@ -442,8 +442,9 @@ export default async function handler(req: Request, res: Response) {
             : action === 'folders.delete'
               ? [body.args[0]]
               : body.args;
+    const requestArgs: unknown[] = body.args;
     const verifyWrite = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
-      ? () => verifyOwnerWriteCommitted(action, body.args)
+      ? () => verifyOwnerWriteCommitted(action, requestArgs)
       : FOLDER_WRITE_ACTIONS.has(action) && directFoldersEnabled()
         ? () => verifyOwnerFolderCommitted(action, ownerArgs, authenticatedOwnerId)
         : null;

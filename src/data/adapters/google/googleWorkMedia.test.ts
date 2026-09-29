@@ -97,7 +97,7 @@ describe('Google standard Work media upload foundation', () => {
     expect(prepared.pending).toEqual([]);
   });
 
-  it('does not proxy Collaboration media or non-proxy legacy media records', () => {
+  it('serves non-proxy legacy media records through the unscoped legacy media route', () => {
     const workId = 'asset_1234567890abcdef1234567890abcdef';
     const asset = {
       id: workId, userId: 'owner', title: 'Legacy', authorName: 'Owner',
@@ -107,8 +107,15 @@ describe('Google standard Work media upload foundation', () => {
         purpose: 'gallery' as const, mimeType: 'image/png', fileSize: 8, sortOrder: 0, isCover: true }],
       isPublic: true, visibility: 'public' as const, status: 'finished' as const, createdAt: '', updatedAt: '', tags: []
     };
-    expect(hydrateGoogleWorkMedia(asset)).toEqual(asset);
-    expect(hydrateGoogleWorkMedia({ ...asset, category: 'collab' })).toEqual({ ...asset, category: 'collab' });
+    // Migrated media is read from Drive by the legacy route: no `scope`, never the Google Work proxy.
+    const legacyUrl = `/api/cxl/media?workId=${workId}&ref=media%3Alegacy-id`;
+    for (const input of [asset, { ...asset, category: 'collab' as const }]) {
+      const hydrated = hydrateGoogleWorkMedia(input as typeof asset);
+      expect(hydrated.previewImage).toBe(legacyUrl);
+      expect(hydrated.previewImages).toEqual([legacyUrl]);
+      expect(hydrated.icon.type === 'image' && hydrated.icon.value).toBe(legacyUrl);
+      expect(hydrated.media).toEqual(asset.media);
+    }
   });
 
   it('hydrates one Google media identity at every standard Work placement that references it', () => {

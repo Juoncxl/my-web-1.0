@@ -135,10 +135,15 @@ describe('CXL data service boundary', () => {
     await expect(service.works.create({} as any)).resolves.toMatchObject({ data: null, error: expect.stringContaining('Google Works write Preview flag') });
     await expect(service.folders.fetch('browser-spoofed-id')).resolves.toEqual({ data: [], error: null });
     expect(folderFetch).toHaveBeenCalledWith('browser-spoofed-id');
-    expect(service.folders.create).not.toBe(googleDataAdapter.folders.create);
-    await expect(service.folders.create({ userId: 'owner', name: 'Folder' } as any)).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
+    // Folder writes route to Google and keep the { data | success, error } result contract.
+    const folderCreate = vi.spyOn(googleDataAdapter.folders, 'create').mockResolvedValue({ data: { id: 'folder_1' } as any, error: null });
+    await expect(service.folders.create({ userId: 'owner', name: 'Folder' } as any)).resolves.toMatchObject({ data: { id: 'folder_1' }, error: null });
+    expect(folderCreate).toHaveBeenCalledTimes(1);
+    const folderDelete = vi.spyOn(googleDataAdapter.folders, 'delete').mockRejectedValue(new Error('Google folder delete failed'));
+    await expect(service.folders.delete('folder', 'owner')).resolves.toEqual({ success: false, error: 'Google folder delete failed' });
+    folderCreate.mockRestore();
+    folderDelete.mockRestore();
     await expect(service.settings.writeCreatorSpace('owner', {} as any)).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
-    await expect(service.folders.delete('folder', 'owner')).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
     await expect(service.engagement.setBookmark('owner', 'work', true)).resolves.toMatchObject({ success: false, error: expect.stringContaining('deferred') });
     await expect(service.engagement.fetchBookmarks('owner')).resolves.toMatchObject({ data: [], error: expect.stringContaining('deferred') });
     await expect(service.collaborations.fetchDrafts({ userId: 'owner' })).resolves.toMatchObject({ data: [], error: expect.stringContaining('deferred') });

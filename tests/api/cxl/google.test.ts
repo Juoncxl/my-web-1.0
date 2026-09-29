@@ -364,28 +364,31 @@ describe('Vercel Google Works read proxy', () => {
     expect(timeout.statusCode).toBe(504);
   });
 
+  // Per-attempt budgets: public snapshot reads retry stalled Apps Script calls (5s x3);
+  // works.fetch (Owner-capable) keeps one long attempt (25s).
   it.each([
-    ['works.fetch', [{ publicOnly: true }]],
-    ['profiles.getCreator', ['@Creator-One']],
-    ['settings.readCreatorSpace', ['cxlc_0123456789abcdef0123456789abcdef']]
-  ] as const)('%s uses the configured timeout and maps an aborted GAS request to 504', async (action, args) => {
+    ['works.fetch', [{ publicOnly: true }], 5_000, 3],
+    ['profiles.getCreator', ['@Creator-One'], 5_000, 3],
+    ['settings.readCreatorSpace', ['cxlc_0123456789abcdef0123456789abcdef'], 5_000, 3]
+  ] as const)('%s uses the configured timeout and maps an aborted GAS request to 504', async (action, args, timeoutMs, attempts) => {
     const controller = new AbortController();
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    const abortError = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => {
-        reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
-      }, { once: true });
+      if (init?.signal?.aborted) return reject(abortError());
+      init?.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
     }));
     vi.stubGlobal('fetch', fetchMock);
 
     try {
       const pending = invoke({ action, args: [...args] });
-      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+      await vi.waitFor(() => expect(timeoutSpy).toHaveBeenCalledWith(timeoutMs));
       expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
 
       controller.abort();
       const result = await pending;
 
+      expect(fetchMock).toHaveBeenCalledTimes(attempts);
       expect(result.statusCode).toBe(504);
       expect(result.json.error).toMatch(/timeout/i);
     } finally {
