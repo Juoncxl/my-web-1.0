@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
-import { directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { directOwnerReadsEnabled, directOwnerWorksFetch, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -182,6 +182,25 @@ export function publicOwnerGasRequest(action: string, args: unknown[], ownerUser
     body: JSON.stringify({ authorization: secret, ownerUserId: configuredOwnerId, action, args,
       ...(includeTiming && process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
 }
+/**
+ * Public list/detail reads: use the direct Sheets/Drive path when configured and
+ * fall back to Apps Script on any failure. Returns the Apps Script response shape.
+ */
+async function publicReadRequest(action: string, args: unknown[], ownerUserId?: string, includeTiming = false): Promise<unknown> {
+  if (directPublicReadsEnabled() && (action === 'public.works.list' || (action === 'public.works.detail' && typeof args[0] === 'string'))) {
+    const started = Date.now();
+    try {
+      const data = action === 'public.works.list' ? await directPublicWorksList() : await directPublicWorkDetail(args[0] as string);
+      console.info(JSON.stringify({ event: 'cxl_direct_public_read', action, elapsedMs: Date.now() - started, used: true }));
+      return data === null
+        ? { ok: false, error: 'Work is not publicly available', code: 'WORK_NOT_FOUND' }
+        : { ok: true, data };
+    } catch (error) {
+      console.info(JSON.stringify({ event: 'cxl_direct_read_failed', action, reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+    }
+  }
+  return publicOwnerGasRequest(action, args, ownerUserId, includeTiming);
+}
 function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 }
@@ -278,7 +297,7 @@ export function validateAssetList(value: unknown): Asset[] {
 export async function fetchPublicWorksSnapshot() {
   const handlerStartedAt = Date.now();
   const gasStartedAt = Date.now();
-  const raw = await publicOwnerGasRequest('public.works.list', [{}], undefined, true);
+  const raw = await publicReadRequest('public.works.list', [{}], undefined, true);
   const gasElapsedMs = Date.now() - gasStartedAt;
   const validationStartedAt = Date.now();
   if (!record(raw) || raw.ok !== true) {
@@ -311,7 +330,7 @@ export async function fetchPublicWorksSnapshot() {
 
 /** Anonymous public Work detail for the cacheable GET route; same data as an anonymous works.fetch. */
 export async function fetchPublicWorkDetail(assetId: string) {
-  const raw = await publicOwnerGasRequest('public.works.detail', [assetId]);
+  const raw = await publicReadRequest('public.works.detail', [assetId]);
   if (!record(raw) || raw.ok !== true) {
     throw Object.assign(new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed'), {
       status: ownerErrorStatus(record(raw) ? raw.code : undefined)
@@ -516,7 +535,7 @@ export default async function handler(req: Request, res: Response) {
     } else {
       const bridgeAction = publicCreatorSlug ? 'public.works.creator' : options.assetId ? 'public.works.detail' : 'public.works.list';
       const bridgeArgs = publicCreatorSlug ? [publicCreatorSlug] : options.assetId ? [options.assetId] : [{}];
-      const response = await publicOwnerGasRequest(bridgeAction, bridgeArgs, ownerUserId);
+      const response = await publicReadRequest(bridgeAction, bridgeArgs, ownerUserId);
       if (!record(response) || response.ok !== true) {
         const error = new Error(record(response) && typeof response.error === 'string' ? response.error : 'Google public API response is malformed') as Error & { apiCode?: unknown };
         if (record(response)) error.apiCode = response.code;

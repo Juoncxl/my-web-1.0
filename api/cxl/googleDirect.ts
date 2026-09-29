@@ -121,6 +121,182 @@ function assetFromRecord(record: Row): Row {
   };
 }
 
+// ---- Public reads (port of publicReadSnapshotBuildPayload_ works + public.works.detail) ----
+
+const PUBLIC_SUMMARY_VERSIONS = [1, 2];
+const PUBLIC_CREATOR_ID_RE = /^cxlc_[a-f0-9]{32}$/i;
+const PUBLIC_ASSET_FIELDS = ['id','title','authorName','authorAvatar','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','icon','content','contentBlocks','uiCodeSnippet','previewImage','previewImages','media','isPublic','visibility','status','tags','createdAt','updatedAt','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','linkedAssetIds','versions','publicCreatorId'];
+const MEDIA_REF_RE = /^media:[A-Za-z0-9_-]{1,128}$/;
+const HASH_REF_RE = /^cxl-media:[a-f0-9]{64}$/i;
+const IMAGE_MIME_RE = /^(image\/(?:jpeg|png|webp|gif))$/i;
+const WORK_ID_RE = /^asset_[A-Za-z0-9_-]{1,96}$/;
+
+export function directPublicReadsEnabled(): boolean {
+  return config() !== null && Boolean(process.env.CXL_PUBLIC_SHEET_ID?.trim());
+}
+
+async function sheetRows(spreadsheetId: string, range: string): Promise<Row[]> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`
+    + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&majorDimension=ROWS';
+  const body = await (await googleGet(url)).json() as { values?: unknown[][] };
+  const [headers = [], ...rows] = body.values || [];
+  const names = headers.map(value => text(value));
+  if (new Set(names.filter(Boolean)).size !== names.filter(Boolean).length) throw new Error('Public snapshot source has duplicate columns');
+  return rows.filter(values => values.some(value => value !== '' && value !== null && value !== undefined)).map(values => {
+    const row: Row = {};
+    names.forEach((key, index) => { if (key) row[key] = values[index] ?? ''; });
+    return row;
+  });
+}
+
+/** Port of publicReadSafeUrl_. */
+function safeUrl(value: unknown, withoutQuery: boolean): string {
+  const url = text(value);
+  if (!url || url.length > 2048 || /^data:/i.test(url)) return '';
+  const match = url.match(/^https:\/\/([^/?#@]+)(?:\/[^?#]*)?(?:\?[^#]*)?(?:#.*)?$/i);
+  if (!match) return '';
+  const host = match[1].toLowerCase();
+  if (/(^|\.)drive\.google\.com$/.test(host) || /(^|\.)googleusercontent\.com$/.test(host) || /(^|\.)script\.google\.com$/.test(host)) return '';
+  return withoutQuery && /[?#]/.test(url) ? '' : url;
+}
+const mediaOrSafe = (value: unknown) => { const ref = text(value); return MEDIA_REF_RE.test(ref) || HASH_REF_RE.test(ref) ? ref : safeUrl(ref, false); };
+const strings = (value: unknown, max: number) => (Array.isArray(value) ? value : []).filter(item => typeof item === 'string').slice(0, max) as string[];
+const isObject = (value: unknown): value is Row => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** Port of sanitizePublicReadWork_. */
+function sanitizePublicWork(asset: Row | null, fullDetail: boolean): Row | null {
+  if (!isObject(asset)) return null;
+  const safe: Row = {};
+  PUBLIC_ASSET_FIELDS.forEach(key => { if (Object.prototype.hasOwnProperty.call(asset, key)) safe[key] = asset[key]; });
+  safe.isPublic = true; safe.visibility = 'public'; safe.authorName = text(safe.authorName || 'Creator').slice(0, 200);
+  if (safe.authorAvatar) safe.authorAvatar = safeUrl(safe.authorAvatar, false) || undefined;
+  if (isObject(safe.icon)) {
+    const icon = safe.icon, iconValue = text(icon.value), iconType = text(icon.type || 'emoji');
+    if (iconType === 'image' && (MEDIA_REF_RE.test(iconValue) || HASH_REF_RE.test(iconValue) || safeUrl(iconValue, false))) {
+      const safeIcon: Row = { type: 'image', value: iconValue };
+      if (MEDIA_REF_RE.test(iconValue)) safeIcon.mediaId = iconValue.slice(6);
+      else if (MEDIA_REF_RE.test(text(icon.mediaId))) safeIcon.mediaId = text(icon.mediaId);
+      if (typeof icon.mimeType === 'string' && IMAGE_MIME_RE.test(icon.mimeType)) safeIcon.mimeType = icon.mimeType;
+      safe.icon = safeIcon;
+    } else safe.icon = { type: 'emoji', value: iconType === 'emoji' ? iconValue.slice(0, 32) : '✨' };
+  }
+  if (safe.previewImage) safe.previewImage = mediaOrSafe(safe.previewImage) || '';
+  safe.previewImages = (Array.isArray(safe.previewImages) ? safe.previewImages : []).map(mediaOrSafe).filter(Boolean).slice(0, 12);
+  safe.media = (Array.isArray(safe.media) ? safe.media : []).filter(isObject).map(media => {
+    const out: Row = {};
+    ['id','assetId','purpose','contextId','mimeType','fileSize','sortOrder','isCover','createdAt','updatedAt'].forEach(key => { if (media[key] !== undefined) out[key] = media[key]; });
+    if (media.delivery === 'vercel_proxy') out.delivery = 'vercel_proxy';
+    return out;
+  });
+  if (isObject(safe.publicCollaboration)) {
+    const collab = safe.publicCollaboration, policy = isObject(collab.visibilityPolicy) ? collab.visibilityPolicy : {};
+    safe.publicCollaboration = {
+      name: text(collab.name), sharedTag: text(collab.sharedTag), platforms: strings(collab.platforms, 20),
+      sharedInformation: (Array.isArray(collab.sharedInformation) ? collab.sharedInformation : []).slice(0, 20).map((item: unknown) => {
+        const out: Row = {};
+        if (isObject(item)) {
+          ['id','title','type','content','appScope'].forEach(key => { if (typeof item[key] === 'string') out[key] = (item[key] as string).slice(0, key === 'content' ? 4000 : 160); });
+          if (Array.isArray(item.platforms)) out.platforms = strings(item.platforms, 20);
+        }
+        return out;
+      }),
+      deadlines: (Array.isArray(collab.deadlines) ? collab.deadlines : []).map((item: unknown) => isObject(item) ? { label: text(item.label), date: text(item.date) } : null).filter(Boolean),
+      participants: (Array.isArray(collab.participants) ? collab.participants : []).map((raw: unknown) => {
+        const item = isObject(raw) ? raw : {};
+        const p: Row = {};
+        ['isOwner','creatorName','houseTag','platforms','externalWorkName'].forEach(key => { if (item[key] !== undefined) p[key] = item[key]; });
+        p.referenceImages = (Array.isArray(item.referenceImages) ? item.referenceImages : []).map((ref: unknown, index: number) => {
+          const refObject = isObject(ref) ? ref : null;
+          let value = typeof ref === 'string' ? ref : text(refObject?.src || refObject?.storageKey);
+          if (!MEDIA_REF_RE.test(value) && !HASH_REF_RE.test(value)) value = safeUrl(value, false);
+          if (!value) return null;
+          const mediaId = MEDIA_REF_RE.test(value) ? value.slice(6) : '';
+          const mimeType = refObject && IMAGE_MIME_RE.test(text(refObject.mimeType)) ? text(refObject.mimeType) : undefined;
+          const image: Row = { id: text(refObject?.id || mediaId || `reference-${index}`).slice(0, 160), src: value, kind: mimeType === 'image/gif' ? 'gif' : 'image' };
+          if (mediaId) image.mediaId = mediaId;
+          if (mimeType) image.mimeType = mimeType;
+          if (refObject && Number(refObject.naturalWidth) > 0) image.naturalWidth = Number(refObject.naturalWidth);
+          if (refObject && Number(refObject.naturalHeight) > 0) image.naturalHeight = Number(refObject.naturalHeight);
+          return image;
+        }).filter(Boolean).slice(0, 12);
+        p.linkedWorkIds = (Array.isArray(item.linkedWorkIds) ? item.linkedWorkIds : []).filter((id: unknown) => WORK_ID_RE.test(text(id))).slice(0, 24);
+        if (policy.showParticipantStatuses) ['dataStatus','imageStatus'].forEach(key => { if (item[key] !== undefined) p[key] = item[key]; });
+        if (policy.showParticipantNotes && item.notes !== undefined) p.notes = item.notes;
+        if (policy.showParticipantDeadlineOverrides && item.useDeadlineOverrides && isObject(item.deadlineOverrides)) {
+          const overrides: Row = {};
+          Object.keys(item.deadlineOverrides).slice(0, 20).forEach(key => {
+            const value = (item.deadlineOverrides as Row)[key];
+            if (/^[A-Za-z0-9_-]{1,128}$/.test(key) && typeof value === 'string') overrides[key] = value.slice(0, 40);
+          });
+          p.deadlineOverrides = overrides;
+        }
+        return p;
+      }),
+      visibilityPolicy: { showParticipantStatuses: !!policy.showParticipantStatuses, showParticipantNotes: !!policy.showParticipantNotes, showParticipantDeadlineOverrides: !!policy.showParticipantDeadlineOverrides }
+    };
+  }
+  if (!fullDetail) {
+    safe.content = text(safe.content).slice(0, 600); safe.uiCodeSnippet = text(safe.uiCodeSnippet).slice(0, 600);
+    safe.contentBlocks = (Array.isArray(safe.contentBlocks) ? safe.contentBlocks : []).slice(0, 24).map((block: unknown) => {
+      const b = isObject(block) ? block : {};
+      return { id: text(b.id).slice(0, 50), type: text(b.type || 'Text').slice(0, 30), title: text(b.title).slice(0, 100), body: '' };
+    });
+  }
+  if (Array.isArray(safe.linkedAssetIds)) safe.linkedAssetIds = safe.linkedAssetIds.filter((id: unknown) => WORK_ID_RE.test(text(id))).slice(0, 50);
+  return safe;
+}
+
+/** Works part of publicReadSnapshotBuildPayload_: the anonymous public list. */
+export async function directPublicWorksList(): Promise<Row[]> {
+  const sheetId = process.env.CXL_PUBLIC_SHEET_ID!.trim();
+  // The Index tab is the first sheet (A:K = PUBLIC_HEADERS); A1 without a sheet name targets it.
+  const [indexRows, mapRows] = await Promise.all([sheetRows(sheetId, 'A:K'), sheetRows(sheetId, 'WorkCreatorMap!A:ZZ').catch((error: unknown) => {
+    // Apps Script treats a missing tab as empty; any other failure must surface.
+    if (error instanceof Error && /HTTP 400/.test(error.message)) return [] as Row[];
+    throw error;
+  })]);
+  const creatorMap = new Map<string, string>(), duplicates = new Set<string>();
+  mapRows.forEach(row => {
+    const id = text(row.workId), creator = text(row.publicCreatorId);
+    if (!/^asset_[A-Za-z0-9_-]+$/.test(id) || !PUBLIC_CREATOR_ID_RE.test(creator) || Number(row.schemaVersion) !== 1) return;
+    if (creatorMap.has(id)) duplicates.add(id); else creatorMap.set(id, creator);
+  });
+  duplicates.forEach(id => creatorMap.delete(id));
+  const works: Row[] = [], publicIds = new Set<string>();
+  indexRows.forEach(row => {
+    if (!flag(row.active)) return;
+    let envelope: { summaryVersion?: unknown; asset?: Row } | null = null;
+    try { envelope = JSON.parse(text(row.summary_json)); } catch { throw new Error('Public summary index is not ready'); }
+    const asset = envelope?.asset;
+    if (!envelope || !PUBLIC_SUMMARY_VERSIONS.includes(Number(envelope.summaryVersion)) || !isObject(asset) || asset.id !== text(row.id)
+      || asset.visibility !== 'public' || asset.isPublic !== true || typeof asset.title !== 'string' || typeof asset.category !== 'string'
+      || typeof asset.status !== 'string' || !Array.isArray(asset.tags) || !Array.isArray(asset.media)) throw new Error('Public summary index is not ready');
+    const safe = sanitizePublicWork(asset, false);
+    if (!safe) throw new Error('Public summary index is not ready');
+    safe.id = text(row.id); safe.publicCreatorId = creatorMap.get(text(row.id)) || undefined;
+    works.push(safe); publicIds.add(text(row.id));
+  });
+  works.forEach(work => { if (work.collaborationAssetId && !publicIds.has(text(work.collaborationAssetId))) work.collaborationAssetId = null; });
+  return works;
+}
+
+/** Port of the public.works.detail branch of publicReadDispatch_. Returns null when not public. */
+export async function directPublicWorkDetail(assetId: string): Promise<Row | null> {
+  const [works, rows] = await Promise.all([directPublicWorksList(), privateIndexRows()]);
+  const summary = works.find(work => work.id === assetId);
+  if (!summary) return null;
+  const row = rows.find(item => text(item.id) === assetId);
+  if (!row || !text(row.file_id)) return null;
+  const record = await driveJson(text(row.file_id));
+  const recordRow = (record.row || {}) as Row;
+  if (!(recordRow.visibility === 'public' && flag(recordRow.is_public) && !recordRow.deleted_at)) return null;
+  const asset = sanitizePublicWork(assetFromRecord(record), true);
+  if (!asset || asset.id !== assetId) return null;
+  asset.publicCreatorId = summary.publicCreatorId || undefined;
+  if (asset.collaborationAssetId && !works.some(work => work.id === asset.collaborationAssetId)) asset.collaborationAssetId = null;
+  return asset;
+}
+
 /**
  * After an Apps Script write times out, check whether it was actually committed.
  * Update/create match the request's own requestId (Apps Script stores it as
