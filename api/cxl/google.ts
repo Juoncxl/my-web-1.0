@@ -75,21 +75,25 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
   } catch { return null; }
 }
 // Apps Script usually answers reads in ~1-2s, but the googleusercontent hop sometimes
-// stalls until its one-time URL expires (404). Retry reads once with a shorter budget;
+// stalls until its one-time URL expires (404). Retry reads with short budgets;
 // writes are never retried so a stalled response cannot duplicate a mutation.
-const GAS_READ_ATTEMPT_TIMEOUT_MS = 12_000;
-function isRetryableRead(action: string) {
-  return action.startsWith('public.') || action === 'works.fetch' || action === 'folders.fetch';
+// Snapshot-only reads answer in ~1.5s; detail/owner reads touch Drive and take ~5-7s.
+function readRetryPlan(action: string): { timeoutMs: number; attempts: number } | null {
+  if (action === 'public.works.detail' || action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 10_000, attempts: 2 };
+  if (action.startsWith('public.')) return { timeoutMs: 5_000, attempts: 3 };
+  return null;
 }
 async function gasJson(url: string, init: RequestInit, action: string) {
-  if (!isRetryableRead(action)) return gasJsonAttempt(url, init, action, GAS_TIMEOUT_MS, 1);
-  try {
-    return await gasJsonAttempt(url, init, action, GAS_READ_ATTEMPT_TIMEOUT_MS, 1);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '';
-    const retryable = (error instanceof Error && error.name === 'TimeoutError') || /time.?out|HTTP 404|HTTP 5\d\d/i.test(message);
-    if (!retryable) throw error;
-    return gasJsonAttempt(url, init, action, GAS_READ_ATTEMPT_TIMEOUT_MS, 2);
+  const plan = readRetryPlan(action);
+  if (!plan) return gasJsonAttempt(url, init, action, GAS_TIMEOUT_MS, 1);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await gasJsonAttempt(url, init, action, plan.timeoutMs, attempt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const retryable = (error instanceof Error && error.name === 'TimeoutError') || /time.?out|HTTP 404|HTTP 5\d\d/i.test(message);
+      if (!retryable || attempt >= plan.attempts) throw error;
+    }
   }
 }
 async function gasJsonAttempt(url: string, init: RequestInit, action: string, timeoutMs: number, attempt: number) {
