@@ -248,8 +248,12 @@ export function useAssetData(
     return result;
   }, [currentUser]);
 
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
   const moveAsset = useCallback((id: string, folderId: string | null) => {
-    return updateAsset(id, { folderId });
+    // Google writes require a stable requestId and the Work's current revision.
+    const revision = assetsRef.current.find(asset => asset.id === id)?.revision;
+    return updateAsset(id, { folderId }, { requestId: crypto.randomUUID(), ...(revision ? { expectedRevision: revision } : {}) });
   }, [updateAsset]);
 
   const updateAssetLikeCount = useCallback((id: string, likesCount: number) => {
