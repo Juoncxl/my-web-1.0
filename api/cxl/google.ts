@@ -77,6 +77,7 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 async function gasJson(url: string, init: RequestInit, action: string) {
   const started = Date.now();
   let finalHop = '';
+  let outcome = 'error';
   try {
     // ContentService answers the POST with a 302 to a one-time googleusercontent URL;
     // standard redirect following re-requests it with GET, as Google documents.
@@ -84,13 +85,15 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS) });
     try { const final = new URL(response.url); finalHop = `${final.hostname}${final.pathname}`.replace(/\/macros\/s\/[^/]+\//, '/macros/s/*/'); } catch { /* diagnostics only */ }
     const text = await response.text();
-    if (!response.ok) throw new Error(`Google Apps Script responded with HTTP ${response.status}`);
+    if (!response.ok) { outcome = `http_${response.status}`; throw new Error(`Google Apps Script responded with HTTP ${response.status}`); }
     let parsed: unknown;
-    try { parsed = JSON.parse(text); } catch { throw new Error('Google Apps Script returned malformed JSON'); }
+    try { parsed = JSON.parse(text); } catch { outcome = 'malformed_json'; throw new Error('Google Apps Script returned malformed JSON'); }
+    outcome = record(parsed) && parsed.ok === true ? 'ok'
+      : record(parsed) && typeof parsed.code === 'string' && /^[A-Z_]{1,64}$/.test(parsed.code) ? parsed.code : 'not_ok';
     return parsed;
   } finally {
     // Runtime diagnostics deliberately omit endpoint URLs, payloads, IDs, and credentials.
-    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop }));
+    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome }));
   }
 }
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
