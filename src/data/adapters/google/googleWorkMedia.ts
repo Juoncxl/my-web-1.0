@@ -163,12 +163,19 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
   const version = Number.isFinite(updatedAtMs) ? String(updatedAtMs) : undefined;
   const records = (asset.media || []).filter(item => item.delivery === 'vercel_proxy'
     && item.assetId === asset.id && ['icon', 'gallery', 'prompt_example', 'collab_reference'].includes(item.purpose));
-  if (!records.length) return asset;
+  // Migrated (legacy) media records carry a Drive file but no vercel_proxy delivery;
+  // they are served by the legacy /api/cxl/media route instead of staying raw `media:` refs.
+  const legacyIds = new Set((asset.media || []).filter(item => item.delivery !== 'vercel_proxy' && item.id).map(item => item.id));
+  if (!records.length && !legacyIds.size) return asset;
 
   const urlFor = (id: string | null) => {
     if (!id) return undefined;
     const item = records.find(record => record.id === id);
-    return item ? googleWorkMediaProxyUrl(asset.id, item.id, scope, version) : undefined;
+    if (item) return googleWorkMediaProxyUrl(asset.id, item.id, scope, version);
+    if (!legacyIds.has(id)) return undefined;
+    const params = new URLSearchParams({ workId: asset.id, ref: mediaReference(id) });
+    if (version) params.set('v', version);
+    return `/api/cxl/media?${params.toString()}`;
   };
   const media = (asset.media || []).map(item => {
     const signedUrl = item.delivery === 'vercel_proxy' && item.assetId === asset.id

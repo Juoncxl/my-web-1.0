@@ -17,10 +17,14 @@ export function isCxlMediaProxyPath(value: string): boolean {
     const workIds = url.searchParams.getAll('workId');
     const refs = url.searchParams.getAll('ref');
     const cacheVersions = url.searchParams.getAll('v');
+    const versionOk = cacheVersions.length === 0 || cacheVersions.length === 1 && /^\d+$/.test(cacheVersions[0]);
+    const workIdOk = workIds.length === 1 && /^asset_[A-Za-z0-9_-]{1,96}$/.test(workIds[0]);
+    // Legacy (migrated) media uses the unscoped route with any stored media ID.
+    if (scopes.length === 0) return workIdOk && versionOk && refs.length === 1 && /^media:[A-Za-z0-9_-]{1,128}$/.test(refs[0]);
     return scopes.length === 1 && ['owner', 'public'].includes(scopes[0])
-      && workIds.length === 1 && /^asset_[A-Za-z0-9_-]{1,96}$/.test(workIds[0])
+      && workIdOk
       && refs.length === 1 && /^media:[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(refs[0])
-      && (cacheVersions.length === 0 || cacheVersions.length === 1 && /^\d+$/.test(cacheVersions[0]));
+      && versionOk;
   } catch {
     return false;
   }

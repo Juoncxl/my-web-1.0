@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleMediaPoc } from '../../src/server/cxlMediaPoc.js';
-import { handleGoogleWorkMediaRead } from '../../src/server/cxlGoogleWorkMedia.js';
+import { handleGoogleWorkMediaRead, ownerSessionValid } from '../../src/server/cxlGoogleWorkMedia.js';
 import { directOwnerReadsEnabled, directWorkMedia } from './googleDirect.js';
 export { mediaPocLimits } from '../../src/server/cxlMediaPoc.js';
 
@@ -62,11 +62,16 @@ async function publicIconHandler(req: Request, res: Response) {
   // back to the Temporary Public Apps Script for anything not reachable that way.
   if (ref.startsWith('media:') && directOwnerReadsEnabled()) {
     try {
-      const direct = await directWorkMedia(workId, ref, 'public', false);
-      console.info(JSON.stringify({ event: 'cxl_direct_media_read', scope: 'legacy', used: direct !== null }));
+      // Public Works first; a signed-in Owner may also see legacy images of private Works.
+      let direct = await directWorkMedia(workId, ref, 'public', false);
+      let ownerOnly = false;
+      if (!direct && ownerSessionValid(req)) { direct = await directWorkMedia(workId, ref, 'owner', false); ownerOnly = direct !== null; }
+      console.info(JSON.stringify({ event: 'cxl_direct_media_read', scope: ownerOnly ? 'legacy-owner' : 'legacy', used: direct !== null }));
       if (direct) {
         const etag = `"${createHash('sha256').update(direct.bytes).digest('hex')}"`;
         cacheHeaders(res, etag);
+        // Never let the CDN keep a private Work's image.
+        if (ownerOnly) res.setHeader('Cache-Control', 'private, no-store');
         res.setHeader('Content-Type', direct.mimeType);
         res.setHeader('Content-Length', String(direct.bytes.length));
         if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }

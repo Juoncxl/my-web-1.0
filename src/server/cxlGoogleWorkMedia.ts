@@ -43,7 +43,7 @@ function sendJson(res: Response, status: number, code: string, message: string) 
   return res.end(JSON.stringify({ ok: false, code, error: message }));
 }
 
-function ownerSessionValid(req: Request) {
+export function ownerSessionValid(req: Request) {
   const ownerId = process.env.CXL_OWNER_USER_ID?.trim() || '';
   return selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND) === 'vercel'
     && Boolean(ownerId && process.env.CXL_OWNER_GOOGLE_SUB?.trim()
