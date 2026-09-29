@@ -143,17 +143,22 @@ function mediaSignatureMatches(mimeType: string, bytes: Buffer) {
 export async function directWorkMedia(workId: string, ref: string, scope: 'public' | 'owner', requireProxy: boolean): Promise<{ bytes: Buffer; mimeType: string } | null> {
   if (!/^media:[A-Za-z0-9_-]{1,128}$/.test(ref)) return null;
   const mediaId = ref.slice('media:'.length);
-  const row = (await privateIndexRows()).find(item => text(item.id) === workId);
-  if (!row || !text(row.file_id)) return null;
-  const record = await driveJson(text(row.file_id));
-  const recordRow = (record.row || {}) as Row;
-  if (text(recordRow.id) !== workId) return null;
+  let mediaRecords: Row[];
   if (scope === 'public') {
-    if (!(recordRow.visibility === 'public' && flag(recordRow.is_public) && !recordRow.deleted_at)) return null;
-    const publicAsset = sanitizePublicWork(assetFromRecord(record), true);
-    if (!publicAsset || !JSON.stringify(publicAsset).includes(ref)) return null;
-  } else if (!JSON.stringify(record).includes(ref)) return null;
-  const media = ((record.mediaRecords as Row[] | undefined) || []).find(item => item && (text(item.id) === mediaId || item.storage_path === ref || item.original_ref === ref));
+    if (!directPublicReadsEnabled()) return null;
+    const sources = await publicWorkSources(workId);
+    if (!sources || !JSON.stringify(sources.asset).includes(ref)) return null;
+    mediaRecords = sources.mediaRecords;
+  } else {
+    const row = (await privateIndexRows()).find(item => text(item.id) === workId);
+    if (!row || !text(row.file_id)) return null;
+    const record = await driveJson(text(row.file_id));
+    if (text(((record.row || {}) as Row).id) !== workId || !JSON.stringify(record).includes(ref)) return null;
+    mediaRecords = ((record.mediaRecords as Row[] | undefined) || []).filter(isObject);
+  }
+  // A record with a Drive file wins over a duplicate entry without one.
+  const matches = mediaRecords.filter(item => text(item.id) === mediaId || item.storage_path === ref || item.original_ref === ref);
+  const media = matches.find(item => text(item.drive_file_id)) || matches[0];
   if (!media || !text(media.drive_file_id)) return null;
   if (requireProxy && (media.delivery !== 'vercel_proxy' || text(media.asset_id) !== workId)) return null;
   const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(text(media.drive_file_id))}?alt=media&supportsAllDrives=true`);
@@ -338,6 +343,10 @@ function sanitizePublicWork(asset: Row | null, fullDetail: boolean): Row | null 
 
 /** Works part of publicReadSnapshotBuildPayload_: the anonymous public list. */
 export async function directPublicWorksList(): Promise<Row[]> {
+  return (await publicWorksIndex()).works;
+}
+
+async function publicWorksIndex(): Promise<{ works: Row[]; projectionFileIds: Map<string, string> }> {
   const sheetId = process.env.CXL_PUBLIC_SHEET_ID!.trim();
   // The Index tab is the first sheet (A:K = PUBLIC_HEADERS); A1 without a sheet name targets it.
   const [indexRows, mapRows] = await Promise.all([sheetRows(sheetId, 'A:K'), sheetRows(sheetId, 'WorkCreatorMap!A:ZZ').catch((error: unknown) => {
@@ -352,9 +361,10 @@ export async function directPublicWorksList(): Promise<Row[]> {
     if (creatorMap.has(id)) duplicates.add(id); else creatorMap.set(id, creator);
   });
   duplicates.forEach(id => creatorMap.delete(id));
-  const works: Row[] = [], publicIds = new Set<string>();
+  const works: Row[] = [], publicIds = new Set<string>(), projectionFileIds = new Map<string, string>();
   indexRows.forEach(row => {
     if (!flag(row.active)) return;
+    if (text(row.file_id)) projectionFileIds.set(text(row.id), text(row.file_id));
     let envelope: { summaryVersion?: unknown; asset?: Row } | null = null;
     try { envelope = JSON.parse(text(row.summary_json)); } catch { throw new Error('Public summary index is not ready'); }
     const asset = envelope?.asset;
@@ -367,24 +377,40 @@ export async function directPublicWorksList(): Promise<Row[]> {
     works.push(safe); publicIds.add(text(row.id));
   });
   works.forEach(work => { if (work.collaborationAssetId && !publicIds.has(text(work.collaborationAssetId))) work.collaborationAssetId = null; });
-  return works;
+  return { works, projectionFileIds };
 }
 
-/** Port of the public.works.detail branch of publicReadDispatch_. Returns null when not public. */
-export async function directPublicWorkDetail(assetId: string): Promise<Row | null> {
-  const [works, rows] = await Promise.all([directPublicWorksList(), privateIndexRows()]);
+/**
+ * Public view of one Work plus every media record that may back it. The published
+ * projection (the file the public Index row points to) carries the Collaboration
+ * built from the current draft; the private record's own copy can be stale.
+ */
+async function publicWorkSources(assetId: string): Promise<{ asset: Row; mediaRecords: Row[] } | null> {
+  const [{ works, projectionFileIds }, rows] = await Promise.all([publicWorksIndex(), privateIndexRows()]);
   const summary = works.find(work => work.id === assetId);
   if (!summary) return null;
   const row = rows.find(item => text(item.id) === assetId);
   if (!row || !text(row.file_id)) return null;
-  const record = await driveJson(text(row.file_id));
+  const projectionFileId = projectionFileIds.get(assetId);
+  const [record, projection] = await Promise.all([
+    driveJson(text(row.file_id)),
+    projectionFileId ? driveJson(projectionFileId).catch(() => null) : Promise.resolve(null)
+  ]);
   const recordRow = (record.row || {}) as Row;
   if (!(recordRow.visibility === 'public' && flag(recordRow.is_public) && !recordRow.deleted_at)) return null;
-  const asset = sanitizePublicWork(assetFromRecord(record), true);
+  const source = assetFromRecord(record);
+  if (source.category === 'collab' && projection && isObject(projection.public_collaboration)) source.publicCollaboration = projection.public_collaboration;
+  const asset = sanitizePublicWork(source, true);
   if (!asset || asset.id !== assetId) return null;
   asset.publicCreatorId = summary.publicCreatorId || undefined;
   if (asset.collaborationAssetId && !works.some(work => work.id === asset.collaborationAssetId)) asset.collaborationAssetId = null;
-  return asset;
+  const mediaRecords = [...((record.mediaRecords as Row[] | undefined) || []), ...((projection?.mediaRecords as Row[] | undefined) || [])].filter(isObject);
+  return { asset, mediaRecords };
+}
+
+/** Port of the public.works.detail branch of publicReadDispatch_. Returns null when not public. */
+export async function directPublicWorkDetail(assetId: string): Promise<Row | null> {
+  return (await publicWorkSources(assetId))?.asset || null;
 }
 
 /**
