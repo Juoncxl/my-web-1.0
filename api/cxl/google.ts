@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
-import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { randomUUID } from 'node:crypto';
+import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -13,7 +14,8 @@ const MEDIA_UPLOAD_ACTIONS = new Set(['media.upload.begin','media.upload.chunk',
 const MEDIA_CLEANUP_ACTION = 'media.cleanup';
 const MEDIA_REPAIR_ACTION = 'media.work.repairDeliveryChunks';
 const WORK_DELETE_ACTIONS = new Set(['works.softDelete','works.restore','works.permanentDelete']);
-const OWNER_ACTIONS = new Set(['works.create','works.update', ...WORK_DELETE_ACTIONS, 'folders.fetch','public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
+const FOLDER_WRITE_ACTIONS = new Set(['folders.create','folders.update','folders.delete']);
+const OWNER_ACTIONS = new Set(['works.create','works.update', ...WORK_DELETE_ACTIONS, 'folders.fetch', ...FOLDER_WRITE_ACTIONS,'public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update', ...WORK_DELETE_ACTIONS]);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
@@ -156,14 +158,14 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
  */
 const WRITE_VERIFY_START_MS = 2_000;
 const WRITE_VERIFY_INTERVAL_MS = 1_500;
-async function raceWriteWithVerification(gasCall: Promise<unknown>, action: string, args: unknown[]): Promise<unknown> {
+async function raceWriteWithVerification(gasCall: Promise<unknown>, action: string, verifyWrite: () => Promise<unknown | null>): Promise<unknown> {
   let settled = false;
   gasCall.then(() => { settled = true; }, () => { settled = true; });
   const verified = (async () => {
     await new Promise(resolve => setTimeout(resolve, WRITE_VERIFY_START_MS));
     for (let check = 0; !settled; check += 1) {
       try {
-        const committed = await verifyOwnerWriteCommitted(action, args);
+        const committed = await verifyWrite();
         console.info(JSON.stringify({ event: 'cxl_write_verify', action, check, committed: committed !== null }));
         if (committed !== null) return { ok: true, data: committed };
       } catch (error) {
@@ -260,6 +262,15 @@ function validWorkWriteOptions(action: string, value: unknown): boolean {
 }
 function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, authMode: 'supabase' | 'vercel'): boolean {
   if (action === 'public.snapshot.rebuild') return authMode === 'vercel' && args.length === 0;
+  // Folder writes keep the browser's legacy argument shapes; the userId there is never trusted.
+  const folderText = (value: unknown, max: number) => value === undefined || (typeof value === 'string' && value.length <= max);
+  const folderId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+  if (action === 'folders.create') return args.length === 1 && record(args[0]) && typeof args[0].name === 'string'
+    && args[0].name.trim().length > 0 && args[0].name.length <= 100 && folderText(args[0].icon, 16) && folderText(args[0].color, 32);
+  if (action === 'folders.update') return args.length === 3 && folderId(args[0]) && record(args[2])
+    && (args[2].name === undefined || (typeof args[2].name === 'string' && args[2].name.trim().length > 0 && args[2].name.length <= 100))
+    && folderText(args[2].icon, 16) && folderText(args[2].color, 32);
+  if (action === 'folders.delete') return args.length === 2 && folderId(args[0]);
   if (action === 'folders.fetch') return authMode === 'vercel'
     ? args.length === 0
     : args.length === 1 && (args[0] === undefined || args[0] === ownerId);
@@ -402,7 +413,7 @@ export default async function handler(req: Request, res: Response) {
     if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
     if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
-    if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action) || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
+    if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action) || FOLDER_WRITE_ACTIONS.has(action) || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
       && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
       return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
     }
@@ -419,20 +430,31 @@ export default async function handler(req: Request, res: Response) {
         console.info(JSON.stringify({ event: 'cxl_direct_read_failed', action, reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
       }
     }
+    const folderInput = (FOLDER_WRITE_ACTIONS.has(action) ? (action === 'folders.create' ? body.args[0] : body.args[2]) : {}) as Record<string, unknown>;
+    const ownerArgs = action === 'folders.fetch' ? []
+      : action === 'works.create' && authMode === 'vercel'
+        ? [{ ...(body.args[0] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[1]]
+        // A server-chosen folder ID makes a retried create idempotent and lets it be verified.
+        : action === 'folders.create'
+          ? [{ id: `folder_${randomUUID().replace(/-/g, '')}`, name: folderInput.name, icon: folderInput.icon, color: folderInput.color }]
+          : action === 'folders.update'
+            ? [body.args[0], { name: folderInput.name, icon: folderInput.icon, color: folderInput.color }]
+            : action === 'folders.delete'
+              ? [body.args[0]]
+              : body.args;
+    const verifyWrite = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
+      ? () => verifyOwnerWriteCommitted(action, body.args)
+      : FOLDER_WRITE_ACTIONS.has(action) && directFoldersEnabled()
+        ? () => verifyOwnerFolderCommitted(action, ownerArgs, authenticatedOwnerId)
+        : null;
     try {
-      const ownerArgs = action === 'folders.fetch' ? []
-        : action === 'works.create' && authMode === 'vercel'
-          ? [{ ...(body.args[0] as Record<string, unknown>), userId: authenticatedOwnerId }, body.args[1]]
-          : action === 'works.update' && authMode === 'vercel'
-            ? body.args
-            : body.args;
       const gasCall = gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs,
           ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
-      const raw = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
+      const raw = verifyWrite
         // Log phases even when the direct verification answers first.
         ? (gasCall.then(result => logOwnerPhaseTiming(result, action), () => undefined),
-          await raceWriteWithVerification(gasCall, action, body.args))
+          await raceWriteWithVerification(gasCall, action, verifyWrite))
         : await gasCall;
       previewOwnerServerTiming(res, raw, action);
       if (!record(raw) || raw.ok !== true) {
@@ -456,11 +478,11 @@ export default async function handler(req: Request, res: Response) {
       if (action === MEDIA_REPAIR_ACTION) return send(res, status, { ok: false, error: status === 504 ? 'Work media repair timed out' : 'Work media repair failed' });
       // The Apps Script response often never arrives although the write committed.
       // Confirm through the read-only Sheets/Drive path before reporting a failure.
-      if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()) {
+      if (verifyWrite) {
         for (let check = 0; check < 4; check += 1) {
           if (check) await new Promise(resolve => setTimeout(resolve, 2_500));
           try {
-            const committed = await verifyOwnerWriteCommitted(action, body.args);
+            const committed = await verifyWrite();
             console.info(JSON.stringify({ event: 'cxl_write_verify', action, check, committed: committed !== null }));
             if (committed !== null) return send(res, 200, { ok: true, data: committed });
           } catch (verifyError) {

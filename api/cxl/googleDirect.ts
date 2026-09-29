@@ -148,6 +148,24 @@ export async function directOwnerFolders(ownerUserId: string): Promise<{ data: R
   return { data: folders, error: null };
 }
 
+/**
+ * Confirm a folder write from folders.jsonl after its Apps Script response stalls.
+ * `args` are the Apps Script arguments (create carries the server-chosen ID).
+ */
+export async function verifyOwnerFolderCommitted(action: string, args: unknown[], ownerUserId: string): Promise<unknown | null> {
+  const { data: folders } = await directOwnerFolders(ownerUserId);
+  if (action === 'folders.delete') return folders.some(folder => folder.id === text(args[0])) ? null : { success: true, error: null };
+  const input = (action === 'folders.create' ? args[0] : args[1]) as Row | undefined;
+  const id = action === 'folders.create' ? text(input?.id) : text(args[0]);
+  const folder = folders.find(item => item.id === id);
+  if (!folder) return null;
+  if (action === 'folders.update') {
+    const same = (key: string) => typeof input?.[key] !== 'string' || !(input[key] as string).trim() || folder[key] === (input[key] as string).trim().slice(0, key === 'name' ? 100 : key === 'icon' ? 16 : 32);
+    if (!same('name') || !same('icon') || !same('color')) return null;
+  }
+  return { data: folder, error: null };
+}
+
 // ---- Public reads (port of publicReadSnapshotBuildPayload_ works + public.works.detail) ----
 
 const PUBLIC_SUMMARY_VERSIONS = [1, 2];

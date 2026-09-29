@@ -35,7 +35,7 @@ var OWNER_SEARCH_MAX_QUERY_CHARS_ = 256;
 var OWNER_SEARCH_OVERLAP_CHARS_ = OWNER_SEARCH_MAX_QUERY_CHARS_ - 1;
 var PUBLIC_SUMMARY_ASSET_FIELDS = ['id','title','authorName','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','icon','content','contentBlocks','uiCodeSnippet','previewImage','previewImages','media','folderId','isPublic','visibility','status','tags','createdAt','updatedAt','deletedAt','likesCount','forkedFromAuthor','versions'];
 var CXL_WRITE_FIELDS_=['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
-var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','works.create','works.update','works.softDelete','works.restore','works.permanentDelete',
+var API_OWNER_ACTIONS_ = ['works.fetch','folders.fetch','folders.create','folders.update','folders.delete','works.create','works.update','works.softDelete','works.restore','works.permanentDelete',
   'public.works.list','public.works.detail','public.works.creator',
   'public.profiles.getCreator','public.profiles.getPublic','public.settings.readCreatorSpace','public.snapshot.rebuild',
   'media.upload.begin','media.upload.chunk','media.upload.finalize',
@@ -82,6 +82,7 @@ function doGet() {
 }
 function doPost(e) {
   API_TIMING_CONTEXT_=null;
+  FOLDERS_MEMO_=null;
   MEDIA_POC_READ_TRACE_=null;
   var requestStarted=Date.now();
   var raw=e&&e.postData&&typeof e.postData.contents==='string'?e.postData.contents:'';
@@ -119,6 +120,8 @@ function doPost(e) {
       if(args.length)return apiJson_({ok:false,error:'Invalid folders.fetch request',code:'INVALID_REQUEST',httpStatus:400});
       return apiJson_({ok:true,data:{data:cxlOwnerFolders_(configuredOwner),error:null}});
     }
+    if(body.action==='folders.create'||body.action==='folders.update'||body.action==='folders.delete')
+      return apiJson_({ok:true,data:mutateOwnerFolder_(body.action,args,configuredOwner)});
     if(body.action==='works.create'&&args.length===2)
       return apiJson_({ok:true,data:saveCxlWorkApi_('create',args[0],args[1],configuredOwner)});
     if(body.action==='works.update'&&args.length===3)
@@ -1381,9 +1384,68 @@ function flag_(value) { return value===true || String(value).toLowerCase()==='tr
 
 function folder_(id) { if (!id) fail_('ยังไม่ได้ตั้งค่าพื้นที่เก็บข้อมูล'); return DriveApp.getFolderById(id); }
 
+var FOLDERS_MEMO_=null;
+var CXL_FOLDERS_FILE_CACHE_KEY_='CXL_FOLDERS_FILE_ID';
+
+// Resolve folders.jsonl by a cached file ID: a Drive name search per save cost seconds.
+function foldersFile_(createIfMissing) {
+  var cache=null;try{cache=CacheService.getScriptCache();}catch(_cacheError){}
+  var cachedId=null;try{cachedId=cache&&cache.get(CXL_FOLDERS_FILE_CACHE_KEY_);}catch(_readError){}
+  if(cachedId){try{return DriveApp.getFileById(cachedId);}catch(_staleId){}}
+  var parent=folder_(config_().incomingId),it=parent.getFilesByName('folders.jsonl'),file=it.hasNext()?it.next():null;
+  if(!file&&createIfMissing)file=parent.createFile(Utilities.newBlob('','application/x-ndjson','folders.jsonl'));
+  if(file&&cache){try{cache.put(CXL_FOLDERS_FILE_CACHE_KEY_,file.getId(),21600);}catch(_putError){}}
+  return file;
+}
+
+function parseFolders_(file) {
+  return file?file.getBlob().getDataAsString('UTF-8').split(/\r?\n/).filter(Boolean).map(JSON.parse):[];
+}
+
 function getFolders_() {
-  var it=folder_(config_().incomingId).getFilesByName('folders.jsonl'); if(!it.hasNext())return [];
-  return it.next().getBlob().getDataAsString('UTF-8').split(/\r?\n/).filter(Boolean).map(JSON.parse);
+  if(!FOLDERS_MEMO_)FOLDERS_MEMO_=parseFolders_(foldersFile_(false));
+  return FOLDERS_MEMO_;
+}
+
+function ownerFolderProjection_(folder,ownerUserId) {
+  return {id:String(folder.id),userId:String(ownerUserId),name:String(folder.name),icon:folder.icon||'📁',color:folder.color||'purple',createdAt:String(folder.created_at),updatedAt:String(folder.updated_at)};
+}
+
+function cleanFolderText_(value,max) { return typeof value==='string'?value.trim().slice(0,max):''; }
+
+/** folders.create / folders.update / folders.delete. Idempotent by folder ID so a retried request is safe. */
+function mutateOwnerFolder_(action,args,ownerUserId) {
+  if(!ownerUserId)apiFail_('OWNER_REQUIRED','Authenticated Owner is required');
+  var lock=LockService.getScriptLock();lock.waitLock(30000);
+  try {
+    var file=foldersFile_(true),all=parseFolders_(file),now=new Date().toISOString(),result;
+    var id=String(action==='folders.create'?(args[0]&&args[0].id||''):(args[0]||''));
+    if(!/^[A-Za-z0-9_-]{1,128}$/.test(id))apiFail_('INVALID_FOLDER','Folder ID is invalid');
+    var index=-1;all.forEach(function(folder,i){if(folder&&String(folder.id)===id)index=i;});
+    var existing=index>=0?all[index]:null;
+    if(existing&&String(existing.user_id||'')!==String(ownerUserId))apiFail_('INVALID_FOLDER','Folder is unavailable for this Owner');
+    if(action==='folders.create'){
+      if(existing)return {data:ownerFolderProjection_(existing,ownerUserId),error:null};
+      var input=args[0]||{},name=cleanFolderText_(input.name,100);
+      if(!name)apiFail_('INVALID_FOLDER','Folder name is required');
+      existing={id:id,user_id:String(ownerUserId),name:name,icon:cleanFolderText_(input.icon,16)||'📁',color:cleanFolderText_(input.color,32)||'purple',created_at:now,updated_at:now};
+      all.push(existing);result={data:ownerFolderProjection_(existing,ownerUserId),error:null};
+    } else if(action==='folders.update'){
+      if(!existing)apiFail_('INVALID_FOLDER','Folder was not found');
+      var updates=args[1]||{};
+      if(updates.name!==undefined){var newName=cleanFolderText_(updates.name,100);if(!newName)apiFail_('INVALID_FOLDER','Folder name is required');existing.name=newName;}
+      if(typeof updates.icon==='string'&&updates.icon.trim())existing.icon=cleanFolderText_(updates.icon,16);
+      if(typeof updates.color==='string'&&updates.color.trim())existing.color=cleanFolderText_(updates.color,32);
+      existing.updated_at=now;result={data:ownerFolderProjection_(existing,ownerUserId),error:null};
+    } else {
+      // Works that still reference a deleted folder drop it on their next save (see saveCxlWorkApi_).
+      if(existing)all.splice(index,1);
+      result={success:true,error:null};
+    }
+    file.setContent(all.map(function(folder){return JSON.stringify(folder);}).join('\n')+(all.length?'\n':''));
+    FOLDERS_MEMO_=all;
+    return result;
+  } finally { lock.releaseLock(); }
 }
 
 function getOwnerWork_(id,includeReadTiming) {
@@ -2255,6 +2317,8 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
     rejectUnsupportedWorkMedia_(asset,existingAsset,mediaIds);
   }
   ownerTimingPhase_('write_payload_prepare',Date.now()-phaseStarted);phaseStarted=Date.now();
+  // A Work may still reference a folder deleted since; drop it unless this request chose it.
+  if(operation==='update'&&assetInput.folderId===undefined&&asset.folderId&&!cxlOwnerFolders_(ownerUserId).some(function(folder){return folder.id===String(asset.folderId);}))asset.folderId=null;
   validateOwnerFolder_(asset.folderId,ownerUserId);
   var request={operation:operation,requestId:requestId,fingerprint:fingerprint,revision:operation==='update'?Number(options.expectedRevision):0,createRequestId:operation==='create'?requestId:'',mediaIds:mediaIds};
   ownerTimingPhase_('write_payload_prepare',Date.now()-phaseStarted);phaseStarted=Date.now();
