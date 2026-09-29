@@ -1068,7 +1068,7 @@ function cxlAssetFromRecord_(record) {
       isCover:!!m.is_cover,naturalWidth:m.natural_width,naturalHeight:m.natural_height,createdAt:m.created_at,updatedAt:m.updated_at};}),
     folderId:r.folder_id&&r.folder_id!=='null'?r.folder_id:null,isPublic:isPublic_(r),visibility:r.visibility||'private',status:r.status||'draft',tags:r.tags||[],
     createdAt:r.created_at,updatedAt:r.updated_at,deletedAt:r.deleted_at||null,likesCount:Number(r.likes_count||0),forkCount:Number(r.fork_count||0),
-    forkedFromId:r.forked_from_id&&r.forked_from_id!=='null'?r.forked_from_id:null,forkedFromAuthor:r.forked_from_author&&r.forked_from_author!=='null'?r.forked_from_author:null,linkedAssetIds:r.linked_asset_ids||[],versions:r.versions||[]};
+    forkedFromId:r.forked_from_id&&r.forked_from_id!=='null'?r.forked_from_id:null,forkedFromAuthor:r.forked_from_author&&r.forked_from_author!=='null'?r.forked_from_author:null,linkedAssetIds:r.linked_asset_ids||[],versions:r.versions||[],revision:Number(record.revision)||1};
 }
 
 function cxlOwnerFolders_(ownerUserId) {
@@ -2244,7 +2244,7 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
     if(!record)apiFail_('WORK_NOT_FOUND','Work was not found for this Owner');
     var revisionStarted=Date.now();
     if(!Number.isInteger(Number(options.expectedRevision))||Number(options.expectedRevision)<1)apiFail_('REVISION_REQUIRED','Expected revision is required for update');
-    if(Number(options.expectedRevision)!==Number(record.revision))apiFail_('REVISION_CONFLICT','Work revision is stale; reload before saving');
+    if(Number(options.expectedRevision)!==(Number(record.revision)||1))apiFail_('REVISION_CONFLICT','Work revision is stale; reload before saving');
     ownerTimingPhase_('revision_idempotency_validation',Date.now()-revisionStarted);
     var existingAsset=cxlAssetFromRecord_(record);if(String(existingAsset.userId||'')!==String(ownerUserId)&&String(record.row.user_id||'')!==String(ownerUserId))apiFail_('WORK_NOT_OWNED','Work is not owned by this authenticated Owner');
     asset=Object.assign({},existingAsset,assetInput);asset.id=id;asset.userId=ownerUserId;asset.createdAt=existingAsset.createdAt;asset.updatedAt=now;
@@ -2286,7 +2286,8 @@ function saveOwnerWork_(input,options) {
       else {record=parse_(existing.file_id);ownerTimingPhase_('canonical_drive_json_read',Date.now()-phaseStarted);phaseStarted=Date.now();}
       var canonicalOwner=String(record.row&&record.row.user_id||record.cxlAsset&&record.cxlAsset.userId||'');
       if(canonicalOwner!==String(input.ownerUserId||''))apiFail_('WORK_NOT_OWNED','Work is not owned by this authenticated Owner');
-      if(String(record.row.id)!==String(input.id)||Number(record.revision)!==Number(existing.revision))apiFail_('REVISION_CONFLICT','Work revision changed before save; reload before saving');
+      // Legacy migrated records may carry no revision; treat them as revision 1, as reads do.
+      if(String(record.row.id)!==String(input.id)||(Number(record.revision)||1)!==(Number(existing.revision)||1))apiFail_('REVISION_CONFLICT','Work revision changed before save; reload before saving');
       if(preloaded&&!preloadedMatches){
         if(record.lastWriteRequestId===input.writeRequestId){
           if(record.lastWriteFingerprint!==input.writeFingerprint)apiFail_('IDEMPOTENCY_KEY_REUSED','Update requestId was already used with different Work data');
@@ -2294,7 +2295,7 @@ function saveOwnerWork_(input,options) {
         }
         apiFail_('REVISION_CONFLICT','Work revision changed before save; reload before saving');
       }
-      if(Number(input.revision)!==Number(existing.revision))apiFail_('REVISION_CONFLICT','Work revision is stale; reload before saving');
+      if(Number(input.revision)!==(Number(existing.revision)||1))apiFail_('REVISION_CONFLICT','Work revision is stale; reload before saving');
       ownerTimingPhase_('locked_revision_read',Date.now()-phaseStarted);phaseStarted=Date.now();
     }
     else {var id=input.id||('asset_'+Date.now()+'_'+Utilities.getUuid().slice(0,6));record={schemaVersion:1,sourceSha256:null,revision:0,row:{id:id,user_id:input.ownerUserId||'google-temporary-owner',created_at:new Date().toISOString(),versions:[]},collaborationDraft:null,collaborationDraftMeta:null,mediaRecords:[]};}
@@ -2322,7 +2323,7 @@ function saveOwnerWork_(input,options) {
     var nextWorkMediaIds=mediaWorkReferencedIds_(cxlAssetFromRecord_(record)),retiredWorkMediaIds=Object.keys(previousWorkMediaIds).filter(function(mediaId){return !nextWorkMediaIds[mediaId]
       &&(record.mediaRecords||[]).some(function(item){return item.id===mediaId&&item.delivery==='vercel_proxy';});});
     record.mediaRecords=(record.mediaRecords||[]).filter(function(item){return item.delivery!=='vercel_proxy'||!!nextWorkMediaIds[item.id];});
-    record.revision=(record.revision||0)+1;
+    record.revision=existing?(Number(record.revision)||1)+1:(Number(record.revision)||0)+1;
     var publicAction=publicProjectionAction_(wasPublic,isPublic_(r));
     phaseStarted=Date.now();if(publicAction==='deactivate'){var publicSheet=sheet_(c.publicSheetId),pub=rowById_(publicSheet,r.id);if(pub){pub.active='false';setRow_(publicSheet,PUBLIC_HEADERS,pub,pub);}}
     ownerTimingPhase_('private_public_transition',Date.now()-phaseStarted);
