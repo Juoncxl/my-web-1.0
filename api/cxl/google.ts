@@ -149,12 +149,13 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
 }
 /**
  * Apps Script writes take ~16-18s and their response sometimes never arrives.
- * From 8s on, also poll the read-only Sheets/Drive state every 2.5s; whichever
+ * From 2s on, also poll the read-only Sheets/Drive state every 1.5s; whichever
  * confirms first wins. Before the commit none of the checks can match, and a
  * committed write is reported with the same data shape Apps Script returns.
+ * Logs showed writes already committed at the first 8s check, so start early.
  */
-const WRITE_VERIFY_START_MS = 8_000;
-const WRITE_VERIFY_INTERVAL_MS = 2_500;
+const WRITE_VERIFY_START_MS = 2_000;
+const WRITE_VERIFY_INTERVAL_MS = 1_500;
 async function raceWriteWithVerification(gasCall: Promise<unknown>, action: string, args: unknown[]): Promise<unknown> {
   let settled = false;
   gasCall.then(() => { settled = true; }, () => { settled = true; });
