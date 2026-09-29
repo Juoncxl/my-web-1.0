@@ -103,11 +103,26 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
   const started = Date.now();
   let finalHop = '';
   let outcome = 'error';
+  let postMs = -1;
+  let echoMs = -1;
   try {
-    // ContentService answers the POST with a 302 to a one-time googleusercontent URL;
-    // standard redirect following re-requests it with GET, as Google documents.
+    // ContentService answers the POST with a 302 to a one-time googleusercontent URL,
+    // which is read with GET, as Google documents. The POST leg is taken manually only
+    // to time the two legs separately; the echo leg still follows redirects normally.
     // gasEndpoint() strips a trailing /exec/ slash, whose extra redirect would reach doGet().
-    const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+    const signal = AbortSignal.timeout(timeoutMs);
+    let response = await fetch(url, { ...init, redirect: 'manual', signal });
+    postMs = Date.now() - started;
+    const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
+    if (location && new URL(location, url).hostname === 'script.googleusercontent.com') {
+      const echoStarted = Date.now();
+      response = await fetch(new URL(location, url), { method: 'GET', redirect: 'follow', signal });
+      echoMs = Date.now() - echoStarted;
+    } else if (response.status >= 300 && response.status < 400) {
+      // Never re-send the POST: a write could run twice. Surface the unexpected shape instead.
+      outcome = `redirect_${response.status}`;
+      throw new Error('Google Apps Script redirected to an unexpected destination');
+    }
     try { const final = new URL(response.url); finalHop = `${final.hostname}${final.pathname}`.replace(/\/macros\/s\/[^/]+\//, '/macros/s/*/'); } catch { /* diagnostics only */ }
     const text = await response.text();
     if (!response.ok) { outcome = `http_${response.status}`; throw new Error(`Google Apps Script responded with HTTP ${response.status}`); }
@@ -118,7 +133,7 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
     return parsed;
   } finally {
     // Runtime diagnostics deliberately omit endpoint URLs, payloads, IDs, and credentials.
-    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome, attempt }));
+    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome, attempt, postMs, echoMs }));
   }
 }
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
