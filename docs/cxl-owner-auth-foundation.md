@@ -42,7 +42,7 @@ The browser build flag is separate: `VITE_CXL_OWNER_AUTH_BACKEND=vercel`. It is 
 
 - Vercel auth mode sends same-origin requests and relies on the browser cookie; it never reads a Supabase access token. Core Works create/update requests include a CSRF header from the readable CSRF cookie and are checked against the exact configured Origin.
 - Owner API maps the verified OIDC subject to `CXL_OWNER_USER_ID`; request payload Owner IDs do not choose the trusted identity.
-- Profile/password changes, profile image writes, folder mutations, collaboration draft mutations, engagement writes, reports, and media upload/delete remain deferred and fail explicitly. Owner folders/read and Google Works core writes require their separate GO 6A write selection. Public anonymous reads remain available.
+- Profile/password changes, profile image writes, folder mutations, engagement writes, and reports remain deferred and fail explicitly. Collaboration drafts and their reference images now persist through the Google Works create/update contract; Work trash, restore, and permanent delete use Owner-only mutations. Public anonymous reads remain available.
 
 ## Google/Vercel setup before Preview validation
 

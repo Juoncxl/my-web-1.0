@@ -339,7 +339,24 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   }): Promise<boolean> => {
     try {
       const useNativeSaveSheet = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints);
-      const freshSource = input.mediaId ? await cxlDataService.media.getFreshDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename) : null;
+      let freshSource: string | null = null;
+      if (input.mediaId) {
+        try {
+          freshSource = await cxlDataService.media.getFreshDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename);
+        } catch {
+          // Google Work media already carries an association-checked same-origin
+          // proxy URL. Requesting download=1 keeps Drive IDs private while the
+          // server returns the original bytes as an attachment.
+          try {
+            const url = new URL(input.src, window.location.origin);
+            if (url.origin === window.location.origin && url.pathname === '/api/cxl/media'
+              && ['owner', 'public'].includes(url.searchParams.get('scope') || '')) {
+              url.searchParams.set('download', '1');
+              freshSource = `${url.pathname}${url.search}`;
+            }
+          } catch { /* fall back to fetching the displayed source below */ }
+        }
+      }
 
       if (!useNativeSaveSheet && freshSource && triggerBrowserUrlDownload(freshSource, input.filename)) return true;
 
@@ -607,7 +624,6 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
       {!embedded && <footer className="work-detail-footer" data-work-detail-actions={isOwner ? 'owner' : 'visitor'}>
         <div className="work-detail-footer-note">
-          <span><Heart aria-hidden="true" /> {asset.likesCount || 0}</span>
           <span>โดย {creator.displayName}</span>
         </div>
         <div className="work-detail-footer-actions">

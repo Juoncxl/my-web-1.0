@@ -78,8 +78,11 @@ export function createCxlDataService(
       create: createWork,
       update: updateWork,
       ...(ownerAuthBackend === 'vercel' ? {
-        softDelete: failedWrite('Work delete'), restore: failedWrite('Work restore'),
-        permanentDelete: failedWrite('Permanent delete'), emptyTrash: failedWrite('Trash cleanup'), fork: failedWrite('Work fork')
+        softDelete: googleDataAdapter.works.softDelete,
+        restore: googleDataAdapter.works.restore,
+        permanentDelete: googleDataAdapter.works.permanentDelete,
+        emptyTrash: failedWrite('Trash cleanup'),
+        fork: failedWrite('Work fork')
       } : {})
     },
     folders: ownerAuthBackend === 'vercel' ? {

@@ -11,9 +11,10 @@ const PUBLIC_ACTIONS = new Set(['profiles.getCreator','profiles.getPublic','sett
 const MEDIA_UPLOAD_ACTIONS = new Set(['media.upload.begin','media.upload.chunk','media.upload.finalize']);
 const MEDIA_CLEANUP_ACTION = 'media.cleanup';
 const MEDIA_REPAIR_ACTION = 'media.work.repairDeliveryChunks';
-const OWNER_ACTIONS = new Set(['works.create','works.update','folders.fetch','public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
+const WORK_DELETE_ACTIONS = new Set(['works.softDelete','works.restore','works.permanentDelete']);
+const OWNER_ACTIONS = new Set(['works.create','works.update', ...WORK_DELETE_ACTIONS, 'folders.fetch','public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
 const GAS_TIMEOUT_MS = 30_000;
-const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update']);
+const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update', ...WORK_DELETE_ACTIONS]);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
 
 function send(res: Response, status: number, body: unknown) {
@@ -23,6 +24,9 @@ function send(res: Response, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 function record(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
+function workMediaEnabled() {
+  return process.env.VERCEL_ENV === 'preview' || process.env.CXL_GOOGLE_WORK_MEDIA_ENABLED === '1';
+}
 function previewOwnerServerTiming(res: Response, raw: unknown, requestedAction: string) {
   if (process.env.VERCEL_ENV !== 'preview' || !record(raw) || !record(raw.meta) || !record(raw.meta.timing)) return;
   const timing = raw.meta.timing;
@@ -118,7 +122,7 @@ function validMediaUploadArgs(action: string, args: unknown[]): boolean {
       && Number(input.totalChunks) >= 1 && Number(input.totalChunks) <= 5
       && ['image/jpeg','image/png','image/webp','image/gif'].includes(String(input.mimeType))
       && typeof input.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.sha256)
-      && ['icon','gallery','prompt_example'].includes(String(input.purpose))
+      && ['icon','gallery','prompt_example','collab_reference'].includes(String(input.purpose))
       && (input.contextId === undefined || input.contextId === null || (typeof input.contextId === 'string' && input.contextId.length <= 128))
       && Number.isInteger(input.sortOrder) && Number(input.sortOrder) >= 0 && Number(input.sortOrder) <= 20
       && typeof input.isCover === 'boolean';
@@ -152,6 +156,9 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   if (action === 'works.create') return args.length === 2 && record(args[0]) && validWorkWriteOptions(action, args[1]);
   if (action === 'works.update') return args.length === 3 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0])
     && record(args[1]) && validWorkWriteOptions(action, args[2]);
+  if (action === 'works.softDelete' || action === 'works.restore' || action === 'works.permanentDelete') {
+    return args.length === 1 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0]);
+  }
   if (action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) return args.length === 0;
   if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
@@ -161,16 +168,18 @@ function ownerErrorStatus(code: unknown): number {
   if (code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'UNSUPPORTED_ACTION') return 400;
   if (code === 'REVISION_CONFLICT' || code === 'PUBLIC_SYNC_PENDING' || code === 'IDEMPOTENCY_KEY_REUSED' || code === 'CREATOR_MAPPING_CONFLICT') return 409;
   if (code === 'WORK_NOT_FOUND') return 404;
+  if (code === 'WORK_NOT_IN_TRASH') return 409;
   if (code === 'PUBLIC_SNAPSHOT_NOT_READY' || code === 'PUBLIC_SNAPSHOT_NOT_CONFIGURED' || code === 'PUBLIC_SNAPSHOT_WRITE_FAILED') return 503;
   if (code === 'WORK_NOT_OWNED') return 403;
   if (code === 'UNSUPPORTED_MEDIA_MUTATION' || code === 'UNSUPPORTED_COLLAB_DRAFT') return 422;
   if (code === 'CREATOR_MAPPING_MISSING' || code === 'CREATOR_MAPPING_AMBIGUOUS' || code === 'FOLDER_SCHEMA_INVALID') return 503;
   if (code === 'OWNER_REQUIRED') return 401;
   if (code === 'MEDIA_UPLOAD_NOT_CONFIGURED' || code === 'MEDIA_UPLOAD_FOLDER_NOT_PRIVATE') return 503;
+  if (code === 'WORK_MEDIA_CACHE_INVALIDATION_FAILED') return 503;
   if (code === 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' || code === 'MEDIA_UPLOAD_SESSION_EXPIRED' || code === 'MEDIA_UPLOAD_SESSION_CLOSED') return 409;
   if (code === 'MEDIA_UPLOAD_CHUNK_CHECKSUM' || code === 'MEDIA_UPLOAD_CHUNK_CONFLICT' || code === 'MEDIA_UPLOAD_FINAL_CHECKSUM' || code === 'MEDIA_UPLOAD_MIME_MISMATCH') return 422;
   if (typeof code === 'string' && code.startsWith('INVALID_MEDIA_UPLOAD')) return 400;
-  if (code === 'INVALID_FOLDER' || code === 'INVALID_WORK' || code === 'INVALID_REQUEST_ID' || code === 'REVISION_REQUIRED') return 400;
+  if (code === 'INVALID_FOLDER' || code === 'INVALID_WORK' || code === 'INVALID_COLLAB_DRAFT' || code === 'INVALID_REQUEST_ID' || code === 'REVISION_REQUIRED') return 400;
   return 502;
 }
 export function validateAssetList(value: unknown): Asset[] {
@@ -250,8 +259,8 @@ export default async function handler(req: Request, res: Response) {
     if ((MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || ((action === 'works.create' || action === 'works.update')
       && record(body.args[action === 'works.create' ? 1 : 2]) && Array.isArray((body.args[action === 'works.create' ? 1 : 2] as Record<string, unknown>).mediaIds)
       && ((body.args[action === 'works.create' ? 1 : 2] as Record<string, unknown>).mediaIds as unknown[]).length > 0))
-      && process.env.VERCEL_ENV !== 'preview') {
-      return send(res, 404, { ok: false, error: 'Google Work media writes are available only in Preview' });
+      && !workMediaEnabled()) {
+      return send(res, 404, { ok: false, error: 'Google Work media writes are not enabled for this deployment' });
     }
     const authMode = selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND);
     if (action === MEDIA_REPAIR_ACTION && authMode !== 'vercel')
@@ -272,7 +281,7 @@ export default async function handler(req: Request, res: Response) {
     if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
     if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
-    if ((action === 'works.create' || action === 'works.update' || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
+    if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action) || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
       && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
       return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
     }

@@ -13,7 +13,7 @@ import { callGoogleBackend } from './googleTransport';
 import { filterGoogleWorks } from '../../googleWorksRead';
 import { toGoogleWorkUpdateRequest } from './googleWorkWrite';
 import { hydrateGoogleWorkMediaResult, prepareGoogleWorkMedia, uploadGoogleWorkMedia, type GoogleWorkAssetInput } from './googleWorkMedia';
-import { warmAfterPublicWorkMutation } from '../../../lib/publicWorksCache';
+import { warmAfterPublicWorkMutation, warmPublicWorksCache } from '../../../lib/publicWorksCache';
 
 type Operation = (...args: any[]) => any;
 type GoogleWorkWriteResult = Awaited<ReturnType<CxlDataService['works']['create']>>;
@@ -81,6 +81,19 @@ async function fetchPublicSnapshot(options: FetchAssetsOptions = {}) {
   return hydrateGoogleWorkMediaResult({ data: summaries, error: null });
 }
 
+type GoogleWorkStatusAction = 'works.softDelete' | 'works.restore' | 'works.permanentDelete';
+type GoogleWorkStatusResult = Awaited<ReturnType<CxlDataService['works']['softDelete']>>;
+
+async function mutateGoogleWorkStatus(action: GoogleWorkStatusAction, id: string): Promise<GoogleWorkStatusResult> {
+  try {
+    const result = await callGoogleBackend<GoogleWorkStatusResult>(action, [id]);
+    if (result.success) warmPublicWorksCache();
+    return result;
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : `Google ${action} failed` };
+  }
+}
+
 /** Inactive Google implementation of the current CXL data contract. */
 export const googleDataAdapter = {
   works: {
@@ -95,9 +108,9 @@ export const googleDataAdapter = {
     }) as CxlDataService['works']['fetch'],
     create: ((asset, options) => saveGoogleWork('works.create', asset as GoogleWorkAssetInput, options)) as CxlDataService['works']['create'],
     update: ((id, updates, options) => saveGoogleWork('works.update', id, updates, options)) as CxlDataService['works']['update'],
-    softDelete: remote<CxlDataService['works']['softDelete']>('works.softDelete'),
-    restore: remote<CxlDataService['works']['restore']>('works.restore'),
-    permanentDelete: remote<CxlDataService['works']['permanentDelete']>('works.permanentDelete'),
+    softDelete: ((id: string) => mutateGoogleWorkStatus('works.softDelete', id)) as CxlDataService['works']['softDelete'],
+    restore: ((id: string) => mutateGoogleWorkStatus('works.restore', id)) as CxlDataService['works']['restore'],
+    permanentDelete: ((id: string) => mutateGoogleWorkStatus('works.permanentDelete', id)) as CxlDataService['works']['permanentDelete'],
     emptyTrash: remote<CxlDataService['works']['emptyTrash']>('works.emptyTrash'),
     fork: remote<CxlDataService['works']['fork']>('works.fork'),
     exportVault: remote<CxlDataService['works']['exportVault']>('works.exportVault'),

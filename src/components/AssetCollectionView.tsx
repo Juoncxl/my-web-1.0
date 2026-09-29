@@ -39,9 +39,9 @@ interface AssetCollectionViewProps {
   onEditAsset: (asset: Asset) => void;
   onDeleteAsset: (asset: Asset) => void;
   onSelectStatusFilter: (status: AssetStatus | 'all') => void;
-  onLike: (assetId: string) => void;
-  onBookmark: (assetId: string) => void;
-  onFork: (asset: Asset) => void;
+  onLike?: (assetId: string) => void;
+  onBookmark?: (assetId: string) => void;
+  onFork?: (asset: Asset) => void;
   onReport: (asset: Asset) => void;
   onRestore: (assetId: string) => void;
   onPermanentDelete: (assetId: string) => void;

@@ -29,7 +29,6 @@ import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 import { isGoogleWorksReadBackend } from './data/cxlDataService';
-import { isVercelOwnerAuth } from './lib/auth/ownerAuthBackend';
 import { CATEGORIES, STATUS_PRESETS } from './lib/constants';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
@@ -199,7 +198,10 @@ function MainApp() {
     toggleBookmark,
     toggleLike
   } = useEngagementData(resolvedUserId, reportOperationError);
-  const engagementActionsAvailable = !isVercelOwnerAuth;
+  // This release has one authenticated Owner and read-only public visitors.
+  // Likes, bookmarks, and forks require visitor accounts, so keep them out of
+  // the active product surface while the Google owner backend is in use.
+  const engagementActionsAvailable = false;
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
   const visibleOperationError = operationError || assetLoadError;
 
@@ -551,7 +553,7 @@ function MainApp() {
     onDeleteAsset: handleDeleteVaultAsset,
     onLike: engagementActionsAvailable ? handleLikeAsset : undefined,
     onBookmark: engagementActionsAvailable ? handleToggleBookmark : undefined,
-    onFork: handleForkAsset,
+    onFork: engagementActionsAvailable ? handleForkAsset : undefined,
     onReport: handleOpenReport,
     onRestore: handleRestoreAsset,
     onPermanentDelete: handlePermanentDeleteAsset,
@@ -646,7 +648,7 @@ function MainApp() {
         onRestore={handleRestoreAsset}
         onLike={engagementActionsAvailable ? handleLikeAsset : undefined}
         onBookmark={engagementActionsAvailable ? handleToggleBookmark : undefined}
-        onFork={handleForkAsset}
+        onFork={engagementActionsAvailable ? handleForkAsset : undefined}
         onReport={handleOpenReport}
         onSelectLinkedAsset={(linkedId) => {
           const target = assets.find(a => a.id === linkedId);

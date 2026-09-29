@@ -16,7 +16,7 @@ type PendingMedia = {
 export interface StandardWorkMediaDraft {
   mediaId: string;
   source: string;
-  purpose: 'icon' | 'gallery' | 'prompt_example';
+  purpose: AssetMediaPurpose;
   contextId?: string | null;
   sortOrder: number;
   isCover: boolean;

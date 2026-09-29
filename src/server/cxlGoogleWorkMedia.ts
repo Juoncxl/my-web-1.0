@@ -168,7 +168,9 @@ async function waitForDrain(res: Response) {
 }
 
 export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
-  if (process.env.VERCEL_ENV !== 'preview') return failure(res, 404, 'MEDIA_NOT_FOUND', 'Media is unavailable');
+  if (process.env.VERCEL_ENV !== 'preview' && process.env.CXL_GOOGLE_WORK_MEDIA_ENABLED !== '1') {
+    return failure(res, 404, 'MEDIA_NOT_FOUND', 'Media is unavailable');
+  }
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return failure(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
@@ -178,10 +180,12 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
   try { params = new URL(req.url || '/', 'https://cxl.invalid').searchParams; }
   catch { return failure(res, 400, 'INVALID_MEDIA_READ_REQUEST', 'Invalid media read request'); }
   const scope = params.get('scope');
+  const download = params.get('download');
   const workId = params.get('workId') || '';
   const ref = params.get('ref') || '';
   const mediaId = ref.startsWith('media:') ? ref.slice('media:'.length) : '';
   if (params.getAll('scope').length !== 1 || params.getAll('workId').length !== 1 || params.getAll('ref').length !== 1
+    || params.getAll('download').length > 1 || (download !== null && download !== '1')
     || (scope !== 'owner' && scope !== 'public') || !/^asset_[A-Za-z0-9_-]{1,96}$/.test(workId)
     || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(mediaId)
     || ref !== `media:${mediaId}`) {
@@ -194,7 +198,9 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
     return failure(res, 503, 'MEDIA_READ_UNAVAILABLE', 'Media is unavailable');
   }
 
-  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Cache-Control', scope === 'public' && download !== '1'
+    ? 'public, max-age=60, s-maxage=60, stale-while-revalidate=60'
+    : 'private, no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   const digest = createHash('sha256');
   let metadata: ReturnType<typeof validateChunk> | undefined;
@@ -215,6 +221,10 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
         res.statusCode = 200;
         res.setHeader('Content-Type', chunk.mimeType);
         res.setHeader('Content-Length', String(chunk.totalFileSize));
+        if (download === '1') {
+          const extension = chunk.mimeType === 'image/jpeg' ? 'jpg' : chunk.mimeType.split('/')[1];
+          res.setHeader('Content-Disposition', `attachment; filename="cxl-${workId}-${mediaId}.${extension}"`);
+        }
       }
       digest.update(chunk.bytes);
       let accepted: boolean;

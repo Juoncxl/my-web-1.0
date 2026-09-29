@@ -109,10 +109,35 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
   };
   const coverItem = draft.mediaDraft?.items.find(item => item.src === draft.coverImage);
   const workMediaDraft: StandardWorkMediaDraft[] = [];
-  if (!isCollaboration) {
-    if (draft.icon.type === 'image' && isLocalMediaSource(draft.icon.value) && draft.icon.mediaId) {
-      workMediaDraft.push({ mediaId: draft.icon.mediaId, source: draft.icon.value, purpose: 'icon', sortOrder: 0, isCover: false, mimeType: draft.icon.mimeType });
-    }
+  const canonicalCollaboration = isCollaboration ? cloneCreatorCollaborationDraft(draft.collaboration) : null;
+  if (draft.icon.type === 'image' && isLocalMediaSource(draft.icon.value) && draft.icon.mediaId) {
+    workMediaDraft.push({ mediaId: draft.icon.mediaId, source: draft.icon.value, purpose: 'icon', sortOrder: 0, isCover: false, mimeType: draft.icon.mimeType });
+  }
+  if (isCollaboration && canonicalCollaboration) {
+    canonicalCollaboration.participants.forEach(participant => {
+      participant.referenceImages = participant.referenceImages.map((image, sortOrder) => {
+        const mediaId = image.mediaId || (isLocalMediaSource(image.src) ? crypto.randomUUID() : undefined);
+        if (isLocalMediaSource(image.src)) {
+          if (!mediaId) throw new Error('เบราว์เซอร์ไม่สามารถสร้าง media identity ได้');
+          workMediaDraft.push({
+            mediaId,
+            source: image.src,
+            purpose: 'collab_reference',
+            contextId: participant.id,
+            sortOrder,
+            isCover: false,
+            mimeType: image.mimeType
+          });
+        }
+        return {
+          ...image,
+          mediaId: mediaId || undefined,
+          src: canonicalProxyMediaSource(image.src, mediaId),
+          localBlobKey: undefined
+        };
+      });
+    });
+  } else {
     draft.mediaDraft?.items.forEach((item, sortOrder) => {
       if (isLocalMediaSource(item.src) && item.mediaId) {
         workMediaDraft.push({
@@ -146,8 +171,8 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
       imagePromptToolModel: draft.imagePromptToolModel.trim(),
       workStatus: draft.workStatus
     },
-    collaboration: isCollaboration ? cloneCreatorCollaborationDraft(draft.collaboration) : null,
-    publicCollaboration: isCollaboration ? createPublicCollaborationSnapshot(draft.collaboration) : null,
+    collaboration: canonicalCollaboration,
+    publicCollaboration: canonicalCollaboration ? createPublicCollaborationSnapshot(canonicalCollaboration) : null,
     collaborationAssetId: isCollaboration ? null : draft.collaborationAssetId,
     contentBlocks: regularBlocks,
     content: draft.content,

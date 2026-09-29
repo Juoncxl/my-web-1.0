@@ -1,4 +1,4 @@
-import type { Asset } from '../../../types';
+import type { Asset, PublicAssetCollaboration } from '../../../types';
 import { isInlineMediaUrl, mediaReference } from '../../../lib/workMedia';
 import type { StandardWorkMediaDraft } from '../../../lib/workMedia';
 import { callGoogleBackend } from './googleTransport';
@@ -41,10 +41,10 @@ function copyAsset(asset: GoogleWorkAssetInput): GoogleWorkAssetInput {
   return JSON.parse(JSON.stringify(asset)) as GoogleWorkAssetInput;
 }
 
-/** Convert only standard Work local media sources into canonical refs. */
+/** Convert Work local media sources into canonical refs before sending them to Google. */
 export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promise<PreparedGoogleWorkMedia> {
   const asset = copyAsset(input);
-  const drafts = input.category === 'collab' ? [] : [...(input.workMediaDraft || [])];
+  const drafts = [...(input.workMediaDraft || [])];
   const ids = new Set<string>();
   const pending: GooglePendingWorkMedia[] = [];
   const byMediaId = new Map<string, StandardWorkMediaDraft>();
@@ -74,10 +74,6 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
   };
 
   if (asset.authorAvatar && isInlineMediaUrl(asset.authorAvatar)) asset.authorAvatar = undefined;
-  if (input.category === 'collab') {
-    delete asset.workMediaDraft;
-    return { asset, pending: [] };
-  }
 
   if (asset.icon?.type === 'image' && asset.icon.value) {
     const source = asset.icon.value;
@@ -108,6 +104,31 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
     return { ...block, body, mediaId: mediaId || undefined, localBlobKey: undefined };
   });
 
+  const rewriteCollaboration = <T extends PublicAssetCollaboration | NonNullable<Asset['collaboration']>>(
+    collaboration: T | null | undefined
+  ): T | null | undefined => {
+    if (!collaboration) return collaboration;
+    const cloned = JSON.parse(JSON.stringify(collaboration)) as T;
+    cloned.participants = cloned.participants.map(participant => ({
+      ...participant,
+      referenceImages: participant.referenceImages.map((image, sortOrder) => {
+        const matching = drafts.find(item => item.purpose === 'collab_reference'
+          && item.contextId === participant.id && item.sortOrder === sortOrder);
+        const mediaId = image.mediaId || matching?.mediaId;
+        return {
+          ...image,
+          src: toReference(image.src, mediaId),
+          mediaId: mediaId || undefined,
+          localBlobKey: undefined
+        };
+      })
+    }));
+    return cloned;
+  };
+
+  asset.collaboration = rewriteCollaboration(asset.collaboration);
+  asset.publicCollaboration = rewriteCollaboration(asset.publicCollaboration);
+
   delete (asset as GoogleWorkAssetInput).workMediaDraft;
   return { asset, pending };
 }
@@ -129,28 +150,29 @@ function mediaIdFromRef(value: string | undefined): string | null {
   return match?.[1] || null;
 }
 
-export function googleWorkMediaProxyUrl(workId: string, mediaId: string, scope: 'owner' | 'public'): string {
+export function googleWorkMediaProxyUrl(workId: string, mediaId: string, scope: 'owner' | 'public', version?: string): string {
   const params = new URLSearchParams({ scope, workId, ref: mediaReference(mediaId) });
+  if (version) params.set('v', version);
   return `/api/cxl/media?${params.toString()}`;
 }
 
-/** Convert only attached standard Work proxy media into display URLs in a read object. */
+/** Convert attached Work proxy media into display URLs in a read object. */
 export function hydrateGoogleWorkMedia(asset: Asset): Asset {
-  if (asset.category === 'collab') return asset;
   const scope = asset.visibility === 'public' && asset.isPublic === true && !asset.deletedAt ? 'public' : 'owner';
+  const version = asset.updatedAt || asset.createdAt;
   const records = (asset.media || []).filter(item => item.delivery === 'vercel_proxy'
-    && item.assetId === asset.id && ['icon', 'gallery', 'prompt_example'].includes(item.purpose));
+    && item.assetId === asset.id && ['icon', 'gallery', 'prompt_example', 'collab_reference'].includes(item.purpose));
   if (!records.length) return asset;
 
   const urlFor = (id: string | null) => {
     if (!id) return undefined;
     const item = records.find(record => record.id === id);
-    return item ? googleWorkMediaProxyUrl(asset.id, item.id, scope) : undefined;
+    return item ? googleWorkMediaProxyUrl(asset.id, item.id, scope, version) : undefined;
   };
   const media = (asset.media || []).map(item => {
     const signedUrl = item.delivery === 'vercel_proxy' && item.assetId === asset.id
-      && ['icon', 'gallery', 'prompt_example'].includes(item.purpose)
-      ? googleWorkMediaProxyUrl(asset.id, item.id, scope) : item.signedUrl;
+      && ['icon', 'gallery', 'prompt_example', 'collab_reference'].includes(item.purpose)
+      ? googleWorkMediaProxyUrl(asset.id, item.id, scope, version) : item.signedUrl;
     return signedUrl ? { ...item, signedUrl } : item;
   });
 
@@ -173,6 +195,22 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
     const imageUrl = urlFor(id);
     return imageUrl ? { ...block, body: imageUrl, mediaId: id || undefined } : block;
   });
+  const hydrateCollaboration = <T extends PublicAssetCollaboration | NonNullable<Asset['collaboration']>>(
+    collaboration: T | null | undefined
+  ): T | null | undefined => {
+    if (!collaboration) return collaboration;
+    return {
+      ...collaboration,
+      participants: collaboration.participants.map(participant => ({
+        ...participant,
+        referenceImages: participant.referenceImages.map(image => {
+          const id = image.mediaId || mediaIdFromRef(image.src);
+          const src = urlFor(id) || image.src;
+          return { ...image, src, mediaId: id || undefined };
+        })
+      }))
+    } as T;
+  };
 
   return {
     ...asset,
@@ -183,7 +221,9 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
       : asset.icon,
     ...(previewImages ? { previewImages } : {}),
     ...(previewImage !== undefined ? { previewImage } : {}),
-    ...(contentBlocks ? { contentBlocks } : {})
+    ...(contentBlocks ? { contentBlocks } : {}),
+    collaboration: hydrateCollaboration(asset.collaboration),
+    publicCollaboration: hydrateCollaboration(asset.publicCollaboration)
   };
 }
 

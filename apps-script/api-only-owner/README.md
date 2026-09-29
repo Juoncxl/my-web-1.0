@@ -4,11 +4,11 @@ This project is a separate server-to-server endpoint for Vercel. Keep the existi
 
 ## Exposed surface
 
-- `doPost`: accepts the Owner Works/folder contracts, public reads over the Vercel server bridge, the Vercel Owner-only public snapshot rebuild, Preview-only standard Work `media.upload.*` actions, and isolated `media.poc.*` actions after shared-secret and configured Owner identity checks.
+- `doPost`: accepts the Owner Works/folder contracts, soft-delete/restore/permanent-delete actions, public reads over the Vercel server bridge, the Vercel Owner-only public snapshot rebuild, standard Work and Collaboration-reference `media.upload.*` actions, and isolated `media.poc.*` actions after shared-secret and configured Owner identity checks.
 - `doGet`: returns a JSON `Method not allowed` envelope. It does not serve HTML.
 - Every helper function ends in `_`, so it is not callable through `google.script.run`.
 
-GO 7A.2 read validation is complete. This source contains the GO 7B.1 write, GO 7B.2 read/hydration, and GO 7B.3 replace/remove plus orphan-cleanup implementations; none of GO 7B is live validated yet. Vercel media actions remain Preview-only, and the runtime still needs Preview configuration and live validation at GO 7B.4.
+GO 7A.2 read validation is complete. This source contains the standard Work media flow plus Collaboration draft/reference media and Work trash operations. The Vercel bridge enables media automatically in Preview; Production additionally requires `CXL_GOOGLE_WORK_MEDIA_ENABLED=1`. Deploy and validate the API-only Apps Script source before enabling that Production flag.
 
 Apps Script `ContentService` does not expose a method to set an arbitrary HTTP status code. Error replies therefore carry a `httpStatus` and stable `code` in the JSON envelope; the Vercel Owner proxy translates `OWNER_API_UNAUTHORIZED` to HTTP 401. Malformed JSON and unknown actions fail closed before any action dispatch.
 
@@ -69,7 +69,7 @@ The API script uses the configured resources by ID and contains no hardcoded pri
 5. Deploy the new project as a Web App with **Execute as: the API deployment account**. Set access to **Anyone** only for this API-only project so Vercel server requests can reach `doPost`. This does not change the access policy of the existing Owner Web App, which remains **Only myself**.
 6. Save the new `/exec` URL as Vercel Preview's server-only `CXL_GAS_OWNER_URL`. Keep `CXL_API_SHARED_SECRET` server-only. Do not put either value in `VITE_*`, a client bundle, or a request URL.
 7. Before enabling any write flag, validate the endpoint with read-only `works.fetch` via the Vercel Owner proxy. Confirm missing/wrong secret fail closed and the existing Owner UI still works at its unchanged private deployment.
-8. GO 7A.2 media reads are live validated. GO 7B.1–7B.3 source is not deployed; keep the existing Preview read-only until the GO 7B.4 live validation gate. Do not change Production or `main` in this step.
+8. Deploy the API-only Apps Script revision before its matching Vercel revision. Validate create/edit, Collaboration references, public image reads, trash/restore, and permanent delete in the controlled environment. Enable `CXL_GOOGLE_WORK_MEDIA_ENABLED=1` in Production only after those checks pass.
 
 ## GO 7B.1 standard Work media write foundation
 
@@ -93,7 +93,7 @@ The locked Work write derives previous and next media references from the canoni
 
 Finalized unassociated uploads expire 24 hours after finalization. Retired files remain private for 24 hours after the Work commit, then become eligible for trashing. The authenticated Preview-only `media.cleanup` action scans at most five Work-media session/manifest records per invocation, skips active uploads, verifies the current Owner/Work association, and checks the exact private Work-media folder/name before deleting. POC, legacy/Supabase media, and unrelated Drive files are outside its key/folder contract. Cleanup retains a deleted media identity tombstone so the same `mediaId` cannot be reused. GO 7B.3 is implementation complete but not deployed or live validated; that remains GO 7B.4.
 
-The bridge still reuses the GO 6A Work persistence and public projection logic: Drive revision JSON remains canonical; private/public indexes and `WorkCreatorMap` are updated through the existing sync path; summary JSON uses the current allowlist; create retry keys and update revisions are enforced; and public-sync partial failure returns `PUBLIC_SYNC_PENDING`. Collaboration media and legacy backfill remain deferred. It does not expose private Owner functions through `google.script.run`.
+The bridge still reuses the GO 6A Work persistence and public projection logic: Drive revision JSON remains canonical; private/public indexes and `WorkCreatorMap` are updated through the existing sync path; summary JSON uses the current allowlist; create retry keys and update revisions are enforced; and public-sync partial failure returns `PUBLIC_SYNC_PENDING`. Collaboration reference media uses the same private Drive and Vercel proxy contract. Legacy media backfill remains deferred. It does not expose private Owner functions through `google.script.run`.
 
 Because `doPost` is public at the transport layer, the shared secret is the server-to-server credential. Keep it high entropy, rotate it if exposed, and keep Owner OIDC/session verification in Vercel. Apps Script does not independently verify the browser Owner session.
 
