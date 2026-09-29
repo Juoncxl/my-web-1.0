@@ -74,7 +74,25 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
     return !error && data.user?.id === ownerId ? data.user.id : null;
   } catch { return null; }
 }
+// Apps Script usually answers reads in ~1-2s, but the googleusercontent hop sometimes
+// stalls until its one-time URL expires (404). Retry reads once with a shorter budget;
+// writes are never retried so a stalled response cannot duplicate a mutation.
+const GAS_READ_ATTEMPT_TIMEOUT_MS = 12_000;
+function isRetryableRead(action: string) {
+  return action.startsWith('public.') || action === 'works.fetch' || action === 'folders.fetch';
+}
 async function gasJson(url: string, init: RequestInit, action: string) {
+  if (!isRetryableRead(action)) return gasJsonAttempt(url, init, action, GAS_TIMEOUT_MS, 1);
+  try {
+    return await gasJsonAttempt(url, init, action, GAS_READ_ATTEMPT_TIMEOUT_MS, 1);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const retryable = (error instanceof Error && error.name === 'TimeoutError') || /time.?out|HTTP 404|HTTP 5\d\d/i.test(message);
+    if (!retryable) throw error;
+    return gasJsonAttempt(url, init, action, GAS_READ_ATTEMPT_TIMEOUT_MS, 2);
+  }
+}
+async function gasJsonAttempt(url: string, init: RequestInit, action: string, timeoutMs: number, attempt: number) {
   const started = Date.now();
   let finalHop = '';
   let outcome = 'error';
@@ -82,7 +100,7 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     // ContentService answers the POST with a 302 to a one-time googleusercontent URL;
     // standard redirect following re-requests it with GET, as Google documents.
     // gasEndpoint() strips a trailing /exec/ slash, whose extra redirect would reach doGet().
-    const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS) });
+    const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
     try { const final = new URL(response.url); finalHop = `${final.hostname}${final.pathname}`.replace(/\/macros\/s\/[^/]+\//, '/macros/s/*/'); } catch { /* diagnostics only */ }
     const text = await response.text();
     if (!response.ok) { outcome = `http_${response.status}`; throw new Error(`Google Apps Script responded with HTTP ${response.status}`); }
@@ -93,7 +111,7 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     return parsed;
   } finally {
     // Runtime diagnostics deliberately omit endpoint URLs, payloads, IDs, and credentials.
-    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome }));
+    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome, attempt }));
   }
 }
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
