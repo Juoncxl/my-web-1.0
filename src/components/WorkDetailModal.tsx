@@ -553,38 +553,38 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
                   {tagCopyStatus === 'success' ? 'คัดลอกแท็กแล้ว' : tagCopyStatus === 'error' ? 'คัดลอกแท็กไม่สำเร็จ' : ''}
                 </span>
               </div>}
-              {publicCollaboration.platforms.map(platform => <span key={platform}>{platform}</span>)}
+              {publicCollaboration.platforms?.map(platform => <span key={platform}>{platform}</span>)}
             </div>
           </div>
         </section>}
 
-        {display.isCollaborationFocused && publicCollaboration?.sharedInformation.length ? <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content">
+        {display.isCollaborationFocused && publicCollaboration?.sharedInformation?.length ? <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ข้อมูลกลางของคอลแลป</strong><span>คัดลอกไปใช้สร้างหรือโปรโมตผลงานได้</span></div></div></div>
           <div className="work-detail-blocks">{publicCollaboration.sharedInformation.map(item => <article className={`work-detail-block work-detail-collaboration-shared-item ${item.type === 'code' ? 'is-prompt work-detail-collaboration-code-block' : 'is-text'}`} data-collaboration-shared-information key={item.id}>
             <header><div><span>{item.type === 'code' ? 'ข้อมูลแบบโค้ด' : 'ข้อความ'}</span><strong>{item.title || 'ข้อมูลกลางของคอลแลป'}</strong></div>{isMeaningfulCopyText(item.content, item.title) && <CopyButton copied={copiedKey === `collaboration-${item.id}`} label="คัดลอก" onClick={() => copyToClipboard(item.content, `collaboration-${item.id}`)} />}</header>
             {item.type === 'code' ? <CodePresentation code={item.content} view={codeView} onViewChange={setCodeView} /> : <p>{item.content}</p>}
-            {(item.appScope !== 'unspecified' || item.platforms.length > 0) && <footer className="work-detail-collaboration-scope"><span>{item.appScope === 'all_apps' ? 'ใช้กับทุกแอป' : item.platforms.join(' · ')}</span></footer>}
+            {(item.appScope === 'all_apps' || Boolean(item.platforms?.length)) && <footer className="work-detail-collaboration-scope"><span>{item.appScope === 'all_apps' ? 'ใช้กับทุกแอป' : item.platforms?.join(' · ')}</span></footer>}
           </article>)}</div>
         </section> : null}
 
-        {display.isCollaborationFocused && publicCollaboration?.deadlines.length ? <section className="work-detail-section work-detail-collaboration-deadlines" data-work-detail-section="collaboration-deadlines">
+        {display.isCollaborationFocused && publicCollaboration?.deadlines?.length ? <section className="work-detail-section work-detail-collaboration-deadlines" data-work-detail-section="collaboration-deadlines">
           <div className="work-detail-section-heading"><div><Clock3 aria-hidden="true" /><div><strong>กำหนดส่ง</strong><span>กำหนดการกลางของคอลแลป</span></div></div></div>
           <div className="work-detail-collaboration-deadline-grid">{publicCollaboration.deadlines.map(deadline => <article key={deadline.id}><strong>{deadline.label || 'กำหนดส่ง'}</strong><time dateTime={deadline.date}>{deadline.date || 'ยังไม่ระบุวันที่'}</time></article>)}</div>
         </section> : null}
 
-        {display.isCollaborationFocused && publicCollaboration?.participants.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
+        {display.isCollaborationFocused && publicCollaboration?.participants?.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div></div>
           <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => {
             const participantTagText = participantTagCopy(participant);
             const participantContentText = participantContentCopy(participant);
             return <article key={participant.id}>
             <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
-            <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
+            <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms?.map(platform => <span key={platform}>{platform}</span>)}</div>
             {participant.externalWorkName && <p><strong>ผลงาน:</strong> {participant.externalWorkName}</p>}
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
-            {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
+            {Boolean(participant.referenceImages?.length) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
             {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
           </article>;
           })}</div>

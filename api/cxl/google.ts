@@ -50,7 +50,11 @@ function gasEndpoint(raw: string | undefined): URL | null {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    return url.protocol === 'https:' && url.hostname === 'script.google.com' && /^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname) ? url : null;
+    if (url.protocol !== 'https:' || url.hostname !== 'script.google.com'
+      || !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname)) return null;
+    // A slash after /exec can cause an HTTP redirect that turns POST into GET.
+    url.pathname = url.pathname.replace(/\/$/, '');
+    return url;
   } catch { return null; }
 }
 function parseBody(req: Request): unknown {
@@ -73,7 +77,25 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 async function gasJson(url: string, init: RequestInit, action: string) {
   const started = Date.now();
   try {
-    const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS) });
+    const signal = AbortSignal.timeout(GAS_TIMEOUT_MS);
+    let response = await fetch(url, { ...init, redirect: 'manual', signal });
+    // ContentService redirects its response to a one-time googleusercontent URL.
+    // Follow that URL with GET, but keep the JSON POST on the Apps Script URL.
+    // Automatic 301/302 following can otherwise turn the API call into doGet().
+    for (let redirects = 0; response.status >= 300 && response.status < 400 && redirects < 3; redirects += 1) {
+      const location = response.headers.get('location');
+      if (!location) throw new Error('Google Apps Script redirect has no destination');
+      const next = new URL(location, url);
+      if (next.protocol !== 'https:') throw new Error('Google Apps Script redirect is not secure');
+      if (next.hostname === 'script.googleusercontent.com') {
+        response = await fetch(next, { method: 'GET', redirect: 'manual', signal });
+      } else if (next.origin === new URL(url).origin && next.pathname === new URL(url).pathname) {
+        response = await fetch(next, { ...init, redirect: 'manual', signal });
+      } else {
+        throw new Error('Google Apps Script redirected outside the configured deployment');
+      }
+    }
+    if (response.status >= 300 && response.status < 400) throw new Error('Google Apps Script redirected too many times');
     const text = await response.text();
     if (!response.ok) throw new Error(`Google Apps Script responded with HTTP ${response.status}`);
     let parsed: unknown;
