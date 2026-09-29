@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
 import { randomUUID } from 'node:crypto';
-import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -93,6 +93,12 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 // Owner reads (the full profile/Vault list) can legitimately exceed 10s, so they keep
 // a long budget: a short cut-off hid private Works and left cards without a revision.
 function readRetryPlan(action: string): { timeoutMs: number; attempts: number } | null {
+  // Media upload steps are idempotent in Apps Script (same uploadId/chunk bytes/sha256 match the
+  // stored session instead of creating duplicates), so a stalled step is safe to resend.
+  if (action === 'media.upload.begin') return { timeoutMs: 12_000, attempts: 3 };
+  if (action === 'media.upload.chunk') return { timeoutMs: 20_000, attempts: 2 };
+  // Finalize assembles the file and can run long; a second attempt only waits on the first's lock.
+  if (action === 'media.upload.finalize') return { timeoutMs: 45_000, attempts: 1 };
   if (action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 25_000, attempts: 1 };
   if (action === 'public.works.detail') return { timeoutMs: 10_000, attempts: 2 };
   if (action.startsWith('public.')) return { timeoutMs: 5_000, attempts: 3 };
@@ -107,6 +113,8 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       const retryable = (error instanceof Error && error.name === 'TimeoutError') || /time.?out|HTTP 404|HTTP 5\d\d/i.test(message);
+      // A media upload step whose script ran but whose answer was lost is handled by the caller.
+      if (MEDIA_UPLOAD_ACTIONS.has(action) && record(error) && error.scriptCompleted === true) throw error;
       if (!retryable || attempt >= plan.attempts) throw error;
     }
   }
@@ -129,7 +137,12 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
     if (location && new URL(location, url).hostname === 'script.googleusercontent.com') {
       const echoStarted = Date.now();
       // Do not re-request a stalled echo URL: Google then routes it to doGet() (METHOD_NOT_ALLOWED).
-      response = await fetch(new URL(location, url), { method: 'GET', redirect: 'follow', signal });
+      try {
+        response = await fetch(new URL(location, url), { method: 'GET', redirect: 'follow', signal });
+      } catch (echoError) {
+        // The script already ran (its redirect arrived); only the answer was lost.
+        throw Object.assign(echoError instanceof Error ? echoError : new Error('Google Apps Script response was lost'), { scriptCompleted: true });
+      }
       echoMs = Date.now() - echoStarted;
     } else if (response.status >= 300 && response.status < 400) {
       // Never re-send the POST: a write could run twice. Surface the unexpected shape instead.
@@ -251,7 +264,8 @@ function validMediaUploadArgs(action: string, args: unknown[]): boolean {
       && typeof input.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.sha256);
   }
   if (action === 'media.upload.finalize') return args.length === 1 && record(args[0])
-    && Object.keys(args[0]).length === 1 && validRequestId(args[0].uploadId);
+    && Object.keys(args[0]).every(key => key === 'uploadId' || key === 'mediaId')
+    && validRequestId(args[0].uploadId) && (args[0].mediaId === undefined || validRequestId(args[0].mediaId));
   return false;
 }
 function validWorkWriteOptions(action: string, value: unknown): boolean {
@@ -441,18 +455,25 @@ export default async function handler(req: Request, res: Response) {
             ? [body.args[0], { name: folderInput.name, icon: folderInput.icon, color: folderInput.color }]
             : action === 'folders.delete'
               ? [body.args[0]]
-              : body.args;
+              // Apps Script finalize accepts only uploadId; mediaId stays on Vercel for verification.
+              : action === 'media.upload.finalize'
+                ? [{ uploadId: (body.args[0] as Record<string, unknown>).uploadId }]
+                : body.args;
     const requestArgs: unknown[] = body.args;
     const verifyWrite = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
       ? () => verifyOwnerWriteCommitted(action, requestArgs)
       : FOLDER_WRITE_ACTIONS.has(action) && directFoldersEnabled()
         ? () => verifyOwnerFolderCommitted(action, ownerArgs, authenticatedOwnerId)
-        : null;
+        : action === 'media.upload.finalize' && directOwnerReadsEnabled() && record(requestArgs[0]) && typeof requestArgs[0].mediaId === 'string'
+          ? () => verifyWorkMediaFinalized(String((requestArgs[0] as Record<string, unknown>).uploadId), String((requestArgs[0] as Record<string, unknown>).mediaId))
+          : null;
     try {
       const gasCall = gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs,
           ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
-      const raw = verifyWrite
+      // Finalize is only confirmed after it times out: its file appears before the upload
+      // manifest is marked finalized, so an early "done" could make the Work save fail.
+      const raw = verifyWrite && action !== 'media.upload.finalize'
         // Log phases even when the direct verification answers first.
         ? (gasCall.then(result => logOwnerPhaseTiming(result, action), () => undefined),
           await raceWriteWithVerification(gasCall, action, verifyWrite))
@@ -477,6 +498,16 @@ export default async function handler(req: Request, res: Response) {
       const message = error instanceof Error ? error.message : 'Google owner request failed';
       const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
       if (action === MEDIA_REPAIR_ACTION) return send(res, status, { ok: false, error: status === 504 ? 'Work media repair timed out' : 'Work media repair failed' });
+      // Idempotent media upload step: the script ran but its answer was lost. The browser
+      // only needs the IDs it sent; if the step had actually failed, the next step (or the
+      // Work save, which requires finalized media) reports it, so nothing is silently lost.
+      if (MEDIA_UPLOAD_ACTIONS.has(action) && record(error) && error.scriptCompleted === true && record(requestArgs[0])) {
+        const input = requestArgs[0];
+        console.info(JSON.stringify({ event: 'cxl_media_upload_answer_lost', action }));
+        return send(res, 200, { ok: true, data: action === 'media.upload.chunk'
+          ? { uploadId: input.uploadId, chunkIndex: input.chunkIndex }
+          : { uploadId: input.uploadId, mediaId: input.mediaId, finalized: action === 'media.upload.finalize' } });
+      }
       // The Apps Script response often never arrives although the write committed.
       // Confirm through the read-only Sheets/Drive path before reporting a failure.
       if (verifyWrite) {

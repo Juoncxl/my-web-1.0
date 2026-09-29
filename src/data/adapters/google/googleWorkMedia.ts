@@ -267,7 +267,8 @@ export async function uploadGoogleWorkMedia(
           uploadId: begin.uploadId, chunkIndex, base64: bytesToBase64(chunk), sha256: chunkSha256
         }]);
       }
-      await callGoogleBackend('media.upload.finalize', [{ uploadId: begin.uploadId }]);
+      // mediaId lets the server confirm a stalled finalize from Drive; it is not sent to Apps Script.
+      await callGoogleBackend('media.upload.finalize', [{ uploadId: begin.uploadId, mediaId: item.mediaId }]);
     }
     attachedMediaIds.push(item.mediaId);
   }

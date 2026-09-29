@@ -226,6 +226,20 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
   return { bytes, mimeType };
 }
 
+/**
+ * After a stalled media.upload.finalize, confirm from Drive that the canonical file
+ * (cxl-work-media-<mediaId>.<ext>, written by finalize) exists. Returns the finalize
+ * result shape, or null when it is not there yet.
+ */
+export async function verifyWorkMediaFinalized(uploadId: string, mediaId: string): Promise<Row | null> {
+  if (!/^[a-f0-9-]{36}$/i.test(mediaId)) return null;
+  const query = `name contains 'cxl-work-media-${mediaId}.' and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,size)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const listed = await (await googleGet(url)).json() as { files?: { name?: string; size?: string }[] };
+  const found = (listed.files || []).some(file => new RegExp(`^cxl-work-media-${mediaId}\\.(jpg|jpeg|png|gif|webp)$`, 'i').test(file.name || '') && Number(file.size) > 0);
+  return found ? { uploadId, mediaId, finalized: true } : null;
+}
+
 // ---- Owner folders (port of getFolders_ + cxlOwnerFolders_) ----
 
 export function directFoldersEnabled(): boolean {
