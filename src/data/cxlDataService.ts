@@ -87,7 +87,19 @@ export function createCxlDataService(
     },
     folders: ownerAuthBackend === 'vercel' ? {
       ...folders,
-      create: failedWrite('Folder create'), update: failedWrite('Folder update'), delete: failedWrite('Folder delete')
+      // Google transport throws on failure; keep the { data | success, error } result contract.
+      create: (async (...args: Parameters<CxlDataService['folders']['create']>) => {
+        try { return await googleDataAdapter.folders.create(...args); }
+        catch (error) { return { data: null, error: error instanceof Error ? error.message : 'Folder create failed' }; }
+      }) as CxlDataService['folders']['create'],
+      update: (async (...args: Parameters<CxlDataService['folders']['update']>) => {
+        try { return await googleDataAdapter.folders.update(...args); }
+        catch (error) { return { data: null, error: error instanceof Error ? error.message : 'Folder update failed' }; }
+      }) as CxlDataService['folders']['update'],
+      delete: (async (...args: Parameters<CxlDataService['folders']['delete']>) => {
+        try { return await googleDataAdapter.folders.delete(...args); }
+        catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Folder delete failed' }; }
+      }) as CxlDataService['folders']['delete']
     } : folders,
     collaborations: ownerAuthBackend === 'vercel' ? {
       ...supabaseDataAdapter.collaborations,
