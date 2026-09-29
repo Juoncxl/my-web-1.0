@@ -12,7 +12,7 @@ describe('public Works cache warming', () => {
     expect(result).toEqual({ works: 3 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/cxl/public-works', expect.objectContaining({
-      method: 'GET', credentials: 'omit',
+      method: 'GET', credentials: 'same-origin',
       headers: { Accept: 'application/json', Pragma: 'no-cache' }
     }));
   });

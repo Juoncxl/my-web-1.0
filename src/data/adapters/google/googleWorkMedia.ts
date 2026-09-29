@@ -159,7 +159,8 @@ export function googleWorkMediaProxyUrl(workId: string, mediaId: string, scope: 
 /** Convert attached Work proxy media into display URLs in a read object. */
 export function hydrateGoogleWorkMedia(asset: Asset): Asset {
   const scope = asset.visibility === 'public' && asset.isPublic === true && !asset.deletedAt ? 'public' : 'owner';
-  const version = asset.updatedAt || asset.createdAt;
+  const updatedAtMs = Date.parse(asset.updatedAt || asset.createdAt);
+  const version = Number.isFinite(updatedAtMs) ? String(updatedAtMs) : undefined;
   const records = (asset.media || []).filter(item => item.delivery === 'vercel_proxy'
     && item.assetId === asset.id && ['icon', 'gallery', 'prompt_example', 'collab_reference'].includes(item.purpose));
   if (!records.length) return asset;

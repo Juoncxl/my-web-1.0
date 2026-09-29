@@ -137,21 +137,20 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
         };
       });
     });
-  } else {
-    draft.mediaDraft?.items.forEach((item, sortOrder) => {
-      if (isLocalMediaSource(item.src) && item.mediaId) {
-        workMediaDraft.push({
-          mediaId: item.mediaId, source: item.src, purpose: 'gallery', sortOrder,
-          isCover: item.id === draft.mediaDraft.coverId, mimeType: item.mimeType
-        });
-      }
-    });
-    regularBlocks.forEach((block, sortOrder) => {
-      if (block.type === 'Image' && isLocalMediaSource(block.body) && block.mediaId) {
-        workMediaDraft.push({ mediaId: block.mediaId, source: block.body, purpose: 'prompt_example', contextId: block.id, sortOrder, isCover: false });
-      }
-    });
   }
+  draft.mediaDraft?.items.forEach((item, sortOrder) => {
+    if (isLocalMediaSource(item.src) && item.mediaId) {
+      workMediaDraft.push({
+        mediaId: item.mediaId, source: item.src, purpose: 'gallery', sortOrder,
+        isCover: item.id === draft.mediaDraft.coverId, mimeType: item.mimeType
+      });
+    }
+  });
+  regularBlocks.forEach((block, sortOrder) => {
+    if (block.type === 'Image' && isLocalMediaSource(block.body) && block.mediaId) {
+      workMediaDraft.push({ mediaId: block.mediaId, source: block.body, purpose: 'prompt_example', contextId: block.id, sortOrder, isCover: false });
+    }
+  });
 
   return {
     title,

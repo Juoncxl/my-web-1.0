@@ -83,14 +83,17 @@ describe('Creator Work canonical serializer', () => {
     expect(JSON.stringify(result)).not.toContain('/api/cxl/media');
   });
 
-  it('does not create standard Work upload descriptors for Collaboration drafts', () => {
+  it('includes icon and gallery upload descriptors for Collaboration drafts', () => {
     const result = serialize({
       workMode: 'collab',
       icon: { type: 'image', value: 'blob:collab-icon', mediaId: '123e4567-e89b-42d3-a456-426614174001' },
       mediaDraft: { items: [createMediaItem('blob:collab-gallery', 'image/png', 'collab-item', '123e4567-e89b-42d3-a456-426614174002')], coverId: 'collab-item' }
     });
 
-    expect(result.workMediaDraft).toEqual([]);
+    expect(result.workMediaDraft).toEqual([
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174001', purpose: 'icon', source: 'blob:collab-icon' }),
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174002', purpose: 'gallery', source: 'blob:collab-gallery' })
+    ]);
   });
 
   it('uses the Collaboration name as the card title and keeps contacts private', () => {

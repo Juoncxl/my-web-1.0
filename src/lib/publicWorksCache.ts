@@ -13,12 +13,13 @@ type WorkMutationResult = {
 const isPublicVisible = (work: PublicWorkShape | null | undefined) =>
   work?.visibility === 'public' && work.isPublic === true && !work.deletedAt;
 
-/** Fire one anonymous request to refresh the public CDN entry, without affecting its caller. */
+/** Refresh the public CDN entry without affecting the mutation caller. */
 export function warmPublicWorksCache(): void {
   try {
     void fetch('/api/cxl/public-works', {
       method: 'GET',
-      credentials: 'omit',
+      // Protected Preview deployments need the same-origin Vercel auth cookie.
+      credentials: 'same-origin',
       headers: { Accept: 'application/json', Pragma: 'no-cache' }
     }).catch(() => undefined);
   } catch {

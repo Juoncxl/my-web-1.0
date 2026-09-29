@@ -405,7 +405,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     setIconStorageKey(draft.icon.type === 'image' ? draft.icon.storageKey : undefined);
     setIconMimeType(draft.icon.type === 'image' ? draft.icon.mimeType : undefined);
     setIconMediaId(draft.icon.type === 'image'
-      ? draft.icon.mediaId || (draft.workMode === 'standard' && isLocalMediaSource(draft.icon.value) ? crypto.randomUUID() : undefined)
+      ? draft.icon.mediaId || (isLocalMediaSource(draft.icon.value) ? crypto.randomUUID() : undefined)
       : undefined);
     setMediaDraft(draft.mediaDraft);
     setCollaboration(draft.collaboration);
@@ -430,7 +430,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
             const draft = stored.draft;
             setTitle(draft.title); setContentTypes(draft.contentTypes); setWorkMode(draft.workMode); setPublicationStatus(draft.publicationStatus); setWorkStatus(draft.workStatus); setDescription(draft.description); setVisibility(draft.visibility); setFolderId(draft.folderId);
             setBlocks(draft.contentBlocks); setContentCanvas(draft.contentCanvas); setTags(draft.tags); setAppPlatforms(draft.appPlatforms); setAudienceRating(draft.audienceRating); setContentWarnings(draft.contentWarnings); setGenres(draft.genres);
-            setIconKind(draft.icon.type === 'emoji' ? 'emoji' : draft.icon.mimeType === 'image/gif' ? 'gif' : 'image'); setIconValue(draft.icon.type === 'emoji' ? draft.icon.value : '✦'); setIconImage(draft.icon.type === 'image' ? draft.icon.value : ''); setIconStorageKey(draft.icon.storageKey); setIconMimeType(draft.icon.mimeType); setIconMediaId(draft.icon.type === 'image' ? draft.icon.mediaId || (draft.workMode === 'standard' && isLocalMediaSource(draft.icon.value) ? crypto.randomUUID() : undefined) : undefined);
+            setIconKind(draft.icon.type === 'emoji' ? 'emoji' : draft.icon.mimeType === 'image/gif' ? 'gif' : 'image'); setIconValue(draft.icon.type === 'emoji' ? draft.icon.value : '✦'); setIconImage(draft.icon.type === 'image' ? draft.icon.value : ''); setIconStorageKey(draft.icon.storageKey); setIconMimeType(draft.icon.mimeType); setIconMediaId(draft.icon.type === 'image' ? draft.icon.mediaId || (isLocalMediaSource(draft.icon.value) ? crypto.randomUUID() : undefined) : undefined);
             setMediaDraft(draft.mediaDraft); setCollaboration(draft.collaboration); setCollaborationAssetId(draft.collaborationAssetId);
           } else await deleteComposerDraft(draftStoreKey);
         } else if (stored) await deleteComposerDraft(draftStoreKey);
@@ -522,14 +522,14 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     if (files.length > remaining) { setError(`ผลงานหนึ่งชิ้นเพิ่มสื่อได้สูงสุด ${CREATOR_MEDIA_MAX_ITEMS} รูป`); return; }
     files.forEach(file => {
       if (!isSupportedCreatorGlobalMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 10MB ต่อรูป'); return; }
-      setMediaDraft(previous => addMediaItem(previous, createMediaItem(URL.createObjectURL(file), file.type, undefined, workMode === 'standard' ? crypto.randomUUID() : undefined)));
+      setMediaDraft(previous => addMediaItem(previous, createMediaItem(URL.createObjectURL(file), file.type, undefined, crypto.randomUUID())));
     });
   };
   const handleMediaReplace = (itemId: string, file: File) => {
     if (!isSupportedCreatorGlobalMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 10MB ต่อรูป'); return; }
-    setMediaDraft(previous => replaceMediaItem(previous, itemId, createMediaItem(URL.createObjectURL(file), file.type, itemId, workMode === 'standard' ? crypto.randomUUID() : undefined)));
+    setMediaDraft(previous => replaceMediaItem(previous, itemId, createMediaItem(URL.createObjectURL(file), file.type, itemId, crypto.randomUUID())));
   };
-  const handleIconFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !isSupportedCreatorMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG, WebP หรือ GIF ขนาดไม่เกิน 10MB'); return; } setIconImage(URL.createObjectURL(file)); setIconStorageKey(undefined); setIconMimeType(file.type); setIconMediaId(workMode === 'standard' ? crypto.randomUUID() : undefined); setIconKind(file.type === 'image/gif' ? 'gif' : 'image'); event.target.value = ''; };
+  const handleIconFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !isSupportedCreatorMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG, WebP หรือ GIF ขนาดไม่เกิน 10MB'); return; } setIconImage(URL.createObjectURL(file)); setIconStorageKey(undefined); setIconMimeType(file.type); setIconMediaId(crypto.randomUUID()); setIconKind(file.type === 'image/gif' ? 'gif' : 'image'); event.target.value = ''; };
   const addTag = () => { const clean = tagInput.trim().replace(/^#/, ''); if (!clean || tags.includes(clean) || tags.length >= 10) return; setTags(previous => [...previous, clean]); setTagInput(''); };
   const addPlatform = () => { const clean = platformInput.trim(); if (!clean || appPlatforms.includes(clean)) return; setAppPlatforms(previous => [...previous, clean]); setPlatformInput(''); };
   const addWarning = () => { const clean = warningInput.trim(); if (!clean || contentWarnings.includes(clean)) return; setContentWarnings(previous => [...previous, clean]); setWarningInput(''); };
@@ -583,12 +583,13 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     }
     const operation = initialData ? 'update' : 'create';
     const requestId = draftStoreKey ? getOrCreateWorkMutationRequestId(draftStoreKey, operation, initialData?.revision) : crypto.randomUUID();
-    const hasStandardLocalMedia = workMode === 'standard' && (
+    const hasLocalMedia = (
       (draftPreview.icon.type === 'image' && isLocalMediaSource(draftPreview.icon.value))
       || draftPreview.mediaDraft.items.some(item => isLocalMediaSource(item.src))
       || draftPreview.contentCanvas.imagePrompt.exampleImages.some(isLocalMediaSource)
+      || draftPreview.collaboration.participants.some(participant => participant.referenceImages.some(image => isLocalMediaSource(image.src)))
     );
-    if (hasStandardLocalMedia && draftStoreKey) {
+    if (hasLocalMedia && draftStoreKey) {
       try { await saveComposerDraft(draftStoreKey, draftPreview, initialData?.updatedAt); }
       catch {
         setIsSaving(false);
