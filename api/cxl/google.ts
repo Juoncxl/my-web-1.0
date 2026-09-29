@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
-import { directOwnerReadsEnabled, directOwnerWorksFetch } from './googleDirect.js';
+import { directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -383,6 +383,20 @@ export default async function handler(req: Request, res: Response) {
       const message = error instanceof Error ? error.message : 'Google owner request failed';
       const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
       if (action === MEDIA_REPAIR_ACTION) return send(res, status, { ok: false, error: status === 504 ? 'Work media repair timed out' : 'Work media repair failed' });
+      // The Apps Script response often never arrives although the write committed.
+      // Confirm through the read-only Sheets/Drive path before reporting a failure.
+      if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()) {
+        for (let check = 0; check < 4; check += 1) {
+          if (check) await new Promise(resolve => setTimeout(resolve, 2_500));
+          try {
+            const committed = await verifyOwnerWriteCommitted(action, body.args);
+            console.info(JSON.stringify({ event: 'cxl_write_verify', action, check, committed: committed !== null }));
+            if (committed !== null) return send(res, 200, { ok: true, data: committed });
+          } catch (verifyError) {
+            console.info(JSON.stringify({ event: 'cxl_write_verify_failed', action, reason: verifyError instanceof Error ? verifyError.message.slice(0, 120) : 'unknown' }));
+          }
+        }
+      }
       return send(res, status, { ok: false, error: message.slice(0, 300) });
     }
   }

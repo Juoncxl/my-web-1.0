@@ -122,6 +122,34 @@ function assetFromRecord(record: Row): Row {
 }
 
 /**
+ * After an Apps Script write times out, check whether it was actually committed.
+ * Update/create match the request's own requestId (Apps Script stores it as
+ * lastWriteRequestId / create_request_id); deletion actions match the row state.
+ * Returns the same `data` shape Apps Script would have returned, or null.
+ */
+export async function verifyOwnerWriteCommitted(action: string, args: unknown[]): Promise<unknown | null> {
+  const rows = await privateIndexRows();
+  if (action === 'works.update' || action === 'works.create') {
+    const options = (action === 'works.update' ? args[2] : args[1]) as { requestId?: unknown } | undefined;
+    const requestId = text(options?.requestId).toLowerCase();
+    if (!requestId) return null;
+    const row = action === 'works.update'
+      ? rows.find(item => text(item.id) === text(args[0]))
+      : rows.find(item => text(item.create_request_id).toLowerCase() === requestId);
+    if (!row || !text(row.file_id)) return null;
+    const record = await driveJson(text(row.file_id));
+    if (text(record.lastWriteRequestId).toLowerCase() !== requestId) return null;
+    return { data: assetFromRecord(record), error: null };
+  }
+  const id = text(args[0]);
+  const row = rows.find(item => text(item.id) === id);
+  if (action === 'works.permanentDelete') return row ? null : { success: true, error: null };
+  if (action === 'works.softDelete') return row && row.deleted_at ? { success: true, error: null } : null;
+  if (action === 'works.restore') return row && !row.deleted_at ? { success: true, error: null } : null;
+  return null;
+}
+
+/**
  * Port of fetchCxlWorks_ for the Owner scope. Returns null when the request needs
  * behaviour not ported here (search), so the caller uses Apps Script instead.
  */
