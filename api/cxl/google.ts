@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
 import { randomUUID } from 'node:crypto';
-import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -97,7 +97,8 @@ function readRetryPlan(action: string): { timeoutMs: number; attempts: number } 
   // stored session instead of creating duplicates), so a stalled step is safe to resend.
   if (action === 'media.upload.begin') return { timeoutMs: 12_000, attempts: 3 };
   if (action === 'media.upload.chunk') return { timeoutMs: 20_000, attempts: 2 };
-  if (action === 'media.upload.finalize') return { timeoutMs: 25_000, attempts: 2 };
+  // Finalize assembles the file and can run long; a second attempt only waits on the first's lock.
+  if (action === 'media.upload.finalize') return { timeoutMs: 45_000, attempts: 1 };
   if (action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 25_000, attempts: 1 };
   if (action === 'public.works.detail') return { timeoutMs: 10_000, attempts: 2 };
   if (action.startsWith('public.')) return { timeoutMs: 5_000, attempts: 3 };
@@ -263,7 +264,8 @@ function validMediaUploadArgs(action: string, args: unknown[]): boolean {
       && typeof input.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.sha256);
   }
   if (action === 'media.upload.finalize') return args.length === 1 && record(args[0])
-    && Object.keys(args[0]).length === 1 && validRequestId(args[0].uploadId);
+    && Object.keys(args[0]).every(key => key === 'uploadId' || key === 'mediaId')
+    && validRequestId(args[0].uploadId) && (args[0].mediaId === undefined || validRequestId(args[0].mediaId));
   return false;
 }
 function validWorkWriteOptions(action: string, value: unknown): boolean {
@@ -453,18 +455,25 @@ export default async function handler(req: Request, res: Response) {
             ? [body.args[0], { name: folderInput.name, icon: folderInput.icon, color: folderInput.color }]
             : action === 'folders.delete'
               ? [body.args[0]]
-              : body.args;
+              // Apps Script finalize accepts only uploadId; mediaId stays on Vercel for verification.
+              : action === 'media.upload.finalize'
+                ? [{ uploadId: (body.args[0] as Record<string, unknown>).uploadId }]
+                : body.args;
     const requestArgs: unknown[] = body.args;
     const verifyWrite = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
       ? () => verifyOwnerWriteCommitted(action, requestArgs)
       : FOLDER_WRITE_ACTIONS.has(action) && directFoldersEnabled()
         ? () => verifyOwnerFolderCommitted(action, ownerArgs, authenticatedOwnerId)
-        : null;
+        : action === 'media.upload.finalize' && directOwnerReadsEnabled() && record(requestArgs[0]) && typeof requestArgs[0].mediaId === 'string'
+          ? () => verifyWorkMediaFinalized(String((requestArgs[0] as Record<string, unknown>).uploadId), String((requestArgs[0] as Record<string, unknown>).mediaId))
+          : null;
     try {
       const gasCall = gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs,
           ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
-      const raw = verifyWrite
+      // Finalize is only confirmed after it times out: its file appears before the upload
+      // manifest is marked finalized, so an early "done" could make the Work save fail.
+      const raw = verifyWrite && action !== 'media.upload.finalize'
         // Log phases even when the direct verification answers first.
         ? (gasCall.then(result => logOwnerPhaseTiming(result, action), () => undefined),
           await raceWriteWithVerification(gasCall, action, verifyWrite))
