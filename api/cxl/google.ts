@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
+import { directOwnerReadsEnabled, directOwnerWorksFetch } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -440,7 +441,20 @@ export default async function handler(req: Request, res: Response) {
 
   try {
     let raw: unknown;
-    if (ownerScope) {
+    let directWorks: unknown[] | null = null;
+    if (ownerScope && directOwnerReadsEnabled()) {
+      const started = Date.now();
+      try {
+        directWorks = await directOwnerWorksFetch({ ...options, ...(authMode === 'vercel' ? { userId: ownerId } : {}), currentUserId: ownerId } as Record<string, unknown>);
+      } catch (error) {
+        // Fall back to Apps Script; log only the error class, never IDs or payloads.
+        console.info(JSON.stringify({ event: 'cxl_direct_read_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+      }
+      console.info(JSON.stringify({ event: 'cxl_direct_read_timing', detail: Boolean(options.assetId), elapsedMs: Date.now() - started, used: directWorks !== null }));
+    }
+    if (directWorks) {
+      raw = directWorks;
+    } else if (ownerScope) {
       const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
       const secret = process.env.CXL_API_SHARED_SECRET;
       if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
