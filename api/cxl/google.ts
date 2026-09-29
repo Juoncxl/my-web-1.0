@@ -39,6 +39,15 @@ function previewOwnerServerTiming(res: Response, raw: unknown, requestedAction: 
   metrics.push(`cxl_action;desc="${requestedAction}"`, `total;dur=${timing.totalMs.toFixed(2)}`);
   res.setHeader('Server-Timing', metrics.join(', '));
 }
+/** Preview-only: log Apps Script phase durations (allow-listed phase names and ms only). */
+function logOwnerPhaseTiming(raw: unknown, requestedAction: string) {
+  if (process.env.VERCEL_ENV !== 'preview' || !record(raw) || !record(raw.meta) || !record(raw.meta.timing)) return;
+  const timing = raw.meta.timing;
+  if (timing.action !== requestedAction || !record(timing.phases)) return;
+  const phases = Object.fromEntries(Object.entries(timing.phases).filter(([phase, duration]) =>
+    OWNER_TIMING_PHASES.has(phase) && typeof duration === 'number' && Number.isFinite(duration)).map(([phase, duration]) => [phase, Math.round(duration as number)]));
+  console.info(JSON.stringify({ event: 'cxl_gas_phase_timing', action: requestedAction, totalMs: typeof timing.totalMs === 'number' ? Math.round(timing.totalMs) : -1, phases }));
+}
 function validOptions(value: unknown): value is FetchAssetsOptions {
   return record(value) && Object.keys(value).every(key => ALLOWED_OPTIONS.has(key))
     && ['userId','currentUserId','creatorSlug','assetId','category','search'].every(key => value[key] === undefined || (typeof value[key] === 'string' && value[key].length <= 256))
@@ -410,7 +419,9 @@ export default async function handler(req: Request, res: Response) {
         body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs,
           ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
       const raw = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
-        ? await raceWriteWithVerification(gasCall, action, body.args)
+        // Log phases even when the direct verification answers first.
+        ? (gasCall.then(result => logOwnerPhaseTiming(result, action), () => undefined),
+          await raceWriteWithVerification(gasCall, action, body.args))
         : await gasCall;
       previewOwnerServerTiming(res, raw, action);
       if (!record(raw) || raw.ok !== true) {
