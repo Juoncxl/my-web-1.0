@@ -30,6 +30,23 @@ export function directOwnerReadsEnabled(): boolean {
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
+// Short-lived, in-flight-deduplicated cache for public/media reads. A page asks for
+// dozens of images at once; without it each image re-read the Sheets and hit the
+// 60 reads/minute quota (HTTP 429). Owner list/detail reads never use it.
+const readCache = new Map<string, { expiresAt: number; value: Promise<unknown> }>();
+function cachedRead<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const hit = readCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value as Promise<T>;
+  const value = load();
+  readCache.set(key, { expiresAt: Date.now() + ttlMs, value });
+  value.catch(() => { if (readCache.get(key)?.value === value) readCache.delete(key); });
+  if (readCache.size > 500) for (const [cacheKey, entry] of readCache) if (entry.expiresAt <= Date.now()) readCache.delete(cacheKey);
+  return value;
+}
+const PUBLIC_READ_CACHE_MS = 60_000;
+// Canonical record files are written under a new name per revision, so a file ID's content is stable.
+const RECORD_FILE_CACHE_MS = 5 * 60_000;
+
 async function accessToken(): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
   const cfg = config();
@@ -150,9 +167,9 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
     if (!sources || !JSON.stringify(sources.asset).includes(ref)) return null;
     mediaRecords = sources.mediaRecords;
   } else {
-    const row = (await privateIndexRows()).find(item => text(item.id) === workId);
+    const row = (await cachedRead('private-index', PUBLIC_READ_CACHE_MS, privateIndexRows)).find(item => text(item.id) === workId);
     if (!row || !text(row.file_id)) return null;
-    const record = await driveJson(text(row.file_id));
+    const record = await cachedRead(`file:${text(row.file_id)}`, RECORD_FILE_CACHE_MS, () => driveJson(text(row.file_id)));
     if (text(((record.row || {}) as Row).id) !== workId || !JSON.stringify(record).includes(ref)) return null;
     mediaRecords = ((record.mediaRecords as Row[] | undefined) || []).filter(isObject);
   }
@@ -346,7 +363,11 @@ export async function directPublicWorksList(): Promise<Row[]> {
   return (await publicWorksIndex()).works;
 }
 
-async function publicWorksIndex(): Promise<{ works: Row[]; projectionFileIds: Map<string, string> }> {
+function publicWorksIndex(): Promise<{ works: Row[]; projectionFileIds: Map<string, string> }> {
+  return cachedRead('public-index', PUBLIC_READ_CACHE_MS, loadPublicWorksIndex);
+}
+
+async function loadPublicWorksIndex(): Promise<{ works: Row[]; projectionFileIds: Map<string, string> }> {
   const sheetId = process.env.CXL_PUBLIC_SHEET_ID!.trim();
   // The Index tab is the first sheet (A:K = PUBLIC_HEADERS); A1 without a sheet name targets it.
   const [indexRows, mapRows] = await Promise.all([sheetRows(sheetId, 'A:K'), sheetRows(sheetId, 'WorkCreatorMap!A:ZZ').catch((error: unknown) => {
@@ -386,15 +407,17 @@ async function publicWorksIndex(): Promise<{ works: Row[]; projectionFileIds: Ma
  * built from the current draft; the private record's own copy can be stale.
  */
 async function publicWorkSources(assetId: string): Promise<{ asset: Row; mediaRecords: Row[] } | null> {
-  const [{ works, projectionFileIds }, rows] = await Promise.all([publicWorksIndex(), privateIndexRows()]);
+  const [{ works, projectionFileIds }, rows] = await Promise.all([publicWorksIndex(), cachedRead('private-index', PUBLIC_READ_CACHE_MS, privateIndexRows)]);
   const summary = works.find(work => work.id === assetId);
   if (!summary) return null;
   const row = rows.find(item => text(item.id) === assetId);
   if (!row || !text(row.file_id)) return null;
   const projectionFileId = projectionFileIds.get(assetId);
+  const readFile = (fileId: string, ttlMs: number) => cachedRead(`file:${fileId}`, ttlMs, () => driveJson(fileId));
+  // The projection may be rewritten in place, so it gets the short public TTL.
   const [record, projection] = await Promise.all([
-    driveJson(text(row.file_id)),
-    projectionFileId ? driveJson(projectionFileId).catch(() => null) : Promise.resolve(null)
+    readFile(text(row.file_id), RECORD_FILE_CACHE_MS),
+    projectionFileId ? readFile(projectionFileId, PUBLIC_READ_CACHE_MS).catch(() => null) : Promise.resolve(null)
   ]);
   const recordRow = (record.row || {}) as Row;
   if (!(recordRow.visibility === 'public' && flag(recordRow.is_public) && !recordRow.deleted_at)) return null;

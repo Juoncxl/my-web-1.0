@@ -78,6 +78,14 @@ async function publicIconHandler(req: Request, res: Response) {
         res.statusCode = 200;
         return res.end(direct.bytes);
       }
+      // Definitive miss: no Drive file behind this reference (e.g. an image still only in
+      // Supabase). Apps Script reads the same records, so skip it and let the CDN remember
+      // the miss instead of re-trying dozens of images on every page view.
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', ownerSessionValid(req) ? 'private, no-store' : 'public, max-age=300, s-maxage=3600');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.end(JSON.stringify({ ok: false, error: 'Media is unavailable' }));
     } catch (error) {
       console.info(JSON.stringify({ event: 'cxl_direct_read_failed', action: 'media.legacy', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
     }
