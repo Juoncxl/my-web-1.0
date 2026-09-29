@@ -83,7 +83,7 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 function readRetryPlan(action: string): { timeoutMs: number; attempts: number } | null {
   if (action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 25_000, attempts: 1 };
   if (action === 'public.works.detail') return { timeoutMs: 10_000, attempts: 2 };
-  if (action.startsWith('public.')) return { timeoutMs: 8_000, attempts: 2 };
+  if (action.startsWith('public.')) return { timeoutMs: 5_000, attempts: 3 };
   return null;
 }
 async function gasJson(url: string, init: RequestInit, action: string) {
@@ -99,28 +99,12 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     }
   }
 }
-// The echo GET normally answers in ~0.1-0.3s but sometimes hangs. It only reads the
-// already-computed result, so re-requesting it never re-runs the script (safe for writes).
-const ECHO_ATTEMPT_TIMEOUT_MS = 3_000;
-async function fetchEchoWithRetry(echoUrl: URL, signal: AbortSignal, stats: { retries: number }): Promise<globalThis.Response> {
-  for (;;) {
-    const attemptSignal = AbortSignal.any([signal, AbortSignal.timeout(ECHO_ATTEMPT_TIMEOUT_MS)]);
-    try {
-      return await fetch(echoUrl, { method: 'GET', redirect: 'follow', signal: attemptSignal });
-    } catch (error) {
-      // Give up when the overall budget is spent; otherwise re-request the same echo URL.
-      if (signal.aborted) throw error;
-      stats.retries += 1;
-    }
-  }
-}
 async function gasJsonAttempt(url: string, init: RequestInit, action: string, timeoutMs: number, attempt: number) {
   const started = Date.now();
   let finalHop = '';
   let outcome = 'error';
   let postMs = -1;
   let echoMs = -1;
-  const echoStats = { retries: 0 };
   try {
     // ContentService answers the POST with a 302 to a one-time googleusercontent URL,
     // which is read with GET, as Google documents. The POST leg is taken manually only
@@ -132,7 +116,8 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
     const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
     if (location && new URL(location, url).hostname === 'script.googleusercontent.com') {
       const echoStarted = Date.now();
-      response = await fetchEchoWithRetry(new URL(location, url), signal, echoStats);
+      // Do not re-request a stalled echo URL: Google then routes it to doGet() (METHOD_NOT_ALLOWED).
+      response = await fetch(new URL(location, url), { method: 'GET', redirect: 'follow', signal });
       echoMs = Date.now() - echoStarted;
     } else if (response.status >= 300 && response.status < 400) {
       // Never re-send the POST: a write could run twice. Surface the unexpected shape instead.
@@ -149,7 +134,7 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
     return parsed;
   } finally {
     // Runtime diagnostics deliberately omit endpoint URLs, payloads, IDs, and credentials.
-    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome, attempt, postMs, echoMs, echoRetries: echoStats.retries }));
+    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome, attempt, postMs, echoMs }));
   }
 }
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
