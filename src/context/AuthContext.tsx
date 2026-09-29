@@ -12,6 +12,7 @@ import {
   signUpWithEmail as signUpWithEmailAction
 } from '../lib/auth/authActions';
 import { useAuthSession } from '../lib/auth/useAuthSession';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -23,7 +24,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authDefaultTab, setAuthDefaultTab] = useState<'login' | 'signup'>('login');
 
   const openAuthModal = (tab: 'login' | 'signup' = 'login') => {
-    setAuthDefaultTab(tab);
+    setAuthDefaultTab(isVercelOwnerAuth ? 'login' : tab);
     setIsAuthOpen(true);
   };
 

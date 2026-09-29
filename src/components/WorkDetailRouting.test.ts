@@ -20,7 +20,8 @@ describe('canonical Work Detail routing', () => {
     expect(creatorSource).toContain('<WorkDetailModal');
     expect(appSource).not.toContain("from './components/AssetViewModal'");
     expect(creatorSource).not.toContain("from '../components/AssetViewModal'");
-    expect(cardSource).toContain('onClick={() => onClick(asset)}');
+    expect(cardSource).toContain('onClickCapture={handleCardSurfaceClick}');
+    expect(cardSource).toContain("event.key === 'Enter' || event.key === ' '");
     expect(creatorSource).toContain('void openAssetDetail(asset)');
     expect(creatorSource).toContain("detail: 'full'");
     expect(creatorSource).toContain('onBookmark={onBookmark}');

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-const cardSource = readFileSync(new URL('./AssetCard.tsx', import.meta.url), 'utf8');
-const detailSource = readFileSync(new URL('./WorkDetailModal.tsx', import.meta.url), 'utf8');
-const previewSource = readFileSync(new URL('./creator/CreatorReviewPreview.tsx', import.meta.url), 'utf8');
-const workspaceSource = readFileSync(new URL('./creator/CreatorWorkWorkspace.tsx', import.meta.url), 'utf8');
-const cssSource = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+const normalizeNewlines = (source: string) => source.replace(/\r\n/g, '\n');
+const cardSource = normalizeNewlines(readFileSync(new URL('./AssetCard.tsx', import.meta.url), 'utf8'));
+const detailSource = normalizeNewlines(readFileSync(new URL('./WorkDetailModal.tsx', import.meta.url), 'utf8'));
+const previewSource = normalizeNewlines(readFileSync(new URL('./creator/CreatorReviewPreview.tsx', import.meta.url), 'utf8'));
+const workspaceSource = normalizeNewlines(readFileSync(new URL('./creator/CreatorWorkWorkspace.tsx', import.meta.url), 'utf8'));
+const cssSource = normalizeNewlines(readFileSync(new URL('../index.css', import.meta.url), 'utf8'));
 const cleanupCss = cssSource.slice(cssSource.indexOf('Phase 1.5N Item 12E.1'));
 
 describe('12E.1 Work Card and Work Detail presentation cleanup', () => {

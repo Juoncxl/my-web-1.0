@@ -34,6 +34,33 @@ export function parseCanonicalProfileLocation(pathname: string, search = ''): Ca
   };
 }
 
+/** Route classification only; authorization still comes from the authenticated session. */
+export function isOwnerProfileRouteSlug(
+  routeSlug: string,
+  currentUser: { id: string; username?: string } | null | undefined
+): boolean {
+  if (!currentUser) return false;
+  let normalizedRoute = routeSlug.trim();
+  try { normalizedRoute = decodeURIComponent(normalizedRoute); } catch { /* compare the raw route below */ }
+  normalizedRoute = normalizedRoute.trim().replace(/^@+/, '').toLowerCase();
+  if (!normalizedRoute) return false;
+  return normalizedRoute === currentUser.id.trim().toLowerCase()
+    || normalizedRoute === (currentUser.username || '').trim().replace(/^@+/, '').toLowerCase();
+}
+
+export type ProfileWorksReadScope =
+  | { type: 'owner'; userId: string }
+  | { type: 'public'; creatorSlug: string };
+
+export function resolveProfileWorksReadScope(
+  routeSlug: string,
+  currentUser: { id: string; username?: string } | null | undefined
+): ProfileWorksReadScope {
+  return currentUser && isOwnerProfileRouteSlug(routeSlug, currentUser)
+    ? { type: 'owner', userId: currentUser.id }
+    : { type: 'public', creatorSlug: routeSlug };
+}
+
 /** Do not discard an owner route before the auth session has resolved. */
 export function shouldNormalizeOwnerProfileContext(
   route: Pick<CanonicalProfileRoute, 'requestedTab' | 'folderId'>,

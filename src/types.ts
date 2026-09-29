@@ -93,6 +93,8 @@ export interface AssetMediaRecord {
   fileSize: number;
   sortOrder: number;
   isCover: boolean;
+  /** Google Drive media marked for Vercel proxy delivery; the Drive file stays private. */
+  delivery?: 'vercel_proxy';
   naturalWidth?: number;
   naturalHeight?: number;
   /** Short-lived display URL. It is never persisted back to the database. */
@@ -187,6 +189,10 @@ export interface PublicAssetCollaboration {
 export interface Asset {
   id: string;
   userId: string;
+  /** Owner-only Google revision used for optimistic write conflicts. */
+  revision?: number;
+  /** Public-safe opaque creator join key returned by the Google public reader. */
+  publicCreatorId?: string;
   authorName: string;
   authorAvatar?: string;
   title: string;
@@ -261,6 +267,8 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface User {
   id: string;
+  /** Opaque public creator identity; distinct from the private legacy owner key in id. */
+  publicCreatorId?: string;
   email?: string;
   displayName: string;
   username?: string;

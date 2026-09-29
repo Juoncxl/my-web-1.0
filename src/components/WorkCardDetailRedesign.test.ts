@@ -95,7 +95,7 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(detailSource).toContain('isOwner && onEdit');
     expect(detailSource).toContain('isOwner && onMoveToFolder');
     expect(detailSource).not.toContain('ติดตามตัวเอง');
-    expect(appSource).toContain('onLike={handleLikeAsset}');
+    expect(appSource).toContain('onLike={engagementActionsAvailable ? handleLikeAsset : undefined}');
     expect(appSource).toContain('isLiked={viewingAsset ? likedAssetIds.includes(viewingAsset.id) : false}');
     expect(creatorSource).toContain('onLike={!isEditing && activeTab !== \'trash\' ? onLike : undefined}');
   });
@@ -120,3 +120,4 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(redesignStyles).toContain('.work-detail-footer-actions { justify-content: stretch; }');
   });
 });
+

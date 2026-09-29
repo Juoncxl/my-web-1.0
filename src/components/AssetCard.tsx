@@ -21,6 +21,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { getWorkDisplayPresentation, type CollaborationDisplayContext } from '../lib/workDisplayPresentation';
+import { shouldOpenAssetCardFromTarget } from './assetCardInteraction';
 
 interface AssetCardProps {
   asset: Asset;
@@ -138,7 +139,14 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const { currentUser } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
+  const [iconFailed, setIconFailed] = useState(false);
+  const [coverFailed, setCoverFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIconFailed(false);
+    setCoverFailed(false);
+  }, [asset.id, asset.icon?.type, asset.icon?.value, asset.previewImage || asset.previewImages?.[0]]);
 
   useEffect(() => {
     const closeWhenAnotherMenuOpens = (event: Event) => {
@@ -222,6 +230,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     if (resolvedCreatorProfile) onPreviewCreator?.(resolvedCreatorProfile, event.currentTarget);
   };
 
+  const handleCardSurfaceClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (shouldOpenAssetCardFromTarget(event.target)) onClick(asset);
+  };
+
   const confirmPermanentDelete = () => {
     if (!onPermanentDelete) return;
     setIsPermanentDeleteConfirmationOpen(false);
@@ -231,7 +243,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   return (
     <>
     <article
-      onClick={() => onClick(asset)}
+      onClickCapture={handleCardSurfaceClick}
       onKeyDown={event => {
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
@@ -244,9 +256,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       className={`cv-asset-card group ${display.isCollaborationFocused ? 'is-collaboration-card' : 'is-standard-card'} ${presentationMode === 'profile-compact' ? 'is-profile-compact' : ''} ${isTrashMode ? 'is-trash' : ''} ${(onLike || onBookmark) && !isTrashMode ? 'has-quick-actions' : ''}`}
     >
       <div className="cv-card-visual">
-      <div className={`cv-card-cover ${mainImage ? 'has-image' : 'has-fallback'}`}>
-        {mainImage ? (
-          <img src={mainImage} alt="" className="cv-card-cover-image" referrerPolicy="no-referrer" />
+      <div className={`cv-card-cover ${mainImage && !coverFailed ? 'has-image' : 'has-fallback'}`}>
+        {mainImage && !coverFailed ? (
+          <img src={mainImage} alt="" className="cv-card-cover-image" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setCoverFailed(true)} />
         ) : (
           <div className={`cv-card-fallback cv-fallback-${asset.category}`} aria-hidden="true">
             <span className="cv-fallback-kicker">CXL / {categoryLabel}</span>
@@ -300,10 +312,10 @@ export const AssetCard: React.FC<AssetCardProps> = ({
 
       <div className="cv-card-body">
         <div className="cv-card-title-row">
-          <div className="cv-card-icon" aria-hidden="true">{isValidWorkIcon(asset.icon)
+          <div className="cv-card-icon" aria-hidden="true">{!iconFailed && isValidWorkIcon(asset.icon)
             ? asset.icon.type === 'emoji' || asset.icon.type === 'kaomoji'
               ? asset.icon.value
-              : <img src={asset.icon.value} alt="" referrerPolicy="no-referrer" />
+              : <img src={asset.icon.value} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
             : categoryMeta.emoji}</div>
           <div className="min-w-0 flex-1">
             <h3>{cardTitle}</h3>
@@ -333,7 +345,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             <div ref={menuRef} className="cv-card-menu-wrap">
               <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
               {menuOpen && (
-                <div className="cv-card-menu" onClick={event => event.stopPropagation()}>
+                <div data-card-action className="cv-card-menu" onClick={event => event.stopPropagation()}>
                   {!isTrashMode && !isOwner && onFork && <button type="button" onClick={handleMenuAction(() => onFork(asset))}><GitFork className="w-3.5 h-3.5" />Fork เข้าคลังของฉัน</button>}
                   {!isTrashMode && !isOwner && onReport && <button type="button" onClick={handleMenuAction(() => onReport(asset))}><Flag className="w-3.5 h-3.5" />รายงานผลงาน</button>}
                   {!isTrashMode && isOwner && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}
@@ -360,3 +372,4 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     </>
   );
 };
+

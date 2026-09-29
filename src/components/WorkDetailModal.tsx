@@ -26,18 +26,20 @@ import {
 } from 'lucide-react';
 import type { Asset, AssetIcon, Folder as WorkFolder, User, WorkContentBlock } from '../types';
 import { AUDIENCE_RATING_LABELS, CATEGORIES, STATUS_PRESETS } from '../lib/constants';
+import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatThaiDate } from '../lib/dateUtils';
 import { resolveWorkCreator } from '../lib/workPresentation';
 import { resolveWorkPresentationContent } from '../lib/workContent';
 import { getWorkDisplayPresentation } from '../lib/workDisplayPresentation';
-import { isValidWorkIcon } from '../lib/assetVisibility';
+import { isValidWorkIcon, isValidWorkImageSource } from '../lib/assetVisibility';
 import { createPublicAssetExport } from './creator/creatorWorkSerializer';
 import { getCollabStatusLabel } from './creator/creatorCollabModel';
 import { getParticipantContentCopy, getParticipantTagCopy } from '../lib/collaborationPresentation';
 import { copyPlainText, createGalleryImageFile, createGalleryImageFilename, createReferenceImageFile, createReferenceImageFilename, getWorkShareUrl, resolveWorkDetailGalleryImages, shouldUseNativeImageShare, triggerBrowserFileDownload, triggerBrowserUrlDownload } from '../lib/workSharing';
-import { getFreshMediaDownload } from '../lib/workMedia';
+import { cxlDataService } from '../data/cxlDataService';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
+import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
 
@@ -94,14 +96,19 @@ function CodePresentation({ code, view, onViewChange }: { code: string; view: Co
   </>;
 }
 
-function ContentBlock({ block, copied, onCopy }: { block: WorkContentBlock; copied: boolean; onCopy: () => void }) {
+function ContentBlock({ block, copied, onCopy, failedImageSrcs, onImageError }: {
+  block: WorkContentBlock; copied: boolean; onCopy: () => void;
+  failedImageSrcs?: ReadonlySet<string>; onImageError?: (src: string) => void;
+}) {
   if (block.type === 'Divider') {
     return <div className="work-detail-divider" aria-label={block.title || 'เส้นแบ่ง'}><span>✦</span></div>;
   }
 
   const body = block.body.trim();
-  const isImageSource = block.type === 'Image' && /^(?:data:image\/|blob:|https?:\/\/)/i.test(body);
+  const isImageSource = block.type === 'Image' && isValidWorkImageSource(body);
   const isCopyable = ['Text', 'Prompt', 'Note'].includes(block.type) && isMeaningfulCopyText(body, block.title);
+  // An image that cannot load (e.g. still only in Supabase) is hidden instead of shown broken.
+  if (isImageSource && failedImageSrcs?.has(body)) return null;
 
   return <article className={`work-detail-block is-${block.type.toLowerCase().replace(/\s+/g, '-')}`}>
     <header>
@@ -112,7 +119,7 @@ function ContentBlock({ block, copied, onCopy }: { block: WorkContentBlock; copi
       {isCopyable && <CopyButton copied={copied} label="คัดลอก" onClick={onCopy} />}
     </header>
     {block.type === 'Heading' ? <h4>{body || block.title}</h4>
-      : isImageSource ? <figure><img src={body} alt={block.title || 'ภาพประกอบผลงาน'} referrerPolicy="no-referrer" /><figcaption>{block.title}</figcaption></figure>
+      : isImageSource ? <figure><img src={body} alt={block.title || 'ภาพประกอบผลงาน'} referrerPolicy="no-referrer" onError={() => onImageError?.(body)} /><figcaption>{block.title}</figcaption></figure>
         : block.type === 'Image' ? <div className="work-detail-image-placeholder"><ImageIcon aria-hidden="true" /><p>{body || 'ยังไม่มีภาพประกอบ'}</p></div>
           : block.type === 'Prompt' ? <pre>{body}</pre>
             : block.type === 'Note' ? <aside>{body}</aside>
@@ -151,6 +158,8 @@ export interface WorkDetailModalProps {
   interactionMode?: 'live' | 'preview';
   /** Keep the app header outside the backdrop so direct Work routes can navigate away. */
   preserveHeaderNavigation?: boolean;
+  /** Detail reads fill long-form fields after the summary shell is already visible. */
+  detailHydration?: { status: 'loading' | 'error'; onRetry: () => void };
 }
 
 /** The one canonical Work presentation for both legacy and newly-created data. */
@@ -179,7 +188,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   coverImage = '',
   coverImageSelected = true,
   interactionMode = 'live',
-  preserveHeaderNavigation = false
+  preserveHeaderNavigation = false,
+  detailHydration
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codeView, setCodeView] = useState<CodeView>('split');
@@ -191,6 +201,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
+  // Image sources that failed to load (e.g. still only in Supabase) are hidden, not shown broken.
+  const [failedImageSrcs, setFailedImageSrcs] = useState<ReadonlySet<string>>(() => new Set());
+  const markImageFailed = (src: string) => setFailedImageSrcs(previous => previous.has(src) ? previous : new Set([...previous, src]));
   const creatorProfileAssets = useMemo(() => asset ? [asset] : [], [asset]);
   const publicCreatorProfiles = usePublicCreatorProfiles(creatorProfileAssets, creatorProfile);
   // Composer Review uses a temporary private asset that is not yet published.
@@ -200,14 +213,15 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   useEffect(() => {
     if (!canRender || embedded) return;
-    const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
-    document.body.style.overflow = 'hidden';
+    // Share the counted lock with ConfirmationDialog: closing both at once in either
+    // cleanup order used to leave body overflow hidden and the page unscrollable.
+    const releaseScrollLock = acquireViewportScrollLock(document);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [canRender, embedded, onClose]);
@@ -226,10 +240,10 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   if (!canRender || !asset) return null;
 
-  const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(asset.userId) || null;
+  const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(resolvePublicCreatorKey(asset)) || null;
   const creator = resolveWorkCreator(asset, canonicalCreatorProfile);
   const requestedCover = coverImage || (coverImageSelected ? asset.previewImage || '' : '');
-  const galleryImages = resolveWorkDetailGalleryImages(asset, requestedCover);
+  const galleryImages = resolveWorkDetailGalleryImages(asset, requestedCover).filter(image => !failedImageSrcs.has(image.src));
   const activeGalleryImage = activeImageIndex >= 0 ? galleryImages[activeImageIndex] : undefined;
   const explicitLinkedAssets = (asset.linkedAssetIds || [])
     .map(id => allAssets.find(candidate => candidate.id === id))
@@ -335,7 +349,24 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   }): Promise<boolean> => {
     try {
       const useNativeSaveSheet = shouldUseNativeImageShare(navigator.userAgent, navigator.maxTouchPoints);
-      const freshSource = input.mediaId ? await getFreshMediaDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename) : null;
+      let freshSource: string | null = null;
+      if (input.mediaId) {
+        try {
+          freshSource = await cxlDataService.media.getFreshDownload(input.mediaId, useNativeSaveSheet ? undefined : input.filename);
+        } catch {
+          // Google Work media already carries an association-checked same-origin
+          // proxy URL. Requesting download=1 keeps Drive IDs private while the
+          // server returns the original bytes as an attachment.
+          try {
+            const url = new URL(input.src, window.location.origin);
+            if (url.origin === window.location.origin && url.pathname === '/api/cxl/media'
+              && ['owner', 'public'].includes(url.searchParams.get('scope') || '')) {
+              url.searchParams.set('download', '1');
+              freshSource = `${url.pathname}${url.search}`;
+            }
+          } catch { /* fall back to fetching the displayed source below */ }
+        }
+      }
 
       if (!useNativeSaveSheet && freshSource && triggerBrowserUrlDownload(freshSource, input.filename)) return true;
 
@@ -426,11 +457,19 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         </div>
       </header>}
 
+      {detailHydration?.status === 'loading' && <div className="work-detail-hydration-state" role="status" aria-live="polite">
+        <span className="work-detail-hydration-spinner" aria-hidden="true" />กำลังโหลดรายละเอียดเพิ่มเติม…
+      </div>}
+      {detailHydration?.status === 'error' && <div className="work-detail-hydration-state is-error" role="status">
+        โหลดรายละเอียดเพิ่มเติมไม่สำเร็จ
+        <button type="button" onClick={detailHydration.onRetry}>ลองอีกครั้ง</button>
+      </div>}
+
       <div className="work-detail-body">
         <div className="work-detail-grid">
           <div className="work-detail-media-column" data-work-detail-section="media">
             <div className={`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`}>
-              {activeGalleryImage && <img src={activeGalleryImage.src} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" />}
+              {activeGalleryImage && <img src={activeGalleryImage.src} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(activeGalleryImage.src)} />}
               {!activeGalleryImage && <div className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}><WorkMark icon={asset.icon} /></div>}
               {display.isCollaborationFocused && activeGalleryImage && <button
                 type="button"
@@ -448,7 +487,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
                 onClick={() => { setActiveImageIndex(index); setGalleryImageError(null); }}
                 aria-label={`ดูรูปที่ ${index + 1}`}
                 aria-pressed={activeImageIndex === index}
-              ><img src={image.src} alt="" referrerPolicy="no-referrer" /></button>)}
+              ><img src={image.src} alt="" referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /></button>)}
             </div>}
             {galleryImageError && <p className="work-detail-reference-error work-detail-gallery-error" role="status">{galleryImageError}</p>}
           </div>
@@ -502,7 +541,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           </div>
           <div className="work-detail-blocks">
             {mainBlocks.length > 0
-              ? mainBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `block-${block.id}`} onCopy={() => copyToClipboard(block.body, `block-${block.id}`)} />)
+              ? mainBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `block-${block.id}`} onCopy={() => copyToClipboard(block.body, `block-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} />)
               : <article className="work-detail-block is-text"><header><div><span>ข้อความ</span><strong>เนื้อหา</strong></div>{isMeaningfulCopyText(legacyContent, 'เนื้อหา') && <CopyButton copied={copiedKey === 'content'} label="คัดลอก" onClick={() => copyToClipboard(legacyContent, 'content')} />}</header><p>{legacyContent}</p></article>}
           </div>
         </section>}
@@ -524,45 +563,45 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
                   {tagCopyStatus === 'success' ? 'คัดลอกแท็กแล้ว' : tagCopyStatus === 'error' ? 'คัดลอกแท็กไม่สำเร็จ' : ''}
                 </span>
               </div>}
-              {publicCollaboration.platforms.map(platform => <span key={platform}>{platform}</span>)}
+              {publicCollaboration.platforms?.map(platform => <span key={platform}>{platform}</span>)}
             </div>
           </div>
         </section>}
 
-        {display.isCollaborationFocused && publicCollaboration?.sharedInformation.length ? <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content">
+        {display.isCollaborationFocused && publicCollaboration?.sharedInformation?.length ? <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ข้อมูลกลางของคอลแลป</strong><span>คัดลอกไปใช้สร้างหรือโปรโมตผลงานได้</span></div></div></div>
           <div className="work-detail-blocks">{publicCollaboration.sharedInformation.map(item => <article className={`work-detail-block work-detail-collaboration-shared-item ${item.type === 'code' ? 'is-prompt work-detail-collaboration-code-block' : 'is-text'}`} data-collaboration-shared-information key={item.id}>
             <header><div><span>{item.type === 'code' ? 'ข้อมูลแบบโค้ด' : 'ข้อความ'}</span><strong>{item.title || 'ข้อมูลกลางของคอลแลป'}</strong></div>{isMeaningfulCopyText(item.content, item.title) && <CopyButton copied={copiedKey === `collaboration-${item.id}`} label="คัดลอก" onClick={() => copyToClipboard(item.content, `collaboration-${item.id}`)} />}</header>
             {item.type === 'code' ? <CodePresentation code={item.content} view={codeView} onViewChange={setCodeView} /> : <p>{item.content}</p>}
-            {(item.appScope !== 'unspecified' || item.platforms.length > 0) && <footer className="work-detail-collaboration-scope"><span>{item.appScope === 'all_apps' ? 'ใช้กับทุกแอป' : item.platforms.join(' · ')}</span></footer>}
+            {(item.appScope === 'all_apps' || Boolean(item.platforms?.length)) && <footer className="work-detail-collaboration-scope"><span>{item.appScope === 'all_apps' ? 'ใช้กับทุกแอป' : item.platforms?.join(' · ')}</span></footer>}
           </article>)}</div>
         </section> : null}
 
-        {display.isCollaborationFocused && publicCollaboration?.deadlines.length ? <section className="work-detail-section work-detail-collaboration-deadlines" data-work-detail-section="collaboration-deadlines">
+        {display.isCollaborationFocused && publicCollaboration?.deadlines?.length ? <section className="work-detail-section work-detail-collaboration-deadlines" data-work-detail-section="collaboration-deadlines">
           <div className="work-detail-section-heading"><div><Clock3 aria-hidden="true" /><div><strong>กำหนดส่ง</strong><span>กำหนดการกลางของคอลแลป</span></div></div></div>
           <div className="work-detail-collaboration-deadline-grid">{publicCollaboration.deadlines.map(deadline => <article key={deadline.id}><strong>{deadline.label || 'กำหนดส่ง'}</strong><time dateTime={deadline.date}>{deadline.date || 'ยังไม่ระบุวันที่'}</time></article>)}</div>
         </section> : null}
 
-        {display.isCollaborationFocused && publicCollaboration?.participants.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
+        {display.isCollaborationFocused && publicCollaboration?.participants?.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div></div>
           <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => {
             const participantTagText = participantTagCopy(participant);
             const participantContentText = participantContentCopy(participant);
             return <article key={participant.id}>
             <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
-            <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms.map(platform => <span key={platform}>{platform}</span>)}</div>
+            <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms?.map(platform => <span key={platform}>{platform}</span>)}</div>
             {participant.externalWorkName && <p><strong>ผลงาน:</strong> {participant.externalWorkName}</p>}
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
-            {participant.referenceImages.length > 0 && <div className="work-detail-participant-references">{participant.referenceImages.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
+            {Boolean(participant.referenceImages?.some(image => !failedImageSrcs.has(image.src))) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => failedImageSrcs.has(image.src) ? null : <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
             {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
           </article>;
           })}</div>
         </section> : null}
 
         {display.isCollaborationFocused && !publicCollaboration && publicCollaborationBlocks.length > 0 && <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content-legacy">
-          <div className="work-detail-blocks">{publicCollaborationBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `collaboration-${block.id}`} onCopy={() => copyToClipboard(block.body, `collaboration-${block.id}`)} />)}</div>
+          <div className="work-detail-blocks">{publicCollaborationBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `collaboration-${block.id}`} onCopy={() => copyToClipboard(block.body, `collaboration-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} />)}</div>
         </section>}
 
         {!display.isCollaborationFocused && visibleLinkedCollaboration && <section className="work-detail-section work-detail-linked-collaboration" data-work-detail-section="linked-collaboration">
@@ -570,9 +609,13 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <button type="button" className="work-detail-linked-collaboration-card" onClick={() => onSelectLinkedAsset?.(visibleLinkedCollaboration.id)}><WorkMark icon={visibleLinkedCollaboration.icon} /><span><strong>{visibleLinkedCollaboration.publicCollaboration?.name || visibleLinkedCollaboration.title}</strong><small>{visibleLinkedCollaboration.shortDescription || 'ดูข้อมูลคอลแลป'}</small></span><b>ดูคอลแลป →</b></button>
         </section>}
 
-        {mainBlocks.length === 0 && !legacyContent.trim() && !uiCode && !display.isCollaborationFocused && <section className="work-detail-section work-detail-empty-state" data-work-detail-section="main-content-empty">
+        {mainBlocks.length === 0 && !legacyContent.trim() && !uiCode && !display.isCollaborationFocused && !detailHydration && <section className="work-detail-section work-detail-empty-state" data-work-detail-section="main-content-empty">
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>เนื้อหาหลัก</strong><span>ยังไม่มีข้อมูลเนื้อหาสำหรับแสดง</span></div></div></div>
           <p>ยังไม่มีข้อมูลเนื้อหาในผลงานชิ้นนี้</p>
+        </section>}
+        {mainBlocks.length === 0 && !legacyContent.trim() && !uiCode && !display.isCollaborationFocused && detailHydration?.status === 'loading' && <section className="work-detail-section work-detail-empty-state" data-work-detail-section="main-content-loading" aria-busy="true">
+          <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>เนื้อหาหลัก</strong><span>กำลังโหลดข้อมูลผลงาน</span></div></div></div>
+          <div className="work-detail-content-skeleton" aria-hidden="true"><span /><span /><span /></div>
         </section>}
 
         {uiCode && <section className="work-detail-section work-detail-code" data-work-detail-section="ui-code">
@@ -591,7 +634,6 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
       {!embedded && <footer className="work-detail-footer" data-work-detail-actions={isOwner ? 'owner' : 'visitor'}>
         <div className="work-detail-footer-note">
-          <span><Heart aria-hidden="true" /> {asset.likesCount || 0}</span>
           <span>โดย {creator.displayName}</span>
         </div>
         <div className="work-detail-footer-actions">

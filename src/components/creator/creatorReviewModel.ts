@@ -39,7 +39,10 @@ export function createCreatorContentBlocks(contentTypes: CreatorContentType[], c
       addTextBlock(contentBlocks, 'creator-image-prompt', 'คำสั่งเจนรูป', canvas.imagePrompt.prompt, 'Prompt');
       addTextBlock(contentBlocks, 'creator-image-tool-model', 'เครื่องมือ / โมเดลที่ใช้', canvas.imagePrompt.toolModel, 'Note');
       canvas.imagePrompt.exampleImages.forEach((src, index) => {
-        if (src) contentBlocks.push({ id: `creator-image-example-${index}`, type: 'Image', title: `รูปตัวอย่าง ${index + 1}`, body: src });
+        if (src) contentBlocks.push({
+          id: `creator-image-example-${index}`, type: 'Image', title: `รูปตัวอย่าง ${index + 1}`, body: src,
+          mediaId: canvas.imagePrompt.exampleImageMediaIds?.[index] || (src.startsWith('media:') ? src.slice('media:'.length) : undefined)
+        });
       });
     } else if (sectionId === 'ui-code') addTextBlock(contentBlocks, 'creator-ui-code', 'โค้ดหน้า UI', canvas.uiCode, 'UI Code');
     else if (sectionId.startsWith('bot-custom:')) {

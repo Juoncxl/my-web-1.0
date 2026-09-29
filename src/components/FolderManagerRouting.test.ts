@@ -37,7 +37,7 @@ describe('Folder Delete confirmation UI', () => {
     expect(appSource).toContain('clearFolderAssignments(id);');
     expect(appSource).toContain('onDeleteFolder={handleDeleteFolder}');
     expect(folderDataSource).toContain('const deleteFolder = useCallback(async (id: string) => {');
-    expect(folderDataSource).toContain('const result = await supabaseService.deleteFolder(id, currentUserId);');
+    expect(folderDataSource).toContain('const result = await cxlDataService.folders.delete(id, currentUserId);');
     expect(folderDataSource).toContain('setFolders(previous => previous.filter(folder => folder.id !== id));');
     expect(serviceSource).toContain('async deleteFolder(id: string, userId: string)');
   });

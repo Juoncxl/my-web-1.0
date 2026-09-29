@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Flag, AlertTriangle, Check, ShieldAlert } from 'lucide-react';
 import { REPORT_REASONS } from '../lib/constants';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { useAuth } from '../context/AuthContext';
 import { Asset } from '../types';
 
@@ -38,7 +38,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ isOpen, onClose, asset
     setSubmitError(null);
 
     try {
-      const result = await supabaseService.submitReport({
+      const result = await cxlDataService.reports.submit({
         assetId: asset.id,
         reporterId: currentUser.id,
         reporterName: currentUser.displayName,

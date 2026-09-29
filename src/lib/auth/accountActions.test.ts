@@ -5,8 +5,8 @@ const serviceMocks = vi.hoisted(() => ({
   upsertProfile: vi.fn()
 }));
 
-vi.mock('../supabaseService', () => ({
-  supabaseService: { upsertProfile: serviceMocks.upsertProfile }
+vi.mock('../../data/cxlDataService', () => ({
+  cxlDataService: { profiles: { upsert: serviceMocks.upsertProfile } }
 }));
 
 import { updateProfile } from './accountActions';

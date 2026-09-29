@@ -9,6 +9,7 @@ import { AssetCard } from './AssetCard';
 import { CreatorProfilePreview, type CreatorProfilePreviewAnchor } from './CreatorProfilePreview';
 import type { VaultTabType } from './PersonalVaultHeader';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
+import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 
 interface AssetCollectionViewProps {
   activeView: 'feed' | 'vault';
@@ -38,9 +39,9 @@ interface AssetCollectionViewProps {
   onEditAsset: (asset: Asset) => void;
   onDeleteAsset: (asset: Asset) => void;
   onSelectStatusFilter: (status: AssetStatus | 'all') => void;
-  onLike: (assetId: string) => void;
-  onBookmark: (assetId: string) => void;
-  onFork: (asset: Asset) => void;
+  onLike?: (assetId: string) => void;
+  onBookmark?: (assetId: string) => void;
+  onFork?: (asset: Asset) => void;
   onReport: (asset: Asset) => void;
   onRestore: (assetId: string) => void;
   onPermanentDelete: (assetId: string) => void;
@@ -393,7 +394,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                     isBookmarked={bookmarkedAssetIds.includes(asset.id)}
                     isLiked={likedAssetIds.includes(asset.id)}
                     isTrashMode={activeVaultTab === 'trash'}
-                    creatorProfile={creatorProfilesById.get(asset.userId) || null}
+                    creatorProfile={creatorProfilesById.get(resolvePublicCreatorKey(asset)) || null}
                     onPreviewCreator={openCreatorPreview}
                   />
                 );

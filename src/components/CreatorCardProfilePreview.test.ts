@@ -9,13 +9,13 @@ const detailSource = readFileSync(new URL('./WorkDetailModal.tsx', import.meta.u
 describe('public Creator identity on Work cards', () => {
   it('loads canonical public profiles for cards instead of restoring legacy avatar blobs', () => {
     expect(collectionSource).toContain('usePublicCreatorProfiles(allAssets, currentUser)');
-    expect(collectionSource).toContain('creatorProfile={creatorProfilesById.get(asset.userId) || null}');
+    expect(collectionSource).toContain('creatorProfile={creatorProfilesById.get(resolvePublicCreatorKey(asset)) || null}');
     expect(cardSource).toContain('resolveWorkCreator(asset, resolvedCreatorProfile)');
   });
 
   it('loads the same canonical public profile in Work Detail for signed-out visitors', () => {
     expect(detailSource).toContain('usePublicCreatorProfiles(creatorProfileAssets, creatorProfile)');
-    expect(detailSource).toContain('creatorProfile || publicCreatorProfiles.get(asset.userId) || null');
+    expect(detailSource).toContain('creatorProfile || publicCreatorProfiles.get(resolvePublicCreatorKey(asset)) || null');
     expect(detailSource).toContain('resolveWorkCreator(asset, canonicalCreatorProfile)');
   });
 

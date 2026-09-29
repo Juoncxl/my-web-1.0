@@ -1,6 +1,40 @@
 import type { Asset, AssetIcon, AssetVisibility } from '../types';
 
 const ASSET_VISIBILITIES: AssetVisibility[] = ['public', 'private', 'draft'];
+const CXL_MEDIA_PROXY_ORIGIN = 'https://cxl.invalid';
+const CXL_MEDIA_PROXY_QUERY_KEYS = new Set(['scope', 'workId', 'ref', 'v']);
+
+/** Accept only the canonical same-origin media proxy path used by Google Work. */
+export function isCxlMediaProxyPath(value: string): boolean {
+  if (!value.startsWith('/api/cxl/media?')) return false;
+
+  try {
+    const url = new URL(value, CXL_MEDIA_PROXY_ORIGIN);
+    if (url.origin !== CXL_MEDIA_PROXY_ORIGIN || url.pathname !== '/api/cxl/media' || url.hash) return false;
+    if ([...url.searchParams.keys()].some(key => !CXL_MEDIA_PROXY_QUERY_KEYS.has(key))) return false;
+
+    const scopes = url.searchParams.getAll('scope');
+    const workIds = url.searchParams.getAll('workId');
+    const refs = url.searchParams.getAll('ref');
+    const cacheVersions = url.searchParams.getAll('v');
+    const versionOk = cacheVersions.length === 0 || cacheVersions.length === 1 && /^\d+$/.test(cacheVersions[0]);
+    const workIdOk = workIds.length === 1 && /^asset_[A-Za-z0-9_-]{1,96}$/.test(workIds[0]);
+    // Legacy (migrated) media uses the unscoped route with any stored media ID.
+    if (scopes.length === 0) return workIdOk && versionOk && refs.length === 1 && /^media:[A-Za-z0-9_-]{1,128}$/.test(refs[0]);
+    return scopes.length === 1 && ['owner', 'public'].includes(scopes[0])
+      && workIdOk
+      && refs.length === 1 && /^media:[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(refs[0])
+      && versionOk;
+  } catch {
+    return false;
+  }
+}
+
+/** Work Detail Image blocks support the existing sources plus the CXL proxy. */
+export function isValidWorkImageSource(value: string): boolean {
+  const source = value.trim();
+  return /^(?:data:image\/|blob:|https?:\/\/)/i.test(source) || isCxlMediaProxyPath(source);
+}
 
 function isAssetVisibility(value: unknown): value is AssetVisibility {
   return typeof value === 'string' && ASSET_VISIBILITIES.includes(value as AssetVisibility);
@@ -53,7 +87,9 @@ export function normalizeAssetVisibility(input: AssetVisibilityInput): Normalize
 export function isValidWorkIcon(icon?: AssetIcon | null): boolean {
   if (!icon || typeof icon.value !== 'string' || !icon.value.trim()) return false;
   if (icon.type === 'emoji' || icon.type === 'kaomoji') return true;
-  return /^(?:data:image\/[a-z0-9.+-]+;base64,|blob:|https?:\/\/)/i.test(icon.value.trim());
+  const source = icon.value.trim();
+  return /^(?:data:image\/[a-z0-9.+-]+;base64,|blob:|https?:\/\/)/i.test(source)
+    || isCxlMediaProxyPath(source);
 }
 
 export function isPublicFeedVisibility(asset: Pick<Asset, 'visibility' | 'isPublic'>): boolean {

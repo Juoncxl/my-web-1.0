@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Sparkles, Camera, Check, ArrowRight, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { isQaObjectUrl, restoreQaProfileImage, validateQaProfileImage } from '../lib/qaProfileImageStore';
 
 const PRESET_AVATARS = [
@@ -61,7 +61,7 @@ export const OnboardingModal: React.FC = () => {
       let nextAvatarUrl = avatarUrl;
       let nextAvatarImageKey = avatarImageKey;
       if (avatarFile) {
-        const upload = await supabaseService.uploadProfileImage(currentUser?.id || '', avatarFile, 'avatar');
+        const upload = await cxlDataService.profiles.uploadImage(currentUser?.id || '', avatarFile, 'avatar');
         if (!upload.data) { setErrorMsg(upload.error || 'อัปโหลดรูปโปรไฟล์ไม่สำเร็จ'); return; }
         nextAvatarUrl = upload.data;
         nextAvatarImageKey = upload.imageKey || null;

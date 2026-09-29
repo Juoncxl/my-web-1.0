@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileView, shouldNormalizeOwnerProfileContext } from './profileRouting';
+import { getLegacyProfileRedirect, isOwnerProfileRouteSlug, parseCanonicalProfileLocation, resolveProfileView, resolveProfileWorksReadScope, shouldNormalizeOwnerProfileContext } from './profileRouting';
 
 describe('canonical Profile routing', () => {
+  it('keeps the configured Owner slug in Owner scope after session restoration without presentation enrichment', () => {
+    const restoredOwner = { id: 'private-owner-key', username: 'juoncxl' };
+    expect(isOwnerProfileRouteSlug('juoncxl', restoredOwner)).toBe(true);
+    expect(isOwnerProfileRouteSlug('JUONCXL', restoredOwner)).toBe(true);
+    expect(isOwnerProfileRouteSlug('juoncxl', null)).toBe(false);
+    expect(isOwnerProfileRouteSlug('another-creator', restoredOwner)).toBe(false);
+    expect(resolveProfileWorksReadScope('juoncxl', restoredOwner)).toEqual({ type: 'owner', userId: 'private-owner-key' });
+    expect(resolveProfileWorksReadScope('another-creator', restoredOwner)).toEqual({ type: 'public', creatorSlug: 'another-creator' });
+    expect(resolveProfileWorksReadScope('juoncxl', null)).toEqual({ type: 'public', creatorSlug: 'juoncxl' });
+  });
+
   it('preserves Profile identity in public preview', () => {
     const route = parseCanonicalProfileLocation('/@juoncxl', '?preview=public');
 

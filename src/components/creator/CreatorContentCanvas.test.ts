@@ -12,6 +12,7 @@ import {
   getVisibleCreatorContentSectionIds,
   normalizeCreatorContentSectionOrder,
   reorderCreatorContentSections,
+  removeImagePromptExample,
   removeBotCustomField,
   updateBotCustomFieldTitle,
   updateContentEditorValue,
@@ -22,6 +23,7 @@ import {
 } from './creatorContentModel';
 
 const canvasSource = readFileSync(new URL('./CreatorContentCanvas.tsx', import.meta.url), 'utf8');
+const canvasStyles = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
 const workspaceSource = readFileSync(new URL('./CreatorWorkWorkspace.tsx', import.meta.url), 'utf8');
 
 function blank(): CreatorContentCanvasDraft {
@@ -73,12 +75,26 @@ describe('CreatorContentCanvas dynamic draft model', () => {
     const withToolModel = updateImagePromptToolModel(original, 'TensorArt — Z-Image Turbo');
     const withImages = updateImagePromptExamples(withToolModel, ['data:image/png;base64,one']);
     expect(original.imagePrompt.toolModel).toBe('');
-    expect(withImages.imagePrompt).toEqual({ toolModel: 'TensorArt — Z-Image Turbo', prompt: '', exampleImages: ['data:image/png;base64,one'] });
+    expect(withImages.imagePrompt).toMatchObject({ toolModel: 'TensorArt — Z-Image Turbo', prompt: '', exampleImages: ['data:image/png;base64,one'] });
+    expect(withImages.imagePrompt.exampleImageMediaIds).toHaveLength(1);
+    expect(withImages.imagePrompt.exampleImageMediaIds?.[0]).toMatch(/^[a-f0-9-]{36}$/i);
     expect(canvasSource).toContain('เครื่องมือ / โมเดลที่ใช้');
     expect(canvasSource).toContain('TensorArt — Z-Image Turbo, ChatGPT, Gemini');
     expect(canvasSource).not.toContain('แอปที่ใช้');
     expect(canvasSource).not.toContain('platformOptions');
     expect(canvasSource).not.toContain('appPlatforms');
+  });
+
+  it('shows a visible accessible delete affordance and removes only the selected example image', () => {
+    const images = ['data:image/png;base64,first', 'data:image/png;base64,second', 'data:image/png;base64,third'];
+    expect(removeImagePromptExample(images, 1)).toEqual(['data:image/png;base64,first', 'data:image/png;base64,third']);
+    expect(images).toEqual(['data:image/png;base64,first', 'data:image/png;base64,second', 'data:image/png;base64,third']);
+    expect(canvasSource).toContain('onClick={() => onExampleImagesChange(removeImagePromptExample(draft.imagePrompt.exampleImages, index))}');
+    expect(canvasSource).toContain('<span className="csp-content-example-delete" aria-hidden="true"><Trash2 className="h-4 w-4" /></span>');
+    expect(canvasSource).toContain('aria-label={`ลบภาพตัวอย่างที่ ${index + 1}`}');
+    expect(canvasStyles).toContain('.csp-work-modal .csp-content-example-delete {');
+    expect(canvasStyles).toContain('position: absolute;');
+    expect(canvasStyles).toContain('background: rgb(24 24 27 / 88%);');
   });
 
   it('starts the Bot Prompt section with one blank custom field and no fixed fields', () => {

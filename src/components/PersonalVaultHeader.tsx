@@ -2,7 +2,6 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import type { Folder } from '../types';
 import {
-  Bookmark,
   Clock3,
   Folder as FolderIcon,
   Layers3,
@@ -28,17 +27,15 @@ interface PersonalVaultHeaderProps {
   onCreateAsset: () => void;
 }
 
-const primaryTabs: Array<{ id: Extract<VaultTabType, 'my_assets' | 'folders' | 'bookmarks'>; label: string; icon: typeof Layers3 }> = [
+const primaryTabs: Array<{ id: Extract<VaultTabType, 'my_assets' | 'folders'>; label: string; icon: typeof Layers3 }> = [
   { id: 'my_assets', label: 'ผลงาน', icon: Layers3 },
-  { id: 'folders', label: 'โฟลเดอร์', icon: FolderIcon },
-  { id: 'bookmarks', label: 'บันทึกไว้', icon: Bookmark }
+  { id: 'folders', label: 'โฟลเดอร์', icon: FolderIcon }
 ];
 
 export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
   totalAssetsCount,
   publicCount,
   privateCount,
-  bookmarksCount = 0,
   trashCount = 0,
   folders,
   activeVaultTab,
@@ -81,7 +78,7 @@ export const PersonalVaultHeader: React.FC<PersonalVaultHeaderProps> = ({
       <nav className="cv-vault-navigation" aria-label="เมนูคลังผลงาน">
         <div className="cv-vault-primary-tabs">
           {primaryTabs.map(({ id, label, icon: Icon }) => {
-            const count = id === 'my_assets' ? totalAssetsCount : id === 'bookmarks' ? bookmarksCount : folders.length;
+            const count = id === 'my_assets' ? totalAssetsCount : folders.length;
             const isActive = activeVaultTab === id;
             return (
               <button

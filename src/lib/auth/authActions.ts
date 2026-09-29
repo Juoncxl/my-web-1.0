@@ -1,30 +1,9 @@
 import type { AuthResponse } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
-import { getSupabaseClient, isLocalRuntime, supabaseConfigStatus } from '../supabaseClient';
-import { supabaseService } from '../supabaseService';
-import { mapSupabaseAuthUser } from './authUserMapper';
+import { cxlAuthService } from '../../data/cxlAuthService';
+import { isVercelOwnerAuth } from './ownerAuthBackend';
 
 let logoutInFlight: Promise<void> | null = null;
-
-function logAuthFailure(operation: string, error: unknown) {
-  if (!isLocalRuntime()) return;
-  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
-  const message = typeof record.message === 'string' ? record.message.replace(/[\r\n]+/g, ' ').slice(0, 300) : 'Unknown auth error';
-  console.warn(`[supabase:auth:${operation}] failed`, {
-    code: typeof record.code === 'string' ? record.code : undefined,
-    status: typeof record.status === 'number' ? record.status : undefined,
-    name: typeof record.name === 'string' ? record.name : undefined,
-    message
-  });
-}
-
-function logAuthConfigUnavailable(operation: string) {
-  if (!isLocalRuntime()) return;
-  console.warn(`[supabase:auth:${operation}] skipped because client is not configured`, {
-    url: supabaseConfigStatus.urlConfigured ? 'configured' : 'missing',
-    anonKey: supabaseConfigStatus.anonKeyConfigured ? 'configured' : 'missing'
-  });
-}
 
 function safeAuthMessage(error: unknown, fallback: string): string {
   const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
@@ -40,39 +19,32 @@ function safeAuthMessage(error: unknown, fallback: string): string {
   return message;
 }
 
-function mapAuthenticatedUser(authUser: Parameters<typeof mapSupabaseAuthUser>[0]) {
-  const profileSnapshot = supabaseService.getProfileSnapshot(authUser.id);
-  return mapSupabaseAuthUser(authUser, profileSnapshot?.id === authUser.id ? profileSnapshot : null);
-}
-
 async function waitForLogoutCompletion(): Promise<void> {
   if (logoutInFlight) await logoutInFlight;
 }
 
 export async function signUpWithEmail(email: string, pass: string): Promise<AuthResponse> {
+  if (isVercelOwnerAuth) return { success: false, error: 'สมัครสมาชิกทั่วไปไม่เปิดใน Owner-only mode' };
   try {
     await waitForLogoutCompletion();
     const cleanEmail = email.toLowerCase().trim();
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      logAuthConfigUnavailable('signup');
+    if (!cxlAuthService.isAvailable()) {
+      cxlAuthService.logUnavailable('signup');
       return {
         success: false,
         error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
 
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: pass,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: { display_name: cleanEmail.split('@')[0] }
-      }
-    });
+    const authResult = await cxlAuthService.signUp(cleanEmail, pass);
+    if (!authResult) {
+      cxlAuthService.logUnavailable('signup');
+      return { success: false, error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
+    }
+    const { data, error } = authResult;
 
     if (error) {
-      logAuthFailure('signup', error);
+      cxlAuthService.logFailure('signup', error);
       return { success: false, error: safeAuthMessage(error, 'การสมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') };
     }
     if (!data.user) return { success: false, error: 'ไม่พบข้อมูลผู้ใช้จากการลงทะเบียน' };
@@ -87,35 +59,37 @@ export async function signUpWithEmail(email: string, pass: string): Promise<Auth
 
     return {
       success: true,
-      user: mapAuthenticatedUser(data.user),
+      user: await cxlAuthService.mapUser(data.user),
       isNewUser: true
     };
   } catch (error) {
-    logAuthFailure('signup:exception', error);
+    cxlAuthService.logFailure('signup:exception', error);
     return { success: false, error: safeAuthMessage(error, 'การสมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') };
   }
 }
 
 export async function loginWithEmail(email: string, pass: string): Promise<AuthResponse> {
+  if (isVercelOwnerAuth) return { success: false, error: 'Owner mode ใช้การเข้าสู่ระบบด้วย Google เท่านั้น' };
   try {
     await waitForLogoutCompletion();
     const cleanEmail = email.toLowerCase().trim();
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      logAuthConfigUnavailable('login');
+    if (!cxlAuthService.isAvailable()) {
+      cxlAuthService.logUnavailable('login');
       return {
         success: false,
         error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง'
       };
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password: pass
-    });
+    const authResult = await cxlAuthService.signInWithPassword(cleanEmail, pass);
+    if (!authResult) {
+      cxlAuthService.logUnavailable('login');
+      return { success: false, error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
+    }
+    const { data, error } = authResult;
 
     if (error) {
-      logAuthFailure('login', error);
+      cxlAuthService.logFailure('login', error);
       return { success: false, error: safeAuthMessage(error, 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลหรือรหัสผ่าน') };
     }
     if (!data.user || !data.session) {
@@ -124,11 +98,11 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
 
     return {
       success: true,
-      user: mapAuthenticatedUser(data.user),
+      user: await cxlAuthService.mapUser(data.user),
       isNewUser: false
     };
   } catch (error) {
-    logAuthFailure('login:exception', error);
+    cxlAuthService.logFailure('login:exception', error);
     return { success: false, error: safeAuthMessage(error, 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') };
   }
 }
@@ -136,22 +110,23 @@ export async function loginWithEmail(email: string, pass: string): Promise<AuthR
 export async function loginWithGoogle(): Promise<AuthResponse> {
   try {
     await waitForLogoutCompletion();
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      logAuthConfigUnavailable('google-login');
+    if (!cxlAuthService.isAvailable()) {
+      cxlAuthService.logUnavailable('google-login');
       return { success: false, error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
     }
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin }
-    });
+    const authResult = await cxlAuthService.signInWithGoogle();
+    if (!authResult) {
+      cxlAuthService.logUnavailable('google-login');
+      return { success: false, error: 'ระบบบัญชียังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง' };
+    }
+    const { error } = authResult;
 
     return error
-      ? (logAuthFailure('google-login', error), { success: false, error: safeAuthMessage(error, 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') })
+      ? (cxlAuthService.logFailure('google-login', error), { success: false, error: safeAuthMessage(error, 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') })
       : { success: true };
   } catch (error) {
-    logAuthFailure('google-login:exception', error);
+    cxlAuthService.logFailure('google-login:exception', error);
     return { success: false, error: safeAuthMessage(error, 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง') };
   }
 }
@@ -160,17 +135,17 @@ export async function logout(): Promise<void> {
   if (logoutInFlight) return logoutInFlight;
 
   const operation = (async () => {
-    const supabase = getSupabaseClient();
     try {
-      if (supabase) {
+      if (cxlAuthService.isAvailable()) {
         // The app's Logout button ends only this browser session. Using the
         // explicit local scope avoids revoking unrelated devices and narrows
         // the server-side cleanup before a fresh login.
-        const { error } = await supabase.auth.signOut({ scope: 'local' });
-        if (error) console.warn('Supabase signout failed:', error);
+        const result = await cxlAuthService.signOutLocal();
+        const error = result?.error;
+        if (error) console.warn('Auth signout failed:', error);
       }
     } catch (error) {
-      console.warn('Supabase signout exception:', error);
+      console.warn('Auth signout exception:', error);
     }
   })();
 

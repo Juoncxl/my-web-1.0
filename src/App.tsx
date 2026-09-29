@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import type { Asset, AssetCategory, AssetStatus } from './types';
@@ -17,16 +17,19 @@ import confetti from 'canvas-confetti';
 
 const brandMicroMarkUrl = new URL('./assets/brand/brand-micro-mark.svg', import.meta.url).href;
 import { useAssetData } from './hooks/useAssetData';
+import { hydrateAssetDetailInBackground, openAssetDetailImmediately, type DetailHydrationState } from './hooks/assetDetailRead';
 import { useFolderData } from './hooks/useFolderData';
 import { useEngagementData } from './hooks/useEngagementData';
 import { useRecentlyViewed } from './hooks/useRecentlyViewed';
 import { useAssetFilters } from './hooks/useAssetFilters';
 import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
-import { getLegacyProfileRedirect, parseCanonicalProfileLocation } from './lib/profileRouting';
-import { getCanonicalProfilePath, getCanonicalProfileSlug } from './lib/profileIdentity';
+import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileWorksReadScope } from './lib/profileRouting';
+import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
+import { isGoogleWorksReadBackend } from './data/cxlDataService';
+import { CATEGORIES, STATUS_PRESETS } from './lib/constants';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
 const CreatorSpacePage = React.lazy(() => import('./pages/CreatorSpacePage').then(module => ({ default: module.CreatorSpacePage })));
@@ -37,8 +40,40 @@ const MoveToFolderModal = React.lazy(() => import('./components/MoveToFolderModa
 const ReportModal = React.lazy(() => import('./components/ReportModal').then(module => ({ default: module.ReportModal })));
 const CreatorWorkWorkspace = React.lazy(() => import('./components/creator/CreatorWorkWorkspace').then(module => ({ default: module.CreatorWorkWorkspace })));
 
+function WorkDetailSummaryFallback({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  const cover = asset.previewImage || asset.previewImages?.[0] || '';
+  const categoryLabel = CATEGORIES[asset.category]?.name || asset.category;
+  const statusLabel = STATUS_PRESETS[asset.status || 'finished']?.name || asset.status || 'finished';
+  return <div className="work-detail-backdrop" data-work-detail-loading-shell>
+    <section className="work-detail-modal" role="dialog" aria-modal="true" aria-labelledby="work-detail-loading-title" aria-busy="true">
+      <header className="work-detail-header work-detail-header-actions-only">
+        <div className="work-detail-header-actions">
+          <button type="button" onClick={onClose} aria-label="ปิดรายละเอียดผลงาน"><X aria-hidden="true" /></button>
+        </div>
+      </header>
+      <div className="work-detail-body">
+        <div className="work-detail-grid">
+          <div className="work-detail-media-column" data-work-detail-section="media">
+            <div className={`work-detail-cover ${cover ? 'has-image' : 'has-fallback'}`}>
+              {cover ? <img src={cover} alt={`ภาพปก ${asset.title}`} referrerPolicy="no-referrer" />
+                : <div className="work-detail-mark">{asset.icon?.type === 'image' ? <img src={asset.icon.value} alt="" /> : <span>{asset.icon?.value || '✦'}</span>}</div>}
+            </div>
+          </div>
+          <div className="work-detail-copy">
+            <div className="work-detail-meta"><span>{categoryLabel}</span><span>{statusLabel}</span></div>
+            <h2 id="work-detail-loading-title">{asset.title}</h2>
+            <div className="work-detail-creator"><div className="work-detail-avatar">{asset.authorAvatar ? <img src={asset.authorAvatar} alt="" /> : 'CX'}</div><strong>{asset.authorName || 'ผู้สร้างผลงาน'}</strong></div>
+            {asset.shortDescription && <section className="work-detail-summary"><strong>คำอธิบายสั้น</strong><p>{asset.shortDescription}</p></section>}
+          </div>
+        </div>
+        <p role="status" aria-live="polite">กำลังเปิดรายละเอียดผลงาน…</p>
+      </div>
+    </section>
+  </div>;
+}
+
 function MainApp() {
-  const { 
+  const {
     currentUser, 
     isAuthOpen,
     setIsAuthOpen,
@@ -58,6 +93,7 @@ function MainApp() {
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
   const [activeVaultTab, setActiveVaultTab] = useState<VaultTabType>('my_assets');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<AssetCategory | 'all'>('all');
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -82,6 +118,11 @@ function MainApp() {
     return () => window.removeEventListener('popstate', rerenderForRoute);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
   const [operationError, setOperationError] = useState<string | null>(null);
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
   const reportOperationError = useCallback((message: string) => {
@@ -94,19 +135,11 @@ function MainApp() {
       // columns. Opening or editing a Work hydrates that one full row on
       // demand, so an owner profile with legacy long-form payloads does not
       // download every payload during its initial render.
-      let decodedSlug = creatorSlug;
-      try { decodedSlug = decodeURIComponent(creatorSlug).trim(); } catch { /* use the raw route value */ }
-      const isOwnerRoute = Boolean(
-        currentUser
-        && (
-          decodedSlug === currentUser.id
-          || decodedSlug.toLowerCase() === getCanonicalProfileSlug(currentUser).toLowerCase()
-        )
-      );
+      const profileWorksScope = resolveProfileWorksReadScope(creatorSlug, currentUser);
       const includeDeleted = profileRoute?.requestedTab === 'trash';
-      return isOwnerRoute
-        ? { userId: currentUser!.id, includeDeleted, detail: 'summary', limit: 100 } as const
-        : { creatorSlug, includeDeleted: false, detail: 'summary', limit: 100 } as const;
+      return profileWorksScope.type === 'owner'
+        ? { userId: profileWorksScope.userId, includeDeleted, detail: 'summary', limit: 100 } as const
+        : { creatorSlug: profileWorksScope.creatorSlug, includeDeleted: false, detail: 'summary', limit: 100 } as const;
     }
     if (workRoute?.[1]) {
       let assetId = workRoute[1];
@@ -124,6 +157,16 @@ function MainApp() {
   // A creator route must wait for Auth restoration once so it can choose the
   // owner query immediately instead of doing an anonymous read followed by a
   // second owner read. The public Feed remains independent and starts at once.
+  const indexedOwnerSearch = isGoogleWorksReadBackend && 'userId' in assetLoadOptions && Boolean(assetLoadOptions.userId) && assetLoadOptions.detail === 'summary';
+  const effectiveAssetLoadOptions = useMemo(() => indexedOwnerSearch
+    ? { ...assetLoadOptions, search: debouncedSearchQuery.trim() || undefined }
+    : assetLoadOptions,
+  [assetLoadOptions, debouncedSearchQuery, indexedOwnerSearch]);
+  const detailOpenScopeKey = JSON.stringify([currentUser?.id || '', effectiveAssetLoadOptions]);
+  const latestDetailOpenScopeKey = useRef(detailOpenScopeKey);
+  const detailOpenSequence = useRef(0);
+  latestDetailOpenScopeKey.current = detailOpenScopeKey;
+
   const assetLoadingEnabled = !creatorSlug || !authLoading;
 
   const {
@@ -140,7 +183,7 @@ function MainApp() {
     moveAsset,
     updateAssetLikeCount,
     clearFolderAssignments
-  } = useAssetData(currentUser, setAssetLoadError, assetLoadingEnabled, assetLoadOptions);
+  } = useAssetData(currentUser, setAssetLoadError, assetLoadingEnabled, effectiveAssetLoadOptions);
   const {
     folders,
     isLoadingFolders,
@@ -155,6 +198,10 @@ function MainApp() {
     toggleBookmark,
     toggleLike
   } = useEngagementData(resolvedUserId, reportOperationError);
+  // This release has one authenticated Owner and read-only public visitors.
+  // Likes, bookmarks, and forks require visitor accounts, so keep them out of
+  // the active product surface while the Google owner backend is in use.
+  const engagementActionsAvailable = false;
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
   const visibleOperationError = operationError || assetLoadError;
 
@@ -175,6 +222,19 @@ function MainApp() {
     openMoveToFolder,
     closeMoveToFolder
   } = useAssetModalState(assets);
+  const [detailHydration, setDetailHydration] = useState<DetailHydrationState>(null);
+
+  const hydrateDetail = useCallback((assetId: string) => {
+    void hydrateAssetDetailInBackground<Asset>({
+      assetId,
+      sequence: detailOpenSequence,
+      scopeKey: latestDetailOpenScopeKey.current,
+      getCurrentScopeKey: () => latestDetailOpenScopeKey.current,
+      load: assetId => loadAssetDetail(assetId, { suppressError: true }),
+      setState: setDetailHydration,
+      clearState: () => setDetailHydration(current => current?.assetId === assetId ? null : current)
+    });
+  }, [loadAssetDetail]);
 
   // Simple UI-only state stays local to App; asset selections live in the
   // focused asset modal hook above.
@@ -205,11 +265,9 @@ function MainApp() {
   }, [legacyProfileRedirect]);
 
   // Track recently viewed items while keeping the selected asset canonical.
-  const handleOpenAssetView = useCallback(async (asset: Asset) => {
-    await loadAssetDetail(asset.id);
-    openAssetView(asset.id);
-    trackRecentlyViewed(asset.id);
-  }, [loadAssetDetail, openAssetView, trackRecentlyViewed]);
+  const handleOpenAssetView = useCallback((asset: Asset) => {
+    openAssetDetailImmediately(asset.id, openAssetView, trackRecentlyViewed, hydrateDetail);
+  }, [hydrateDetail, openAssetView, trackRecentlyViewed]);
 
   const handleViewChange = useCallback((view: 'feed' | 'vault') => {
     if (view === 'feed') {
@@ -246,7 +304,7 @@ function MainApp() {
     openCreateEditor();
   }, [authLoading, currentUser, openAuthModal, openCreateEditor]);
 
-  const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft) => {
+  const handleSaveCreatorWork = useCallback(async (draft: CreatorWorkDraft, context?: { requestId: string; expectedRevision?: number }) => {
     if (!currentUser) return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนบันทึกผลงาน' };
     const serialized = serializeCreatorWorkDraft({
       ...draft,
@@ -256,7 +314,7 @@ function MainApp() {
     if (editingAssetId) {
       const result = await updateAsset(editingAssetId, {
         ...serialized
-      });
+      }, context ? { requestId: context.requestId, expectedRevision: context.expectedRevision } : undefined);
       if (result.data) {
         return { success: true };
       }
@@ -272,7 +330,7 @@ function MainApp() {
       forkedFromAuthor: null,
       linkedAssetIds: [],
       versions: []
-    });
+    }, context ? { requestId: context.requestId } : undefined);
     if (result.data) {
       navigate(getCanonicalProfilePath(currentUser, '?tab=works'));
       return { success: true };
@@ -455,6 +513,7 @@ function MainApp() {
     selectedStatusFilter,
     visibilityFilter,
     searchQuery,
+    searchAlreadyApplied: indexedOwnerSearch,
     bookmarkedAssetIds,
     recentlyViewedIds,
     currentUserId: currentUser?.id
@@ -492,9 +551,9 @@ function MainApp() {
     onOpenAsset: handleOpenAssetView,
     onEditAsset: handleEditVaultAsset,
     onDeleteAsset: handleDeleteVaultAsset,
-    onLike: handleLikeAsset,
-    onBookmark: handleToggleBookmark,
-    onFork: handleForkAsset,
+    onLike: engagementActionsAvailable ? handleLikeAsset : undefined,
+    onBookmark: engagementActionsAvailable ? handleToggleBookmark : undefined,
+    onFork: engagementActionsAvailable ? handleForkAsset : undefined,
     onReport: handleOpenReport,
     onRestore: handleRestoreAsset,
     onPermanentDelete: handlePermanentDeleteAsset,
@@ -525,8 +584,8 @@ function MainApp() {
           bookmarkedAssetIds={bookmarkedAssetIds}
           likedAssetIds={likedAssetIds}
           recentlyViewedIds={recentlyViewedIds}
-          onLike={handleLikeAsset}
-          onBookmark={handleToggleBookmark}
+          onLike={engagementActionsAvailable ? handleLikeAsset : undefined}
+          onBookmark={engagementActionsAvailable ? handleToggleBookmark : undefined}
           onDeleteAsset={handleDeleteVaultAsset}
           onRestoreAsset={handleRestoreAsset}
           onPermanentDeleteAsset={handlePermanentDeleteAsset}
@@ -574,9 +633,12 @@ function MainApp() {
       </React.Suspense>
 
       {/* Modals */}
-      <React.Suspense fallback={null}>
+      <React.Suspense fallback={viewingAsset ? <WorkDetailSummaryFallback asset={viewingAsset} onClose={closeAssetView} /> : null}>
       {viewingAsset && <WorkDetailModal
         asset={viewingAsset}
+        detailHydration={detailHydration?.assetId === viewingAsset.id
+          ? { status: detailHydration.status, onRetry: () => hydrateDetail(viewingAsset.id) }
+          : undefined}
         isOpen={!!viewingAsset}
         onClose={closeAssetView}
         preserveHeaderNavigation={Boolean(workRoute?.[1])}
@@ -584,9 +646,9 @@ function MainApp() {
         onDelete={handleSoftDeleteAsset}
         onPermanentDelete={handlePermanentDeleteAsset}
         onRestore={handleRestoreAsset}
-        onLike={handleLikeAsset}
-        onBookmark={handleToggleBookmark}
-        onFork={handleForkAsset}
+        onLike={engagementActionsAvailable ? handleLikeAsset : undefined}
+        onBookmark={engagementActionsAvailable ? handleToggleBookmark : undefined}
+        onFork={engagementActionsAvailable ? handleForkAsset : undefined}
         onReport={handleOpenReport}
         onSelectLinkedAsset={(linkedId) => {
           const target = assets.find(a => a.id === linkedId);
@@ -682,3 +744,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+

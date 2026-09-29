@@ -2,19 +2,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Settings2, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../context/AuthContext';
-import { supabaseService } from '../lib/supabaseService';
+import { cxlDataService } from '../data/cxlDataService';
 import { deleteQaProfileImage, getQaProfileImage, getQaProfileImageUrl, restoreQaProfileImage, isQaObjectUrl, validateQaProfileImage } from '../lib/qaProfileImageStore';
 import { SettingsBackupSection } from './settings/SettingsBackupSection';
 import { SettingsProfileSection } from './settings/SettingsProfileSection';
 import { SettingsSecuritySection } from './settings/SettingsSecuritySection';
 import { SettingsTabs } from './settings/SettingsTabs';
 import type { LegacySummary, SettingsMessage, SettingsTab } from './settings/SettingsTypes';
+import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
+import { callGoogleBackend } from '../data/adapters/google/googleTransport';
+import { rebuildPublicSnapshotAndWarm } from '../lib/publicWorksCache';
 
 const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
 
 export const SettingsModal: React.FC = () => {
   const { currentUser, isSettingsOpen, setIsSettingsOpen, updateProfile, changePassword } = useAuth();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(isVercelOwnerAuth ? 'backup' : 'profile');
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [bio, setBio] = useState(currentUser?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
@@ -32,6 +35,17 @@ export const SettingsModal: React.FC = () => {
   const [isImportingLegacy, setIsImportingLegacy] = useState(false);
   const [legacySummary, setLegacySummary] = useState<LegacySummary>({ assets: 0, folders: 0 });
   const [backupMsg, setBackupMsg] = useState<SettingsMessage | null>(null);
+  const [isRebuildingPublicSnapshot, setIsRebuildingPublicSnapshot] = useState(false);
+
+  const handleRebuildPublicSnapshot = async () => {
+    setIsRebuildingPublicSnapshot(true); setBackupMsg(null);
+    try {
+      const result = await rebuildPublicSnapshotAndWarm(() => callGoogleBackend<{ works: number }>('public.snapshot.rebuild', []));
+      setBackupMsg({ type: 'success', text: `อัปเดตข้อมูลสาธารณะสำเร็จ (${result.works} ผลงาน)` });
+    } catch (error: unknown) {
+      setBackupMsg({ type: 'error', text: errorMessage(error, 'สร้างข้อมูลสาธารณะไม่สำเร็จ') });
+    } finally { setIsRebuildingPublicSnapshot(false); }
+  };
 
   const revokeTemporaryAvatarPreview = () => {
     const previous = temporaryAvatarPreview.current;
@@ -40,7 +54,7 @@ export const SettingsModal: React.FC = () => {
   };
 
   useEffect(() => {
-    if (isSettingsOpen && currentUser?.id) setLegacySummary(supabaseService.getLegacyGuestDataSummary(currentUser.id));
+    if (isSettingsOpen && currentUser?.id) setLegacySummary(cxlDataService.works.getLegacyGuestDataSummary(currentUser.id));
   }, [currentUser?.id, isSettingsOpen]);
 
   useEffect(() => {
@@ -89,7 +103,7 @@ export const SettingsModal: React.FC = () => {
       let nextAvatarUrl = avatarUrl;
       let nextAvatarImageKey = avatarImageKey;
       if (avatarFile) {
-        const upload = await supabaseService.uploadProfileImage(currentUser.id, avatarFile, 'avatar');
+        const upload = await cxlDataService.profiles.uploadImage(currentUser.id, avatarFile, 'avatar');
         if (!upload.data) { setProfileMsg({ type: 'error', text: upload.error || 'อัปโหลดรูปโปรไฟล์ไม่สำเร็จ' }); return; }
         nextAvatarUrl = upload.data;
         nextAvatarImageKey = upload.imageKey || null;
@@ -124,7 +138,7 @@ export const SettingsModal: React.FC = () => {
     if (!currentUser?.id) { setBackupMsg({ type: 'error', text: 'กรุณาเข้าสู่ระบบเพื่อสำรองข้อมูลผลงานส่วนตัว' }); return; }
     setIsExporting(true); setBackupMsg(null);
     try {
-      const [assetsRes, foldersRes] = await Promise.all([supabaseService.fetchAssets({ userId: currentUser.id, includeDeleted: true }), supabaseService.fetchFolders(currentUser.id)]);
+      const [assetsRes, foldersRes] = await Promise.all([cxlDataService.works.fetch({ userId: currentUser.id, includeDeleted: true }), cxlDataService.folders.fetch(currentUser.id)]);
       if (assetsRes.error || foldersRes.error) throw new Error(assetsRes.error || foldersRes.error || 'โหลดข้อมูลสำหรับสำรองไม่สำเร็จ');
       const userAssets = (assetsRes.data || []).filter((asset) => asset.userId === currentUser.id);
       const userFolders = (foldersRes.data || []).filter((folder) => folder.userId === currentUser.id);
@@ -140,10 +154,11 @@ export const SettingsModal: React.FC = () => {
   };
 
   const handleImportLegacyGuestData = async () => {
+    if (isVercelOwnerAuth) { setBackupMsg({ type: 'error', text: 'นำเข้าข้อมูลเก่ายังไม่รองรับใน Owner-only mode' }); return; }
     if (!currentUser) return;
     setIsImportingLegacy(true); setBackupMsg(null);
     try {
-      const result = await supabaseService.importLegacyGuestData(currentUser);
+      const result = await cxlDataService.works.importLegacyGuestData(currentUser);
       setLegacySummary({ assets: result.remainingAssets, folders: result.remainingFolders });
       if (result.importedAssets > 0 || result.importedFolders > 0) window.dispatchEvent(new Event('creator-vault-cloud-data-changed'));
       setBackupMsg(result.success ? { type: 'success', text: `นำเข้าข้อมูลเก่าสำเร็จ: ${result.importedAssets} ผลงาน และ ${result.importedFolders} โฟลเดอร์ (ผลงานถูกตั้งเป็นฉบับร่างส่วนตัว)` } : { type: 'error', text: result.error || `นำเข้าได้บางส่วน ยังเหลือ ${result.remainingAssets} ผลงาน และ ${result.remainingFolders} โฟลเดอร์` });
@@ -156,13 +171,25 @@ export const SettingsModal: React.FC = () => {
     <div className="cv-settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" data-settings-tab={activeTab}>
       <header className="cv-settings-chrome">
         <div className="cv-settings-heading"><div className="cv-settings-heading-copy"><div className="cv-settings-heading-icon"><Settings2 className="w-5 h-5" /></div><div><h2 id="settings-modal-title">ตั้งค่าบัญชี & การสำรองข้อมูล</h2><p>จัดการโปรไฟล์ ความปลอดภัย และการสำรองข้อมูล</p></div></div><button type="button" onClick={() => setIsSettingsOpen(false)} className="cv-settings-close" aria-label="ปิดหน้าตั้งค่า"><X className="w-4 h-4" /></button></div>
-        <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        {isVercelOwnerAuth
+          ? <p className="px-6 py-3 text-xs text-slate-500">โหมด Owner-only: การแก้ไขโปรไฟล์และรหัสผ่านถูกพักไว้ชั่วคราว</p>
+          : <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />}
       </header>
       <div className="cv-settings-content">
-        {activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
-        {activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
+        {isVercelOwnerAuth && <section className="mx-6 mb-5 rounded-xl border border-violet-200 bg-violet-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">ข้อมูลผลงานสาธารณะ</h3>
+          <p className="mt-1 text-xs text-slate-600">สร้างหรือซ่อม snapshot ที่ใช้แสดงผลงานหน้าแรกและหน้า Creator</p>
+          <button type="button" onClick={() => void handleRebuildPublicSnapshot()} disabled={isRebuildingPublicSnapshot}
+            className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+            {isRebuildingPublicSnapshot ? 'กำลังอัปเดต…' : 'อัปเดตข้อมูลสาธารณะ'}
+          </button>
+          {backupMsg && <p role="status" className={`mt-2 text-xs ${backupMsg.type === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>{backupMsg.text}</p>}
+        </section>}
+        {!isVercelOwnerAuth && activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
+        {!isVercelOwnerAuth && activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
       </div>
     </div>
   </div>;
 };
+

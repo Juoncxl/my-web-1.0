@@ -66,7 +66,7 @@ describe('12E.2.1 Work presentation parity and action cleanup', () => {
     expect(detailSource).toContain("className={`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`}");
     expect(detailSource).toContain('className="work-detail-gallery-download"');
     expect(detailSource).toContain('บันทึกรูปประกอบคอลแลปรูปที่');
-    expect(detailSource).toContain('getFreshMediaDownload(input.mediaId');
+    expect(detailSource).toContain('cxlDataService.media.getFreshDownload(input.mediaId');
     expect(detailSource).toContain('className="work-detail-reference-download"');
     expect(detailSource).toContain('บันทึกรูปอ้างอิงที่');
     expect(detailSource).toContain('navigator.canShare({ files })');

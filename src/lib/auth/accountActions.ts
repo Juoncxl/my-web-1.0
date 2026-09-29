@@ -1,8 +1,9 @@
 import type { ProfileSocialLink, User } from '../../types';
 import { formatFriendlyErrorMessage } from '../apiHelper';
-import { getSupabaseClient } from '../supabaseClient';
-import { supabaseService } from '../supabaseService';
 import { normalizeProfileUsername } from '../profileIdentity';
+import { cxlDataService } from '../../data/cxlDataService';
+import { cxlAuthService } from '../../data/cxlAuthService';
+import { isVercelOwnerAuth } from './ownerAuthBackend';
 
 export interface ProfileUpdateResult {
   success: boolean;
@@ -14,6 +15,9 @@ export async function updateProfile(
   currentUser: User | null,
   data: { displayName?: string; username?: string; bio?: string; avatarUrl?: string; coverUrl?: string; avatarImageKey?: string | null; coverImageKey?: string | null; socialLinks?: ProfileSocialLink[] }
 ): Promise<ProfileUpdateResult> {
+  if (isVercelOwnerAuth) {
+    return { success: false, error: 'แก้ไขโปรไฟล์ยังไม่รองรับใน Owner-only mode' };
+  }
   if (!currentUser) {
     return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนแก้ไขโปรไฟล์' };
   }
@@ -30,7 +34,7 @@ export async function updateProfile(
     socialLinks: data.socialLinks !== undefined ? data.socialLinks : currentUser.socialLinks
   };
 
-  const saved = await supabaseService.upsertProfile(updatedUser);
+  const saved = await cxlDataService.profiles.upsert(updatedUser);
   if (!saved.success) {
     return {
       success: false,
@@ -46,6 +50,7 @@ export async function changePassword(
   currentPass: string,
   newPass: string
 ): Promise<{ success: boolean; error?: string }> {
+  if (isVercelOwnerAuth) return { success: false, error: 'เปลี่ยนรหัสผ่านยังไม่รองรับใน Owner-only mode' };
   if (!currentUser) {
     return { success: false, error: 'กรุณาเข้าสู่ระบบก่อนเปลี่ยนรหัสผ่าน' };
   }
@@ -53,19 +58,19 @@ export async function changePassword(
     return { success: false, error: 'บัญชี OAuth ต้องจัดการรหัสผ่านผ่านผู้ให้บริการบัญชี' };
   }
 
-  const supabase = getSupabaseClient();
-  if (!supabase) return { success: false, error: 'ไม่สามารถเชื่อมต่อระบบบัญชีได้' };
+  if (!cxlAuthService.isAvailable()) return { success: false, error: 'ไม่สามารถเชื่อมต่อระบบบัญชีได้' };
 
   try {
-    const { error: verifyError } = await supabase.auth.signInWithPassword({
-      email: currentUser.email,
-      password: currentPass
-    });
+    const verification = await cxlAuthService.signInWithPassword(currentUser.email, currentPass);
+    if (!verification) return { success: false, error: 'ไม่สามารถเชื่อมต่อระบบบัญชีได้' };
+    const { error: verifyError } = verification;
     if (verifyError) {
       return { success: false, error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' };
     }
 
-    const { error } = await supabase.auth.updateUser({ password: newPass });
+    const update = await cxlAuthService.updatePassword(newPass);
+    if (!update) return { success: false, error: 'ไม่สามารถเชื่อมต่อระบบบัญชีได้' };
+    const { error } = update;
     return error
       ? { success: false, error: formatFriendlyErrorMessage(error) }
       : { success: true };

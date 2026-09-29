@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset } from '../../types';
 import { createBlankCreatorWorkDraft } from './CreatorWorkWorkspace';
+import { createMediaItem } from './creatorMediaModel';
 import { addCollabParticipant, createBlankCollabParticipant, createPublicCollaborationSnapshot } from './creatorCollabModel';
 import { createPublicAssetExport, serializeCreatorWorkDraft } from './creatorWorkSerializer';
 
@@ -39,6 +40,60 @@ describe('Creator Work canonical serializer', () => {
         genres: ['แฟนตาซี']
       }
     });
+  });
+
+  it('emits separate stable media identities for standard Work local images', () => {
+    const result = serialize({
+      icon: { type: 'image', value: 'blob:icon', mediaId: '123e4567-e89b-42d3-a456-426614174001', mimeType: 'image/png' },
+      mediaDraft: {
+        items: [createMediaItem('blob:gallery', 'image/webp', 'gallery-item', '123e4567-e89b-42d3-a456-426614174002')],
+        coverId: 'gallery-item'
+      },
+      contentBlocks: [{
+        id: 'creator-image-example-0', type: 'Image', title: 'รูปตัวอย่าง 1', body: 'data:image/png;base64,AA==',
+        mediaId: '123e4567-e89b-42d3-a456-426614174003'
+      }]
+    });
+
+    expect(result.workMediaDraft).toEqual([
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174001', purpose: 'icon', source: 'blob:icon' }),
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174002', purpose: 'gallery', isCover: true, sortOrder: 0 }),
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174003', purpose: 'prompt_example', contextId: 'creator-image-example-0' })
+    ]);
+  });
+
+  it('converts hydrated Google proxy sources back to media refs before Work persistence', () => {
+    const iconId = '123e4567-e89b-42d3-a456-426614174011';
+    const galleryId = '123e4567-e89b-42d3-a456-426614174012';
+    const blockId = '123e4567-e89b-42d3-a456-426614174013';
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const proxy = (id: string) => `/api/cxl/media?scope=owner&workId=${workId}&ref=media%3A${id}`;
+    const result = serialize({
+      icon: { type: 'image', value: proxy(iconId), mediaId: iconId, mimeType: 'image/png' },
+      mediaDraft: { items: [createMediaItem(proxy(galleryId), 'image/png', 'gallery-item', galleryId)], coverId: 'gallery-item' },
+      coverImage: proxy(galleryId), previewImages: [proxy(galleryId)],
+      contentBlocks: [{ id: 'image-block', type: 'Image', title: 'Image', body: proxy(blockId), mediaId: blockId }]
+    });
+
+    expect(result.icon.value).toBe(`media:${iconId}`);
+    expect(result.previewImage).toBe(`media:${galleryId}`);
+    expect(result.previewImages).toEqual([`media:${galleryId}`]);
+    expect(result.contentBlocks[0].body).toBe(`media:${blockId}`);
+    expect(result.workMediaDraft).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('/api/cxl/media');
+  });
+
+  it('includes icon and gallery upload descriptors for Collaboration drafts', () => {
+    const result = serialize({
+      workMode: 'collab',
+      icon: { type: 'image', value: 'blob:collab-icon', mediaId: '123e4567-e89b-42d3-a456-426614174001' },
+      mediaDraft: { items: [createMediaItem('blob:collab-gallery', 'image/png', 'collab-item', '123e4567-e89b-42d3-a456-426614174002')], coverId: 'collab-item' }
+    });
+
+    expect(result.workMediaDraft).toEqual([
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174001', purpose: 'icon', source: 'blob:collab-icon' }),
+      expect.objectContaining({ mediaId: '123e4567-e89b-42d3-a456-426614174002', purpose: 'gallery', source: 'blob:collab-gallery' })
+    ]);
   });
 
   it('uses the Collaboration name as the card title and keeps contacts private', () => {

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { User } from '../../types';
-import { getSupabaseClient } from '../supabaseClient';
-import { supabaseService } from '../supabaseService';
-import { startAuthSessionBootstrap } from './authSessionBootstrap';
+import { cxlAuthService } from '../../data/cxlAuthService';
 
 export interface AuthSessionState {
   currentUser: User | null;
@@ -14,7 +12,7 @@ export interface AuthSessionState {
 export function useAuthSession(): AuthSessionState {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const bootstrapRef = useRef<ReturnType<typeof startAuthSessionBootstrap> | null>(null);
+  const bootstrapRef = useRef<ReturnType<typeof cxlAuthService.createSessionBootstrap> | null>(null);
 
   const transitionToGuest = useCallback(() => {
     const bootstrap = bootstrapRef.current;
@@ -23,20 +21,12 @@ export function useAuthSession(): AuthSessionState {
   }, []);
 
   useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!supabase) {
+    const bootstrap = cxlAuthService.createSessionBootstrap({ setCurrentUser, setLoading: setIsLoading });
+    if (!bootstrap) {
       setCurrentUser(null);
       setIsLoading(false);
       return;
     }
-
-    const bootstrap = startAuthSessionBootstrap({
-      auth: supabase.auth,
-      getProfileSnapshot: userId => supabaseService.getProfileSnapshot(userId),
-      loadProfile: userId => supabaseService.getProfile(userId),
-      setCurrentUser,
-      setLoading: setIsLoading
-    });
     bootstrapRef.current = bootstrap;
 
     return () => {

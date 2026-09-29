@@ -1,3 +1,5 @@
+import type { AssetMediaRecord } from '../../types';
+
 /**
  * Composer-local unified media draft.
  *
@@ -14,6 +16,7 @@ export type CreatorMediaKind = 'image' | 'gif';
 export interface CreatorMediaItem {
   id: string;
   src: string;
+  /** Stable media identity for upload retries; independent of Work request IDs. */
   mediaId?: string;
   localBlobKey?: string;
   kind: CreatorMediaKind;
@@ -52,11 +55,16 @@ export function isSupportedCreatorGlobalMediaFile(file: { type: string; size: nu
   return isSupportedCreatorMediaFile(file) && file.type !== 'image/gif';
 }
 
-export function createMediaItem(src: string, mimeType?: string, id = `media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`): CreatorMediaItem {
-  return { id, src, kind: getCreatorMediaKind(mimeType, src), mimeType };
+export function createMediaItem(
+  src: string,
+  mimeType?: string,
+  id = `media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  mediaId?: string
+): CreatorMediaItem {
+  return { id, src, ...(mediaId ? { mediaId } : {}), kind: getCreatorMediaKind(mimeType, src), mimeType };
 }
 
-export function createMediaDraftFromLegacy(input: { previewImages?: string[]; previewImage?: string }): CreatorMediaDraft {
+export function createMediaDraftFromLegacy(input: { previewImages?: string[]; previewImage?: string; media?: AssetMediaRecord[] }): CreatorMediaDraft {
   const legacyCover = (input.previewImage || '').trim();
   const sources = [...(input.previewImages || [])];
   if (legacyCover && !sources.includes(legacyCover)) sources.unshift(legacyCover);
@@ -66,9 +74,26 @@ export function createMediaDraftFromLegacy(input: { previewImages?: string[]; pr
 
   const items = sources
     .filter((src, index) => Boolean(src) && sources.indexOf(src) === index)
-    .map((src, index) => createMediaItem(src, undefined, `legacy-media-${index}`));
+    .map((src, index) => {
+      const refId = src.startsWith('media:') ? src.slice('media:'.length) : '';
+      const proxyRecord = input.media?.find(item => item.delivery === 'vercel_proxy' && item.signedUrl === src && item.purpose === 'gallery');
+      return createMediaItem(src, proxyRecord?.mimeType, `legacy-media-${index}`,
+        refId || proxyRecord?.id || (isLocalMediaSource(src) ? createStableMediaId_() : undefined));
+    });
   const coverItem = legacyCover ? items.find(item => item.src === legacyCover) : undefined;
   return { items, coverId: coverItem?.id || items[0]?.id || null };
+}
+
+function isLocalMediaSource(value: string): boolean {
+  return /^data:image\//i.test(value) || /^blob:/i.test(value);
+}
+
+function createStableMediaId_(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, token => {
+    const value = Math.floor(Math.random() * 16);
+    return (token === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+  });
 }
 
 export function mediaDraftToPreviewImages(draft: CreatorMediaDraft): string[] {
