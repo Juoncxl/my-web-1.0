@@ -37,6 +37,14 @@ describe('public Works cache warming', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('also warms the public Work detail when the saved Work is public', () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    warmAfterPublicWorkMutation('works.update', { data: { id: 'asset_abc', visibility: 'public', isPublic: true }, error: null });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith('/api/cxl/public-work?id=asset_abc', expect.objectContaining({ method: 'GET' }));
+  });
+
   it('does not warm after failed or private-only mutations', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
