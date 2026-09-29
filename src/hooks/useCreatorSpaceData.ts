@@ -39,12 +39,19 @@ export function getCreatorSpaceRenderState(input: {
   return input.isNotFound ? 'not-found' : 'profile-failed';
 }
 
-export function selectCreatorAssets(source: Asset[], profileId: string | undefined, isOwner: boolean): Asset[] {
+export function selectCreatorAssets(
+  source: Asset[],
+  profileId: string | undefined,
+  isOwner: boolean,
+  publicProfileId?: string
+): Asset[] {
   const normalizedProfileId = profileId?.trim();
   if (!normalizedProfileId) return [];
+  const normalizedPublicProfileId = publicProfileId?.trim();
   return source.filter(asset => {
     const matchesCreator = isOwner
       ? asset.userId === normalizedProfileId
+        || Boolean(normalizedPublicProfileId && resolvePublicCreatorKey(asset) === normalizedPublicProfileId)
       : resolvePublicCreatorKey(asset) === normalizedProfileId;
     return matchesCreator && (isOwner || isPublicFeedAsset(asset));
   });
@@ -200,8 +207,13 @@ export function useCreatorSpaceData(
     (ownerFallback?.publicCreatorId && resolvedProfile.publicCreatorId === ownerFallback.publicCreatorId)
   ));
   const assets = useMemo(
-    () => selectCreatorAssets(sources.assets, isOwner ? currentUserId : resolvedProfile?.publicCreatorId || resolvedProfile?.id, isOwner),
-    [currentUserId, isOwner, resolvedProfile?.id, resolvedProfile?.publicCreatorId, sources.assets]
+    () => selectCreatorAssets(
+      sources.assets,
+      isOwner ? currentUserId : resolvedProfile?.publicCreatorId || resolvedProfile?.id,
+      isOwner,
+      isOwner ? ownerFallback?.publicCreatorId || resolvedProfile?.publicCreatorId : undefined
+    ),
+    [currentUserId, isOwner, ownerFallback?.publicCreatorId, resolvedProfile?.id, resolvedProfile?.publicCreatorId, sources.assets]
   );
   const folders = useMemo(
     () => selectCreatorFolders(sources.folders, isOwner ? currentUserId : resolvedProfile?.id, isOwner),

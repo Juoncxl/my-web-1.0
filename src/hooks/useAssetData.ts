@@ -3,6 +3,7 @@ import type { Asset, User } from '../types';
 import { cxlDataService, type FetchAssetsOptions, type WorkCreateOptions, type WorkUpdateOptions } from '../data/cxlDataService';
 import { ScopedReadLifecycle } from './scopedReadLifecycle';
 import { isVercelOwnerAuth } from '../lib/auth/ownerAuthBackend';
+import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 import { readWithBoundedRetry } from './boundedReadRetry';
 import { loadAssetDetailWithBoundedRetry, shouldRetryOwnerDetailRead } from './assetDetailRead';
 
@@ -39,6 +40,15 @@ export function useAssetData(
   ].join('|');
   const requestScopeKey = JSON.stringify([loadIdentityUserId || '', loadScopeKey]);
   const hasLoadedAssets = useRef(false);
+  const ownerPublicCreatorId = currentUser?.publicCreatorId?.trim() || '';
+  const canRecoverOwnerSummaryFromPublicSnapshot = isVercelOwnerAuth
+    && loadOptions.userId === currentUser?.id
+    && Boolean(ownerPublicCreatorId)
+    && loadOptions.detail === 'summary'
+    && !loadOptions.publicOnly
+    && !loadOptions.includeDeleted
+    && !loadOptions.onlyDeleted
+    && loadOptions.folderId === undefined;
 
   const refreshAssets = useCallback(async () => {
     if (!enabled) return;
@@ -48,11 +58,34 @@ export function useAssetData(
     if (!ticket) return;
     const isInitialLoad = !hasLoadedAssets.current;
     const isCurrentRequest = () => requestId === requestSequence.current && readLifecycle.current.isCurrent(ticket);
-    const retryOwnerInitialRead = isInitialLoad && isVercelOwnerAuth && Boolean(loadIdentityUserId) && !loadOptions.publicOnly;
+    const retryOwnerInitialRead = isInitialLoad && isVercelOwnerAuth && Boolean(loadIdentityUserId)
+      && !loadOptions.publicOnly && !canRecoverOwnerSummaryFromPublicSnapshot;
     const retryPublicInitialSummaryRead = isInitialLoad && loadOptions.publicOnly === true
       && !loadOptions.assetId && loadOptions.detail !== 'full';
+    let ownerReadSucceeded = false;
 
     if (isInitialLoad) setIsLoadingAssets(true);
+
+    // The Owner summary reader can be slower than the Vercel function budget.
+    // Keep the public cards usable from the already established snapshot while
+    // the private Owner read continues in the background. A successful Owner
+    // response still replaces this recovery data with the complete collection.
+    const publicRecovery = canRecoverOwnerSummaryFromPublicSnapshot
+      ? cxlDataService.works.fetch({
+          publicOnly: true,
+          detail: 'summary',
+          search: loadOptions.search,
+          limit: 100
+        }).then(result => {
+          if (!isCurrentRequest() || ownerReadSucceeded || result.error) return false;
+          const ownerPublicAssets = result.data.filter(asset => resolvePublicCreatorKey(asset) === ownerPublicCreatorId);
+          setAssets(ownerPublicAssets);
+          hasLoadedAssets.current = true;
+          setIsLoadingAssets(false);
+          reportError(null);
+          return true;
+        }).catch(() => false)
+      : Promise.resolve(false);
 
     try {
       const res = await readWithBoundedRetry<Awaited<ReturnType<typeof cxlDataService.works.fetch>>>(() => cxlDataService.works.fetch({
@@ -66,9 +99,12 @@ export function useAssetData(
       });
       if (!isCurrentRequest()) return;
       if (res.error) {
+        if (await publicRecovery) return;
+        if (!isCurrentRequest()) return;
         reportError(res.error);
         return;
       }
+      ownerReadSucceeded = true;
       setAssets(res.data);
       hasLoadedAssets.current = true;
       // A successful retry supersedes an earlier request failure. Keeping the
@@ -98,6 +134,8 @@ export function useAssetData(
     loadOptions.publicOnly,
     loadOptions.search,
     loadOptions.userId,
+    canRecoverOwnerSummaryFromPublicSnapshot,
+    ownerPublicCreatorId,
     reportError
   ]);
 
