@@ -96,7 +96,10 @@ function CodePresentation({ code, view, onViewChange }: { code: string; view: Co
   </>;
 }
 
-function ContentBlock({ block, copied, onCopy }: { block: WorkContentBlock; copied: boolean; onCopy: () => void }) {
+function ContentBlock({ block, copied, onCopy, failedImageSrcs, onImageError }: {
+  block: WorkContentBlock; copied: boolean; onCopy: () => void;
+  failedImageSrcs?: ReadonlySet<string>; onImageError?: (src: string) => void;
+}) {
   if (block.type === 'Divider') {
     return <div className="work-detail-divider" aria-label={block.title || 'เส้นแบ่ง'}><span>✦</span></div>;
   }
@@ -104,6 +107,8 @@ function ContentBlock({ block, copied, onCopy }: { block: WorkContentBlock; copi
   const body = block.body.trim();
   const isImageSource = block.type === 'Image' && isValidWorkImageSource(body);
   const isCopyable = ['Text', 'Prompt', 'Note'].includes(block.type) && isMeaningfulCopyText(body, block.title);
+  // An image that cannot load (e.g. still only in Supabase) is hidden instead of shown broken.
+  if (isImageSource && failedImageSrcs?.has(body)) return null;
 
   return <article className={`work-detail-block is-${block.type.toLowerCase().replace(/\s+/g, '-')}`}>
     <header>
@@ -114,7 +119,7 @@ function ContentBlock({ block, copied, onCopy }: { block: WorkContentBlock; copi
       {isCopyable && <CopyButton copied={copied} label="คัดลอก" onClick={onCopy} />}
     </header>
     {block.type === 'Heading' ? <h4>{body || block.title}</h4>
-      : isImageSource ? <figure><img src={body} alt={block.title || 'ภาพประกอบผลงาน'} referrerPolicy="no-referrer" /><figcaption>{block.title}</figcaption></figure>
+      : isImageSource ? <figure><img src={body} alt={block.title || 'ภาพประกอบผลงาน'} referrerPolicy="no-referrer" onError={() => onImageError?.(body)} /><figcaption>{block.title}</figcaption></figure>
         : block.type === 'Image' ? <div className="work-detail-image-placeholder"><ImageIcon aria-hidden="true" /><p>{body || 'ยังไม่มีภาพประกอบ'}</p></div>
           : block.type === 'Prompt' ? <pre>{body}</pre>
             : block.type === 'Note' ? <aside>{body}</aside>
@@ -196,6 +201,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
+  // Image sources that failed to load (e.g. still only in Supabase) are hidden, not shown broken.
+  const [failedImageSrcs, setFailedImageSrcs] = useState<ReadonlySet<string>>(() => new Set());
+  const markImageFailed = (src: string) => setFailedImageSrcs(previous => previous.has(src) ? previous : new Set([...previous, src]));
   const creatorProfileAssets = useMemo(() => asset ? [asset] : [], [asset]);
   const publicCreatorProfiles = usePublicCreatorProfiles(creatorProfileAssets, creatorProfile);
   // Composer Review uses a temporary private asset that is not yet published.
@@ -235,7 +243,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const canonicalCreatorProfile = creatorProfile || publicCreatorProfiles.get(resolvePublicCreatorKey(asset)) || null;
   const creator = resolveWorkCreator(asset, canonicalCreatorProfile);
   const requestedCover = coverImage || (coverImageSelected ? asset.previewImage || '' : '');
-  const galleryImages = resolveWorkDetailGalleryImages(asset, requestedCover);
+  const galleryImages = resolveWorkDetailGalleryImages(asset, requestedCover).filter(image => !failedImageSrcs.has(image.src));
   const activeGalleryImage = activeImageIndex >= 0 ? galleryImages[activeImageIndex] : undefined;
   const explicitLinkedAssets = (asset.linkedAssetIds || [])
     .map(id => allAssets.find(candidate => candidate.id === id))
@@ -461,7 +469,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         <div className="work-detail-grid">
           <div className="work-detail-media-column" data-work-detail-section="media">
             <div className={`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`}>
-              {activeGalleryImage && <img src={activeGalleryImage.src} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" />}
+              {activeGalleryImage && <img src={activeGalleryImage.src} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(activeGalleryImage.src)} />}
               {!activeGalleryImage && <div className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}><WorkMark icon={asset.icon} /></div>}
               {display.isCollaborationFocused && activeGalleryImage && <button
                 type="button"
@@ -479,7 +487,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
                 onClick={() => { setActiveImageIndex(index); setGalleryImageError(null); }}
                 aria-label={`ดูรูปที่ ${index + 1}`}
                 aria-pressed={activeImageIndex === index}
-              ><img src={image.src} alt="" referrerPolicy="no-referrer" /></button>)}
+              ><img src={image.src} alt="" referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /></button>)}
             </div>}
             {galleryImageError && <p className="work-detail-reference-error work-detail-gallery-error" role="status">{galleryImageError}</p>}
           </div>
@@ -533,7 +541,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           </div>
           <div className="work-detail-blocks">
             {mainBlocks.length > 0
-              ? mainBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `block-${block.id}`} onCopy={() => copyToClipboard(block.body, `block-${block.id}`)} />)
+              ? mainBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `block-${block.id}`} onCopy={() => copyToClipboard(block.body, `block-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} />)
               : <article className="work-detail-block is-text"><header><div><span>ข้อความ</span><strong>เนื้อหา</strong></div>{isMeaningfulCopyText(legacyContent, 'เนื้อหา') && <CopyButton copied={copiedKey === 'content'} label="คัดลอก" onClick={() => copyToClipboard(legacyContent, 'content')} />}</header><p>{legacyContent}</p></article>}
           </div>
         </section>}
@@ -586,14 +594,14 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
-            {Boolean(participant.referenceImages?.length) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
+            {Boolean(participant.referenceImages?.some(image => !failedImageSrcs.has(image.src))) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => failedImageSrcs.has(image.src) ? null : <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
             {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
           </article>;
           })}</div>
         </section> : null}
 
         {display.isCollaborationFocused && !publicCollaboration && publicCollaborationBlocks.length > 0 && <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content-legacy">
-          <div className="work-detail-blocks">{publicCollaborationBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `collaboration-${block.id}`} onCopy={() => copyToClipboard(block.body, `collaboration-${block.id}`)} />)}</div>
+          <div className="work-detail-blocks">{publicCollaborationBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `collaboration-${block.id}`} onCopy={() => copyToClipboard(block.body, `collaboration-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} />)}</div>
         </section>}
 
         {!display.isCollaborationFocused && visibleLinkedCollaboration && <section className="work-detail-section work-detail-linked-collaboration" data-work-detail-section="linked-collaboration">
