@@ -121,6 +121,33 @@ function assetFromRecord(record: Row): Row {
   };
 }
 
+// ---- Owner folders (port of getFolders_ + cxlOwnerFolders_) ----
+
+export function directFoldersEnabled(): boolean {
+  return config() !== null && Boolean(process.env.CXL_INCOMING_FOLDER_ID?.trim());
+}
+
+/** Returns the Apps Script folders.fetch data shape: { data: Folder[], error: null }. */
+export async function directOwnerFolders(ownerUserId: string): Promise<{ data: Row[]; error: null }> {
+  if (!ownerUserId) throw new Error('Authenticated Owner is required');
+  const folderId = process.env.CXL_INCOMING_FOLDER_ID!.trim();
+  const query = `'${folderId.replace(/['\\]/g, '\\$&')}' in parents and name = 'folders.jsonl' and trashed = false`;
+  const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const listed = await (await googleGet(listUrl)).json() as { files?: { id?: string }[] };
+  const fileId = listed.files?.[0]?.id;
+  if (!fileId) return { data: [], error: null };
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+  const lines = (await (await googleGet(url)).text()).split(/\r?\n/).filter(Boolean);
+  const folders = lines.map(line => JSON.parse(line) as Row)
+    .filter(folder => folder && text(folder.user_id) === ownerUserId)
+    .map(folder => {
+      if (!folder.id || !folder.name || !folder.created_at || !folder.updated_at) throw new Error('Folder source does not match the CXL Folder contract');
+      return { id: text(folder.id), userId: ownerUserId, name: text(folder.name), icon: folder.icon || '📁', color: folder.color || 'purple',
+        createdAt: text(folder.created_at), updatedAt: text(folder.updated_at) };
+    });
+  return { data: folders, error: null };
+}
+
 // ---- Public reads (port of publicReadSnapshotBuildPayload_ works + public.works.detail) ----
 
 const PUBLIC_SUMMARY_VERSIONS = [1, 2];

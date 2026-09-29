@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
-import { directOwnerReadsEnabled, directOwnerWorksFetch, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 
@@ -409,6 +409,16 @@ export default async function handler(req: Request, res: Response) {
     const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
     const secret = process.env.CXL_API_SHARED_SECRET;
     if (!endpoint || !secret) return send(res, 503, { ok: false, error: 'Google owner API is not configured on the server' });
+    if (action === 'folders.fetch' && directFoldersEnabled()) {
+      const started = Date.now();
+      try {
+        const data = await directOwnerFolders(authenticatedOwnerId);
+        console.info(JSON.stringify({ event: 'cxl_direct_read_timing', action, elapsedMs: Date.now() - started, used: true }));
+        return send(res, 200, { ok: true, data });
+      } catch (error) {
+        console.info(JSON.stringify({ event: 'cxl_direct_read_failed', action, reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+      }
+    }
     try {
       const ownerArgs = action === 'folders.fetch' ? []
         : action === 'works.create' && authMode === 'vercel'
