@@ -54,12 +54,28 @@ async function saveGoogleWork(action: 'works.create' | 'works.update', idOrAsset
 async function fetchPublicSnapshot(options: FetchAssetsOptions = {}) {
   const response = await fetch('/api/cxl/public-works', {
     method: 'GET',
-    credentials: 'omit',
+    // Preview deployments are protected by Vercel Authentication. The page
+    // can load while an `omit` request drops that same-origin auth cookie and
+    // receives Vercel's 401 JSON instead of the public snapshot.
+    credentials: 'same-origin',
     headers: { Accept: 'application/json' }
   });
-  const result = await response.json().catch(() => null) as { ok?: boolean; data?: { data?: unknown; error?: string }; error?: string } | null;
+  const result = await response.json().catch(() => null) as {
+    ok?: boolean;
+    data?: { data?: unknown; error?: unknown };
+    error?: unknown;
+    message?: unknown;
+  } | null;
   if (!response.ok || !result?.ok || !Array.isArray(result.data?.data)) {
-    return { data: [], error: result?.error || 'Google public Works snapshot failed' };
+    const rawError = result?.error;
+    const error = typeof rawError === 'string'
+      ? rawError
+      : rawError && typeof rawError === 'object' && 'message' in rawError && typeof rawError.message === 'string'
+        ? rawError.message
+        : typeof result?.message === 'string'
+          ? result.message
+          : `Google public Works snapshot failed (${response.status})`;
+    return { data: [], error };
   }
   const summaries = filterGoogleWorks(result.data.data as import('../../../types').Asset[], { ...options, publicOnly: true, detail: undefined });
   return hydrateGoogleWorkMediaResult({ data: summaries, error: null });

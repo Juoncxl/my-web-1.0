@@ -57,7 +57,7 @@ describe('Google server transport boundary', () => {
     expect(result.data?.[0].previewImages).toEqual([galleryUrl]);
   });
 
-  it('loads the anonymous public summary feed through the cacheable GET route without cookies', async () => {
+  it('loads the public summary feed through the cacheable same-origin GET route', async () => {
     const publicWork = { id: 'asset_public', userId: 'creator-1', authorName: 'Creator', title: 'Public',
       icon: { type: 'emoji', value: '✨' }, category: 'character', content: 'public content', contentBlocks: [],
       previewImage: '', previewImages: [], media: [], isPublic: true, visibility: 'public', status: 'finished',
@@ -69,7 +69,7 @@ describe('Google server transport boundary', () => {
     const result = await googleDataAdapter.works.fetch({ publicOnly: true });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/cxl/public-works', {
-      method: 'GET', credentials: 'omit', headers: { Accept: 'application/json' }
+      method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' }
     });
     expect(result.data?.map(asset => asset.id)).toEqual(['asset_public']);
     expect(result.data?.[0].content).toBe('public content');
