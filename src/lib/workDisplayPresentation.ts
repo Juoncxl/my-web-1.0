@@ -29,6 +29,35 @@ export function isPublicCollaborationBlock(block: Pick<WorkContentBlock, 'id'>):
   return block.id === CREATOR_COLLAB_IDENTITY_BLOCK_ID || block.id.startsWith(CREATOR_COLLAB_PUBLIC_BLOCK_PREFIX);
 }
 
+const text = (value: unknown) => typeof value === 'string' ? value : '';
+const list = <T,>(value: unknown): T[] => Array.isArray(value) ? value.filter(item => item !== null && item !== undefined) as T[] : [];
+const records = <T,>(value: unknown): T[] => list<unknown>(value).filter(item => typeof item === 'object') as T[];
+
+/** Stored Collaboration JSON may predate newer fields; give renderers the full shape. */
+function normalizePublicCollaboration(value: PublicAssetCollaboration | null | undefined): PublicAssetCollaboration | null {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    ...value,
+    name: text(value.name),
+    sharedTag: text(value.sharedTag),
+    platforms: list<string>(value.platforms).filter(item => typeof item === 'string'),
+    sharedInformation: records<PublicAssetCollaboration['sharedInformation'][number]>(value.sharedInformation)
+      .map(item => ({ ...item, title: text(item.title), content: text(item.content),
+        platforms: list<string>(item.platforms).filter(platform => typeof platform === 'string') })),
+    deadlines: records<PublicAssetCollaboration['deadlines'][number]>(value.deadlines)
+      .map(item => ({ ...item, label: text(item.label), date: text(item.date) })),
+    participants: records<PublicAssetCollaboration['participants'][number]>(value.participants).map(participant => ({
+      ...participant,
+      creatorName: text(participant.creatorName),
+      houseTag: text(participant.houseTag),
+      externalWorkName: text(participant.externalWorkName),
+      platforms: list<string>(participant.platforms).filter(item => typeof item === 'string'),
+      referenceImages: records<PublicAssetCollaboration['participants'][number]['referenceImages'][number]>(participant.referenceImages),
+      linkedWorkIds: list<string>(participant.linkedWorkIds)
+    }))
+  };
+}
+
 function isPlaceholderTitle(title: string): boolean {
   const clean = title.trim();
   return !clean || clean === 'ยังไม่ได้ตั้งชื่อผลงาน';
@@ -49,7 +78,7 @@ export function getWorkDisplayPresentation(asset: Asset, collaboration?: Collabo
     : null;
   // Public surfaces read only the explicit public snapshot. The optional context
   // remains as a legacy test seam but must already be public-safe.
-  const collaborationData = asset.publicCollaboration || collaboration?.collaboration || restoredCollaboration;
+  const collaborationData = normalizePublicCollaboration(asset.publicCollaboration || collaboration?.collaboration || restoredCollaboration);
   const collaborationTitle = collaborationData?.name?.trim() || collaboration?.name?.trim() || identityBlock?.title.trim() || '';
   const collaborationSummary = collaboration?.summary?.trim() || identityBlock?.body.trim() || '';
 
