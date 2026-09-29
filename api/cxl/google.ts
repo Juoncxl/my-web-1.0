@@ -93,6 +93,11 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 // Owner reads (the full profile/Vault list) can legitimately exceed 10s, so they keep
 // a long budget: a short cut-off hid private Works and left cards without a revision.
 function readRetryPlan(action: string): { timeoutMs: number; attempts: number } | null {
+  // Media upload steps are idempotent in Apps Script (same uploadId/chunk bytes/sha256 match the
+  // stored session instead of creating duplicates), so a stalled step is safe to resend.
+  if (action === 'media.upload.begin') return { timeoutMs: 12_000, attempts: 3 };
+  if (action === 'media.upload.chunk') return { timeoutMs: 20_000, attempts: 2 };
+  if (action === 'media.upload.finalize') return { timeoutMs: 25_000, attempts: 2 };
   if (action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 25_000, attempts: 1 };
   if (action === 'public.works.detail') return { timeoutMs: 10_000, attempts: 2 };
   if (action.startsWith('public.')) return { timeoutMs: 5_000, attempts: 3 };
