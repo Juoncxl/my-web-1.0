@@ -138,6 +138,33 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
     console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop, outcome, attempt, postMs, echoMs }));
   }
 }
+/**
+ * Apps Script writes take ~16-18s and their response sometimes never arrives.
+ * From 8s on, also poll the read-only Sheets/Drive state every 2.5s; whichever
+ * confirms first wins. Before the commit none of the checks can match, and a
+ * committed write is reported with the same data shape Apps Script returns.
+ */
+const WRITE_VERIFY_START_MS = 8_000;
+const WRITE_VERIFY_INTERVAL_MS = 2_500;
+async function raceWriteWithVerification(gasCall: Promise<unknown>, action: string, args: unknown[]): Promise<unknown> {
+  let settled = false;
+  gasCall.then(() => { settled = true; }, () => { settled = true; });
+  const verified = (async () => {
+    await new Promise(resolve => setTimeout(resolve, WRITE_VERIFY_START_MS));
+    for (let check = 0; !settled; check += 1) {
+      try {
+        const committed = await verifyOwnerWriteCommitted(action, args);
+        console.info(JSON.stringify({ event: 'cxl_write_verify', action, check, committed: committed !== null }));
+        if (committed !== null) return { ok: true, data: committed };
+      } catch (error) {
+        console.info(JSON.stringify({ event: 'cxl_write_verify_failed', action, reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+      }
+      await new Promise(resolve => setTimeout(resolve, WRITE_VERIFY_INTERVAL_MS));
+    }
+    return new Promise<never>(() => undefined); // Apps Script answered first; never resolve.
+  })();
+  return Promise.race([gasCall, verified]);
+}
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
   if (action === 'profiles.getCreator') return args.length === 1 && typeof args[0] === 'string' && args[0].length <= 128;
   if (action === 'profiles.getPublic') return args.length === 1 && Array.isArray(args[0]) && args[0].length <= 100
@@ -360,9 +387,12 @@ export default async function handler(req: Request, res: Response) {
           : action === 'works.update' && authMode === 'vercel'
             ? body.args
             : body.args;
-      const raw = await gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const gasCall = gasJson(endpoint.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authorization: secret, ownerUserId: authenticatedOwnerId, action, args: ownerArgs,
           ...(process.env.VERCEL_ENV === 'preview' ? { includeTiming: true } : {}) }) }, action);
+      const raw = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
+        ? await raceWriteWithVerification(gasCall, action, body.args)
+        : await gasCall;
       previewOwnerServerTiming(res, raw, action);
       if (!record(raw) || raw.ok !== true) {
         if (action === MEDIA_REPAIR_ACTION) return send(res, 502, { ok: false, error: 'Work media repair failed' });
