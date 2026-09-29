@@ -112,6 +112,8 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       const retryable = (error instanceof Error && error.name === 'TimeoutError') || /time.?out|HTTP 404|HTTP 5\d\d/i.test(message);
+      // A media upload step whose script ran but whose answer was lost is handled by the caller.
+      if (MEDIA_UPLOAD_ACTIONS.has(action) && record(error) && error.scriptCompleted === true) throw error;
       if (!retryable || attempt >= plan.attempts) throw error;
     }
   }
@@ -134,7 +136,12 @@ async function gasJsonAttempt(url: string, init: RequestInit, action: string, ti
     if (location && new URL(location, url).hostname === 'script.googleusercontent.com') {
       const echoStarted = Date.now();
       // Do not re-request a stalled echo URL: Google then routes it to doGet() (METHOD_NOT_ALLOWED).
-      response = await fetch(new URL(location, url), { method: 'GET', redirect: 'follow', signal });
+      try {
+        response = await fetch(new URL(location, url), { method: 'GET', redirect: 'follow', signal });
+      } catch (echoError) {
+        // The script already ran (its redirect arrived); only the answer was lost.
+        throw Object.assign(echoError instanceof Error ? echoError : new Error('Google Apps Script response was lost'), { scriptCompleted: true });
+      }
       echoMs = Date.now() - echoStarted;
     } else if (response.status >= 300 && response.status < 400) {
       // Never re-send the POST: a write could run twice. Surface the unexpected shape instead.
@@ -482,6 +489,16 @@ export default async function handler(req: Request, res: Response) {
       const message = error instanceof Error ? error.message : 'Google owner request failed';
       const status = (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
       if (action === MEDIA_REPAIR_ACTION) return send(res, status, { ok: false, error: status === 504 ? 'Work media repair timed out' : 'Work media repair failed' });
+      // Idempotent media upload step: the script ran but its answer was lost. The browser
+      // only needs the IDs it sent; if the step had actually failed, the next step (or the
+      // Work save, which requires finalized media) reports it, so nothing is silently lost.
+      if (MEDIA_UPLOAD_ACTIONS.has(action) && record(error) && error.scriptCompleted === true && record(requestArgs[0])) {
+        const input = requestArgs[0];
+        console.info(JSON.stringify({ event: 'cxl_media_upload_answer_lost', action }));
+        return send(res, 200, { ok: true, data: action === 'media.upload.chunk'
+          ? { uploadId: input.uploadId, chunkIndex: input.chunkIndex }
+          : { uploadId: input.uploadId, mediaId: input.mediaId, finalized: action === 'media.upload.finalize' } });
+      }
       // The Apps Script response often never arrives although the write committed.
       // Confirm through the read-only Sheets/Drive path before reporting a failure.
       if (verifyWrite) {
