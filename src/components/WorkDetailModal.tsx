@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import type { Asset, AssetIcon, Folder as WorkFolder, User, WorkContentBlock } from '../types';
 import { AUDIENCE_RATING_LABELS, CATEGORIES, STATUS_PRESETS } from '../lib/constants';
+import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatThaiDate } from '../lib/dateUtils';
 import { resolveWorkCreator } from '../lib/workPresentation';
@@ -204,14 +205,15 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
   useEffect(() => {
     if (!canRender || embedded) return;
-    const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
-    document.body.style.overflow = 'hidden';
+    // Share the counted lock with ConfirmationDialog: closing both at once in either
+    // cleanup order used to leave body overflow hidden and the page unscrollable.
+    const releaseScrollLock = acquireViewportScrollLock(document);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [canRender, embedded, onClose]);
