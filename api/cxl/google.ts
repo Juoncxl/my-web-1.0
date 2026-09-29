@@ -77,9 +77,12 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 // Apps Script usually answers reads in ~1-2s, but the googleusercontent hop sometimes
 // stalls until its one-time URL expires (404). Retry reads with short budgets;
 // writes are never retried so a stalled response cannot duplicate a mutation.
-// Snapshot-only reads answer in ~1.5s; detail/owner reads touch Drive and take ~5-7s.
+// Snapshot-only reads answer in ~1.5s; public detail touches Drive and takes ~3-7s.
+// Owner reads (the full profile/Vault list) can legitimately exceed 10s, so they keep
+// a long budget: a short cut-off hid private Works and left cards without a revision.
 function readRetryPlan(action: string): { timeoutMs: number; attempts: number } | null {
-  if (action === 'public.works.detail' || action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 10_000, attempts: 2 };
+  if (action === 'works.fetch' || action === 'folders.fetch') return { timeoutMs: 25_000, attempts: 1 };
+  if (action === 'public.works.detail') return { timeoutMs: 10_000, attempts: 2 };
   if (action.startsWith('public.')) return { timeoutMs: 5_000, attempts: 3 };
   return null;
 }
