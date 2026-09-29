@@ -6,6 +6,7 @@ import {
   selectOwnerAuthMode,
   verifyOwnerSessionToken
 } from './cxlOwnerAuth.js';
+import { directOwnerReadsEnabled, directWorkMedia } from '../../api/cxl/googleDirect.js';
 
 type Request = IncomingMessage & { url?: string };
 type Response = ServerResponse & {
@@ -202,6 +203,26 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
     ? 'public, max-age=60, s-maxage=60, stale-while-revalidate=60'
     : 'private, no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Read straight from Drive when the Service Account is configured; the Apps Script
+  // chunk path below remains the fallback (it often stalls without answering).
+  if (directOwnerReadsEnabled()) {
+    try {
+      const direct = await directWorkMedia(workId, ref, scope, true);
+      console.info(JSON.stringify({ event: 'cxl_direct_media_read', scope, used: direct !== null }));
+      if (direct) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', direct.mimeType);
+        res.setHeader('Content-Length', String(direct.bytes.length));
+        if (download === '1') {
+          const extension = direct.mimeType === 'image/jpeg' ? 'jpg' : direct.mimeType.split('/')[1];
+          res.setHeader('Content-Disposition', `attachment; filename="cxl-${workId}-${mediaId}.${extension}"`);
+        }
+        return res.end(direct.bytes);
+      }
+    } catch (error) {
+      console.info(JSON.stringify({ event: 'cxl_direct_read_failed', action: 'media.work', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+    }
+  }
   const digest = createHash('sha256');
   let metadata: ReturnType<typeof validateChunk> | undefined;
   try {

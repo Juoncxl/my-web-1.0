@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleMediaPoc } from '../../src/server/cxlMediaPoc.js';
 import { handleGoogleWorkMediaRead } from '../../src/server/cxlGoogleWorkMedia.js';
+import { directOwnerReadsEnabled, directWorkMedia } from './googleDirect.js';
 export { mediaPocLimits } from '../../src/server/cxlMediaPoc.js';
 
 type Request = IncomingMessage & { body?: unknown; url?: string };
@@ -56,6 +57,26 @@ async function publicIconHandler(req: Request, res: Response) {
     return sendError(res, 400, 'Invalid icon reference');
   }
   if (version && (version.length > 17 || !/^-?(?:0|[1-9]\d{0,15})$/.test(version))) return sendError(res, 400, 'Invalid media version');
+
+  // Legacy media (migrated with a drive_file_id): read from Drive directly, falling
+  // back to the Temporary Public Apps Script for anything not reachable that way.
+  if (ref.startsWith('media:') && directOwnerReadsEnabled()) {
+    try {
+      const direct = await directWorkMedia(workId, ref, 'public', false);
+      console.info(JSON.stringify({ event: 'cxl_direct_media_read', scope: 'legacy', used: direct !== null }));
+      if (direct) {
+        const etag = `"${createHash('sha256').update(direct.bytes).digest('hex')}"`;
+        cacheHeaders(res, etag);
+        res.setHeader('Content-Type', direct.mimeType);
+        res.setHeader('Content-Length', String(direct.bytes.length));
+        if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }
+        res.statusCode = 200;
+        return res.end(direct.bytes);
+      }
+    } catch (error) {
+      console.info(JSON.stringify({ event: 'cxl_direct_read_failed', action: 'media.legacy', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+    }
+  }
 
   const endpoint = publicGasEndpoint(process.env.CXL_GAS_PUBLIC_URL);
   if (!endpoint) return sendError(res, 503, 'Public media is unavailable');

@@ -121,6 +121,51 @@ function assetFromRecord(record: Row): Row {
   };
 }
 
+// ---- Work media (legacy drive_file_id records and new vercel_proxy records) ----
+
+const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+const MEDIA_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+function mediaSignatureMatches(mimeType: string, bytes: Buffer) {
+  if (mimeType === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (mimeType === 'image/png') return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mimeType === 'image/gif') return bytes.length >= 6 && ['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'));
+  if (mimeType === 'image/webp') return bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  return false;
+}
+
+/**
+ * Read one Work image straight from Drive. `public` requires a public Work whose
+ * sanitized public projection references the image; `owner` trusts the caller's
+ * verified Owner session. `requireProxy` limits to new vercel_proxy uploads.
+ * Returns null when the image is not found/allowed (caller answers 404 or falls back).
+ */
+export async function directWorkMedia(workId: string, ref: string, scope: 'public' | 'owner', requireProxy: boolean): Promise<{ bytes: Buffer; mimeType: string } | null> {
+  if (!/^media:[A-Za-z0-9_-]{1,128}$/.test(ref)) return null;
+  const mediaId = ref.slice('media:'.length);
+  const row = (await privateIndexRows()).find(item => text(item.id) === workId);
+  if (!row || !text(row.file_id)) return null;
+  const record = await driveJson(text(row.file_id));
+  const recordRow = (record.row || {}) as Row;
+  if (text(recordRow.id) !== workId) return null;
+  if (scope === 'public') {
+    if (!(recordRow.visibility === 'public' && flag(recordRow.is_public) && !recordRow.deleted_at)) return null;
+    const publicAsset = sanitizePublicWork(assetFromRecord(record), true);
+    if (!publicAsset || !JSON.stringify(publicAsset).includes(ref)) return null;
+  } else if (!JSON.stringify(record).includes(ref)) return null;
+  const media = ((record.mediaRecords as Row[] | undefined) || []).find(item => item && (text(item.id) === mediaId || item.storage_path === ref || item.original_ref === ref));
+  if (!media || !text(media.drive_file_id)) return null;
+  if (requireProxy && (media.delivery !== 'vercel_proxy' || text(media.asset_id) !== workId)) return null;
+  const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(text(media.drive_file_id))}?alt=media&supportsAllDrives=true`);
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > MEDIA_MAX_BYTES) throw new Error('Work media exceeds the size limit');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const mimeType = (response.headers.get('content-type') || text(media.mime_type)).split(';')[0].trim().toLowerCase();
+  if (!bytes.length || bytes.length > MEDIA_MAX_BYTES || !MEDIA_MIME_TYPES.has(mimeType) || !mediaSignatureMatches(mimeType, bytes))
+    throw new Error('Work media file is invalid');
+  return { bytes, mimeType };
+}
+
 // ---- Owner folders (port of getFolders_ + cxlOwnerFolders_) ----
 
 export function directFoldersEnabled(): boolean {
