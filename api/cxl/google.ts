@@ -262,6 +262,17 @@ export async function fetchPublicWorksSnapshot() {
   };
 }
 
+/** Anonymous public Work detail for the cacheable GET route; same data as an anonymous works.fetch. */
+export async function fetchPublicWorkDetail(assetId: string) {
+  const raw = await publicOwnerGasRequest('public.works.detail', [assetId]);
+  if (!record(raw) || raw.ok !== true) {
+    throw Object.assign(new Error(record(raw) && typeof raw.error === 'string' ? raw.error : 'Google public API response is malformed'), {
+      status: ownerErrorStatus(record(raw) ? raw.code : undefined)
+    });
+  }
+  return filterGoogleWorks(validateAssetList([raw.data]), { assetId, detail: 'full', limit: 1 });
+}
+
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
   let body: unknown;

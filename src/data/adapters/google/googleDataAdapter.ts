@@ -81,6 +81,20 @@ async function fetchPublicSnapshot(options: FetchAssetsOptions = {}) {
   return hydrateGoogleWorkMediaResult({ data: summaries, error: null });
 }
 
+/** Guest detail reads use the CDN-cacheable GET route; owners keep the live POST read. */
+async function fetchPublicWorkDetail(assetId: string) {
+  const response = await fetch(`/api/cxl/public-work?${new URLSearchParams({ id: assetId })}`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' }
+  });
+  const result = await response.json().catch(() => null) as { ok?: boolean; data?: { data?: unknown }; error?: unknown } | null;
+  if (!response.ok || !result?.ok || !Array.isArray(result.data?.data)) {
+    return { data: [], error: typeof result?.error === 'string' ? result.error : `Google public Work detail failed (${response.status})` };
+  }
+  return hydrateGoogleWorkMediaResult({ data: result.data.data as import('../../../types').Asset[], error: null });
+}
+
 type GoogleWorkStatusAction = 'works.softDelete' | 'works.restore' | 'works.permanentDelete';
 type GoogleWorkStatusResult = Awaited<ReturnType<CxlDataService['works']['softDelete']>>;
 
@@ -103,6 +117,12 @@ export const googleDataAdapter = {
         && !options.userId && !options.currentUserId && !options.includeDeleted && !options.onlyDeleted
         && options.folderId === undefined && options.detail !== 'full';
       if (isCacheablePublicList) return fetchPublicSnapshot(options);
+      // Only card opens state "no signed-in user" explicitly (currentUserId key present but empty);
+      // direct /work links omit the key and may belong to the Owner, so they stay on the live read.
+      const isGuestDetail = Boolean(options.assetId) && options.detail === 'full'
+        && Object.prototype.hasOwnProperty.call(options, 'currentUserId') && !options.currentUserId?.trim()
+        && !options.userId && !options.creatorSlug && !options.includeDeleted && !options.onlyDeleted && options.folderId === undefined;
+      if (isGuestDetail) return fetchPublicWorkDetail(options.assetId!);
       const result = await callGoogleBackend<Awaited<ReturnType<CxlDataService['works']['fetch']>>>('works.fetch', args);
       return hydrateGoogleWorkMediaResult(result);
     }) as CxlDataService['works']['fetch'],
