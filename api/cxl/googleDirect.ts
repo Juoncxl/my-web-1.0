@@ -161,7 +161,17 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
   if (!/^media:[A-Za-z0-9_-]{1,128}$/.test(ref)) return null;
   const mediaId = ref.slice('media:'.length);
   let mediaRecords: Row[];
-  if (scope === 'public') {
+  if (scope === 'public' && !requireProxy) {
+    // Legacy images: authorize against the published projection alone, exactly as the
+    // Temporary Public site does. One cached Sheets range per instance instead of three,
+    // so a page of images no longer exhausts the Sheets per-minute quota.
+    if (!directPublicReadsEnabled()) return null;
+    const fileId = (await publicProjectionFileIds()).get(workId);
+    if (!fileId) return null;
+    const projection = await cachedRead(`file:${fileId}`, PUBLIC_READ_CACHE_MS, () => driveJson(fileId));
+    if (text(projection.id) !== workId || !JSON.stringify(projection).includes(ref)) return null;
+    mediaRecords = ((projection.mediaRecords as Row[] | undefined) || []).filter(isObject);
+  } else if (scope === 'public') {
     if (!directPublicReadsEnabled()) return null;
     const sources = await publicWorkSources(workId);
     if (!sources || !JSON.stringify(sources.asset).includes(ref)) return null;
@@ -361,6 +371,16 @@ function sanitizePublicWork(asset: Row | null, fullDetail: boolean): Row | null 
 /** Works part of publicReadSnapshotBuildPayload_: the anonymous public list. */
 export async function directPublicWorksList(): Promise<Row[]> {
   return (await publicWorksIndex()).works;
+}
+
+/** Active public Index rows → published projection file ID (first tab, one range). */
+function publicProjectionFileIds(): Promise<Map<string, string>> {
+  return cachedRead('public-projection-ids', PUBLIC_READ_CACHE_MS, async () => {
+    const rows = await sheetRows(process.env.CXL_PUBLIC_SHEET_ID!.trim(), 'A:K');
+    const ids = new Map<string, string>();
+    rows.forEach(row => { if (flag(row.active) && text(row.file_id)) ids.set(text(row.id), text(row.file_id)); });
+    return ids;
+  });
 }
 
 function publicWorksIndex(): Promise<{ works: Row[]; projectionFileIds: Map<string, string> }> {
