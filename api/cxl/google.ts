@@ -76,26 +76,13 @@ async function verifyOwner(accessToken: string): Promise<string | null> {
 }
 async function gasJson(url: string, init: RequestInit, action: string) {
   const started = Date.now();
+  let finalHop = '';
   try {
-    const signal = AbortSignal.timeout(GAS_TIMEOUT_MS);
-    let response = await fetch(url, { ...init, redirect: 'manual', signal });
-    // ContentService redirects its response to a one-time googleusercontent URL.
-    // Follow that URL with GET, but keep the JSON POST on the Apps Script URL.
-    // Automatic 301/302 following can otherwise turn the API call into doGet().
-    for (let redirects = 0; response.status >= 300 && response.status < 400 && redirects < 3; redirects += 1) {
-      const location = response.headers.get('location');
-      if (!location) throw new Error('Google Apps Script redirect has no destination');
-      const next = new URL(location, url);
-      if (next.protocol !== 'https:') throw new Error('Google Apps Script redirect is not secure');
-      if (next.hostname === 'script.googleusercontent.com') {
-        response = await fetch(next, { method: 'GET', redirect: 'manual', signal });
-      } else if (next.origin === new URL(url).origin && next.pathname === new URL(url).pathname) {
-        response = await fetch(next, { ...init, redirect: 'manual', signal });
-      } else {
-        throw new Error('Google Apps Script redirected outside the configured deployment');
-      }
-    }
-    if (response.status >= 300 && response.status < 400) throw new Error('Google Apps Script redirected too many times');
+    // ContentService answers the POST with a 302 to a one-time googleusercontent URL;
+    // standard redirect following re-requests it with GET, as Google documents.
+    // gasEndpoint() strips a trailing /exec/ slash, whose extra redirect would reach doGet().
+    const response = await fetch(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(GAS_TIMEOUT_MS) });
+    try { const final = new URL(response.url); finalHop = `${final.hostname}${final.pathname}`.replace(/\/macros\/s\/[^/]+\//, '/macros/s/*/'); } catch { /* diagnostics only */ }
     const text = await response.text();
     if (!response.ok) throw new Error(`Google Apps Script responded with HTTP ${response.status}`);
     let parsed: unknown;
@@ -103,7 +90,7 @@ async function gasJson(url: string, init: RequestInit, action: string) {
     return parsed;
   } finally {
     // Runtime diagnostics deliberately omit endpoint URLs, payloads, IDs, and credentials.
-    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started }));
+    console.info(JSON.stringify({ event: 'cxl_gas_request_timing', action, elapsedMs: Date.now() - started, finalHop }));
   }
 }
 function validPublicActionArgs(action: string, args: unknown[]): boolean {
