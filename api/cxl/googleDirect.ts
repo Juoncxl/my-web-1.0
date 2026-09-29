@@ -114,8 +114,36 @@ function mediaProjection(record: Row, assetId: unknown) {
   }));
 }
 
-/** Port of cxlAssetFromRecord_. */
+/** Port of publicSnapshot_: the public Collaboration Apps Script publishes from a draft. */
+function publicSnapshotFromDraft(draft: Row): Row {
+  const p = (draft.visibilityPolicy || {}) as Row;
+  const policy = { showParticipantStatuses: !!p.showParticipantStatuses, showParticipantNotes: !!p.showParticipantNotes, showParticipantDeadlineOverrides: !!p.showParticipantDeadlineOverrides };
+  const list = (value: unknown) => (Array.isArray(value) ? value : []) as Row[];
+  return {
+    name: draft.name || '', sharedTag: draft.sharedTag || '', platforms: draft.platforms || [],
+    sharedInformation: list(draft.sharedInformation).filter(x => x && (x.title || x.content))
+      .map(x => ({ id: x.id, title: x.title, type: x.type, content: x.content, appScope: x.appScope, platforms: x.platforms || [] })),
+    deadlines: list(draft.deadlines).filter(x => x && (x.label || x.date)),
+    participants: list(draft.participants).filter(x => x && (x.creatorName || x.externalWorkName || list(x.referenceImages).length)).map(x => {
+      const q: Row = { id: x.id, isOwner: !!x.isOwner, creatorName: x.creatorName || '', houseTag: x.houseTag || '', platforms: x.platforms || [],
+        externalWorkName: x.externalWorkName || '', referenceImages: x.referenceImages || [], linkedWorkIds: x.linkedWorkIds || [] };
+      if (policy.showParticipantStatuses) { q.dataStatus = x.dataStatus; q.imageStatus = x.imageStatus; }
+      if (policy.showParticipantNotes) q.notes = x.notes || '';
+      if (policy.showParticipantDeadlineOverrides && x.useDeadlineOverrides) q.deadlineOverrides = x.deadlineOverrides || {};
+      return q;
+    }),
+    visibilityPolicy: policy
+  };
+}
+
+/** Port of cxlAssetFromRecord_, with a Collaboration's public view built from its current draft (as projection_ does). */
 function assetFromRecord(record: Row): Row {
+  const asset = assetFromRecordBase(record);
+  if (asset.category === 'collab' && isObject(record.collaborationDraft)) asset.publicCollaboration = publicSnapshotFromDraft(record.collaborationDraft);
+  return asset;
+}
+
+function assetFromRecordBase(record: Row): Row {
   if (record.cxlAsset && typeof record.cxlAsset === 'object') {
     const saved = JSON.parse(JSON.stringify(record.cxlAsset)) as Row;
     saved.revision = Number(record.revision) || 1;
