@@ -2,6 +2,10 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }
