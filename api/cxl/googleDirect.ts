@@ -1,4 +1,6 @@
 import { createSign } from 'node:crypto';
+import { getOwnerAuthConfig } from '../../src/server/cxlOwnerAuth.js';
+import { loadSealedOwnerDriveCredential, OWNER_DRIVE_CREDENTIAL_FILE, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 
 /**
  * Direct, read-only Google Sheets/Drive access with a Service Account.
@@ -67,7 +69,41 @@ async function accessToken(): Promise<string> {
   return cachedToken.value;
 }
 
+/** Service Account Drive GET for server modules (e.g. reading the sealed Owner Drive credential). */
+export function directDriveGet(url: string): Promise<globalThis.Response> {
+  return googleGet(url);
+}
+
 async function googleGet(url: string): Promise<globalThis.Response> {
+  let response = await fetch(url, { headers: { Authorization: `Bearer ${await accessToken()}` }, signal: AbortSignal.timeout(DIRECT_TIMEOUT_MS) });
+  // The Service Account's Sheets quota is per user (~60 reads/min). When it runs out,
+  // retry once as the Owner (connected Drive grant), whose quota is separate.
+  if (response.status === 429 && !url.includes(OWNER_DRIVE_CREDENTIAL_FILE)) {
+    const ownerToken = await ownerFallbackToken().catch(() => null);
+    if (ownerToken) {
+      console.info(JSON.stringify({ event: 'cxl_direct_read_owner_quota_fallback', api: url.includes('sheets.googleapis.com') ? 'sheets' : 'drive' }));
+      response = await fetch(url, { headers: { Authorization: `Bearer ${ownerToken}` }, signal: AbortSignal.timeout(DIRECT_TIMEOUT_MS) });
+    }
+  }
+  if (!response.ok) throw new Error(`Google API request failed (HTTP ${response.status})`);
+  return response;
+}
+
+let sealedOwnerCredential: { value: string | null; expiresAt: number } | null = null;
+
+/** Owner access token from the connected Drive grant, or null when not connected. */
+async function ownerFallbackToken(): Promise<string | null> {
+  const config = getOwnerAuthConfig();
+  const folderId = process.env.CXL_INCOMING_FOLDER_ID?.trim();
+  if (!config || !folderId) return null;
+  if (!sealedOwnerCredential || sealedOwnerCredential.expiresAt <= Date.now()) {
+    // Reading the credential is a Drive call, which has its own (much larger) quota.
+    sealedOwnerCredential = { value: await loadSealedOwnerDriveCredential(folderId, serviceAccountGet), expiresAt: Date.now() + 10 * 60_000 };
+  }
+  return sealedOwnerCredential.value ? ownerDriveAccessToken(sealedOwnerCredential.value, config) : null;
+}
+
+async function serviceAccountGet(url: string): Promise<globalThis.Response> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${await accessToken()}` }, signal: AbortSignal.timeout(DIRECT_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`Google API request failed (HTTP ${response.status})`);
   return response;
@@ -187,6 +223,31 @@ function mediaSignatureMatches(mimeType: string, bytes: Buffer) {
  */
 export async function directWorkMedia(workId: string, ref: string, scope: 'public' | 'owner', requireProxy: boolean): Promise<{ bytes: Buffer; mimeType: string } | null> {
   if (!/^media:[A-Za-z0-9_-]{1,128}$/.test(ref)) return null;
+  const authKey = `${scope}|${requireProxy}|${workId}|${ref}`;
+  const authorized = mediaAuthorizations.get(authKey);
+  const media = authorized && authorized.expiresAt > Date.now() ? authorized.media : await authorizeWorkMedia(workId, ref, scope, requireProxy);
+  if (!media) return null;
+  if (!authorized || authorized.expiresAt <= Date.now()) {
+    mediaAuthorizations.set(authKey, { media, expiresAt: Date.now() + MEDIA_AUTHORIZATION_CACHE_MS });
+    if (mediaAuthorizations.size > 2000) for (const [key, entry] of mediaAuthorizations) if (entry.expiresAt <= Date.now()) mediaAuthorizations.delete(key);
+  }
+  const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(text(media.drive_file_id))}?alt=media&supportsAllDrives=true`);
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > MEDIA_MAX_BYTES) throw new Error('Work media exceeds the size limit');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const mimeType = (response.headers.get('content-type') || text(media.mime_type)).split(';')[0].trim().toLowerCase();
+  if (!bytes.length || bytes.length > MEDIA_MAX_BYTES || !MEDIA_MIME_TYPES.has(mimeType) || !mediaSignatureMatches(mimeType, bytes))
+    throw new Error('Work media file is invalid');
+  return { bytes, mimeType };
+}
+
+// A media reference resolves to the same Drive file for its lifetime, so a successful
+// authorization is reused briefly per instance instead of re-reading the Sheets index.
+// Short enough that a Work turned private stops serving its images within minutes.
+const MEDIA_AUTHORIZATION_CACHE_MS = 5 * 60_000;
+const mediaAuthorizations = new Map<string, { media: Row; expiresAt: number }>();
+
+async function authorizeWorkMedia(workId: string, ref: string, scope: 'public' | 'owner', requireProxy: boolean): Promise<Row | null> {
   const mediaId = ref.slice('media:'.length);
   let mediaRecords: Row[];
   if (scope === 'public' && !requireProxy) {
@@ -216,14 +277,7 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
   const media = matches.find(item => text(item.drive_file_id)) || matches[0];
   if (!media || !text(media.drive_file_id)) return null;
   if (requireProxy && (media.delivery !== 'vercel_proxy' || text(media.asset_id) !== workId)) return null;
-  const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(text(media.drive_file_id))}?alt=media&supportsAllDrives=true`);
-  const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > MEDIA_MAX_BYTES) throw new Error('Work media exceeds the size limit');
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const mimeType = (response.headers.get('content-type') || text(media.mime_type)).split(';')[0].trim().toLowerCase();
-  if (!bytes.length || bytes.length > MEDIA_MAX_BYTES || !MEDIA_MIME_TYPES.has(mimeType) || !mediaSignatureMatches(mimeType, bytes))
-    throw new Error('Work media file is invalid');
-  return { bytes, mimeType };
+  return media;
 }
 
 /**

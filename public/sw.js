@@ -7,7 +7,8 @@
  * Owner/private data is never stored: only public read actions and
  * scope=public media are cached.
  */
-const VERSION = 'cxl-v1';
+// Bump to drop every older cache (v1 could have stored an HTML fallback under a chunk URL).
+const VERSION = 'cxl-v2';
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;
 const DATA_CACHE = `${VERSION}-data`;
@@ -56,7 +57,9 @@ async function cacheFirst(request, cacheName, limit) {
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.ok || response.type === 'opaque') {
+  // Never store an HTML page (e.g. a missing chunk answered by the SPA fallback) as an asset.
+  const isHtml = (response.headers.get('content-type') || '').includes('text/html') && !SHELL_URLS.includes(new URL(request.url).pathname);
+  if ((response.ok && !isHtml) || response.type === 'opaque') {
     await cache.put(request, response.clone());
     if (limit) trimCache(cacheName, limit);
   }

@@ -122,9 +122,9 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
   ): T | null | undefined => {
     if (!collaboration) return collaboration;
     const cloned = JSON.parse(JSON.stringify(collaboration)) as T;
-    cloned.participants = cloned.participants.map(participant => ({
+    cloned.participants = (cloned.participants || []).map(participant => ({
       ...participant,
-      referenceImages: participant.referenceImages.map((image, sortOrder) => {
+      referenceImages: (participant.referenceImages || []).map((image, sortOrder) => {
         const matching = drafts.find(item => item.purpose === 'collab_reference'
           && item.contextId === participant.id && item.sortOrder === sortOrder);
         const mediaId = image.mediaId || matching?.mediaId;
@@ -220,11 +220,12 @@ export function hydrateGoogleWorkMedia(asset: Asset): Asset {
     collaboration: T | null | undefined
   ): T | null | undefined => {
     if (!collaboration) return collaboration;
+    // Owner summary rows carry participant placeholders (`{}`) without referenceImages.
     return {
       ...collaboration,
-      participants: collaboration.participants.map(participant => ({
+      participants: (collaboration.participants || []).map(participant => ({
         ...participant,
-        referenceImages: participant.referenceImages.map(image => {
+        referenceImages: (participant.referenceImages || []).map(image => {
           const id = image.mediaId || mediaIdFromRef(image.src);
           const src = urlFor(id) || image.src;
           return { ...image, src, mediaId: id || undefined };

@@ -97,7 +97,8 @@ describe('Google standard Work media proxy', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.headers['Content-Type']).toBe('image/png');
-    expect(res.headers['Cache-Control']).toBe('private, no-store');
+    // The Owner's own browser may keep immutable media; shared caches may not.
+    expect(res.headers['Cache-Control']).toBe('private, max-age=3600');
     expect(res.body()).toEqual(IMAGE_BYTES);
     expect(res.body().toString()).not.toContain('private-owner-key');
     expect(res.body().toString()).not.toContain('server-only-gas-secret');

@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset, Folder, User } from '../types';
-import { getCreatorSpaceRenderState, resolveOwnerProfileEnrichmentFailure, selectCreatorAssets, selectCreatorFolders, selectCreatorSavedAssets } from './useCreatorSpaceData';
+import { getCreatorSpaceRenderState, isCreatorSpaceOwner, resolveOwnerProfileEnrichmentFailure, selectCreatorAssets, selectCreatorFolders, selectCreatorSavedAssets } from './useCreatorSpaceData';
+
+describe('isCreatorSpaceOwner', () => {
+  const owner = { publicCreatorId: 'cxlc_' + 'a'.repeat(32) };
+  it('recognises the Owner when the public profile carries the public creator ID as its id', () => {
+    expect(isCreatorSpaceOwner({ id: owner.publicCreatorId }, 'owner-uuid', owner)).toBe(true);
+    expect(isCreatorSpaceOwner({ id: 'x', publicCreatorId: owner.publicCreatorId }, 'owner-uuid', owner)).toBe(true);
+    expect(isCreatorSpaceOwner({ id: 'owner-uuid' }, 'owner-uuid', null)).toBe(true);
+  });
+  it('does not treat another creator or a guest as the Owner', () => {
+    expect(isCreatorSpaceOwner({ id: 'cxlc_' + 'b'.repeat(32) }, 'owner-uuid', owner)).toBe(false);
+    expect(isCreatorSpaceOwner({ id: owner.publicCreatorId }, undefined, null)).toBe(false);
+    expect(isCreatorSpaceOwner(null, 'owner-uuid', owner)).toBe(false);
+  });
+});
 
 function makeAsset(id: string, userId: string, visibility: Asset['visibility']): Asset {
   const now = '2026-01-01T00:00:00.000Z';

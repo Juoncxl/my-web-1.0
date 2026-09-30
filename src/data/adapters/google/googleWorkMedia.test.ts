@@ -118,6 +118,20 @@ describe('Google standard Work media upload foundation', () => {
     }
   });
 
+  it('hydrates Owner summary Collabs whose participants are placeholders without reference images', () => {
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const summary = {
+      id: workId, userId: 'owner', title: 'Collab', authorName: 'Owner', icon: { type: 'emoji' as const, value: '🤝' },
+      category: 'collab' as const, content: '', contentBlocks: [], previewImage: 'media:cover', previewImages: ['media:cover'],
+      media: [{ id: 'cover', assetId: workId, storagePath: '', purpose: 'gallery' as const, mimeType: 'image/png', fileSize: 1, sortOrder: 0, isCover: true, delivery: 'vercel_proxy' as const }],
+      publicCollaboration: { name: 'C', sharedTag: '', platforms: [], sharedInformation: [{}], deadlines: [], participants: [{}, {}] },
+      isPublic: false, visibility: 'private' as const, status: 'finished' as const, createdAt: '', updatedAt: '', tags: []
+    };
+    const hydrated = hydrateGoogleWorkMedia(summary as never);
+    expect(hydrated.publicCollaboration?.participants).toHaveLength(2);
+    expect(hydrated.previewImage).toContain('/api/cxl/media');
+  });
+
   it('maps hydrated legacy media URLs back to their stored refs when saving', async () => {
     const workId = 'asset_1234567890abcdef1234567890abcdef';
     const legacyUrl = `/api/cxl/media?workId=${workId}&ref=media%3Alegacy-id&v=123`;

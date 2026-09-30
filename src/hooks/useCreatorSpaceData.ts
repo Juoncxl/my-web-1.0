@@ -39,6 +39,20 @@ export function getCreatorSpaceRenderState(input: {
   return input.isNotFound ? 'not-found' : 'profile-failed';
 }
 
+/**
+ * Public profile reads may identify the creator only by `id` (the public creator ID),
+ * so compare it the same way CreatorSpacePage does; otherwise the Owner sees only public Works.
+ */
+export function isCreatorSpaceOwner(
+  profile: Pick<User, 'id' | 'publicCreatorId'> | null | undefined,
+  currentUserId: string | undefined,
+  owner: Pick<User, 'publicCreatorId'> | null | undefined
+): boolean {
+  if (!profile) return false;
+  if (currentUserId && profile.id === currentUserId) return true;
+  return Boolean(owner?.publicCreatorId && (profile.publicCreatorId || profile.id) === owner.publicCreatorId);
+}
+
 export function selectCreatorAssets(
   source: Asset[],
   profileId: string | undefined,
@@ -202,10 +216,7 @@ export function useCreatorSpaceData(
   }, [authLoading, decodedSlug, ownerProfileFallback, refresh, slug]);
 
   const resolvedProfile = isOwnerSlug && ownerProfileFallback ? profile || ownerProfileFallback : profile;
-  const isOwner = Boolean(resolvedProfile && (
-    resolvedProfile.id === currentUserId ||
-    (ownerFallback?.publicCreatorId && resolvedProfile.publicCreatorId === ownerFallback.publicCreatorId)
-  ));
+  const isOwner = isCreatorSpaceOwner(resolvedProfile, currentUserId, ownerFallback);
   const assets = useMemo(
     () => selectCreatorAssets(
       sources.assets,

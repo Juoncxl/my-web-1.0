@@ -2,9 +2,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
 import { randomUUID } from 'node:crypto';
-import { directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
-import { cookieValue, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
+import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
+import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
+import { DirectWriteError, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -298,6 +300,37 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
 }
+const DIRECT_WRITE_USER_ERRORS = new Set(['REVISION_CONFLICT','REVISION_REQUIRED','INVALID_WORK','INVALID_COLLAB_DRAFT','INVALID_FOLDER','WORK_NOT_FOUND','WORK_NOT_OWNED','INDEX_ROW_AMBIGUOUS']);
+
+function directWritesEnabled(): boolean {
+  const setting = process.env.CXL_DIRECT_WRITES?.trim().toLowerCase();
+  return setting === 'on' || (process.env.VERCEL_ENV === 'preview' && setting !== 'off');
+}
+
+/** Owner OAuth token + sheet IDs for direct writes; null when the Owner has not connected Drive. */
+async function directWriteEnv(ownerUserId: string): Promise<DirectWriteEnv | null> {
+  const config = getOwnerAuthConfig();
+  const folderId = process.env.CXL_INCOMING_FOLDER_ID?.trim();
+  const privateSheetId = process.env.CXL_PRIVATE_SHEET_ID?.trim();
+  const publicSheetId = process.env.CXL_PUBLIC_SHEET_ID?.trim();
+  if (!config || !folderId || !privateSheetId || !publicSheetId || !config.publicCreatorId || !directOwnerReadsEnabled()) return null;
+  const sealed = await loadSealedOwnerDriveCredential(folderId, directDriveGet);
+  if (!sealed) return null;
+  return {
+    ownerToken: await ownerDriveAccessToken(sealed, config),
+    privateSheetId, publicSheetId, publicCreatorId: config.publicCreatorId,
+    ownerFolderIds: async () => (await directOwnerFolders(ownerUserId)).data.map(folder => String(folder.id))
+  };
+}
+
+/** Keeps the Apps Script public fallback snapshot fresh; the web reads the public sheet directly. */
+async function rebuildPublicSnapshotSoon(endpoint: string, secret: string, ownerUserId: string): Promise<void> {
+  try {
+    await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, redirect: 'manual',
+      body: JSON.stringify({ authorization: secret, ownerUserId, action: 'public.snapshot.rebuild', args: [] }), signal: AbortSignal.timeout(1_500) });
+  } catch { /* Apps Script keeps running after the request is dropped. */ }
+}
+
 function ownerErrorStatus(code: unknown): number {
   if (code === 'OWNER_API_UNAUTHORIZED') return 401;
   if (code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'UNSUPPORTED_ACTION') return 400;
@@ -460,6 +493,28 @@ export default async function handler(req: Request, res: Response) {
                 ? [{ uploadId: (body.args[0] as Record<string, unknown>).uploadId }]
                 : body.args;
     const requestArgs: unknown[] = body.args;
+    // Direct Google API update (Preview by default). Unsupported cases and unexpected
+    // failures fall through to Apps Script, whose idempotent path repairs a partial write.
+    if (action === 'works.update' && directWritesEnabled()) {
+      const started = Date.now();
+      try {
+        const env = await directWriteEnv(authenticatedOwnerId);
+        if (env) {
+          const result = await directUpdateWork(requestArgs, authenticatedOwnerId, env);
+          console.info(JSON.stringify({ event: 'cxl_direct_write', action, elapsedMs: Date.now() - started, used: !result.fallback, reason: result.fallback ? result.reason : undefined }));
+          if (result.fallback === false) {
+            const saved = result.data;
+            await rebuildPublicSnapshotSoon(endpoint.toString(), secret, authenticatedOwnerId);
+            return send(res, 200, { ok: true, data: saved });
+          }
+        }
+      } catch (error) {
+        const code = error instanceof DirectWriteError ? error.code : undefined;
+        console.info(JSON.stringify({ event: 'cxl_direct_write_failed', action, code, committed: error instanceof DirectWriteError && error.committed, reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
+        if (error instanceof DirectWriteError && !error.committed && DIRECT_WRITE_USER_ERRORS.has(error.code))
+          return send(res, ownerErrorStatus(error.code), { ok: false, error: error.message, code: error.code });
+      }
+    }
     const verifyWrite = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
       ? () => verifyOwnerWriteCommitted(action, requestArgs)
       : FOLDER_WRITE_ACTIONS.has(action) && directFoldersEnabled()
