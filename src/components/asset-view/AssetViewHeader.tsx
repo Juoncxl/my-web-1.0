@@ -126,15 +126,6 @@ export const AssetViewHeader: React.FC<AssetViewHeaderProps> = ({
             </span>
           )}
         </button>
-        {!isOwner && onReport && (
-          <button
-            onClick={() => onReport(asset)}
-            title="รายงานเนื้อหานี้ (Report)"
-            className="p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-slate-800 rounded-full transition-colors"
-          >
-            <Flag className="w-4 h-4" />
-          </button>
-        )}
         <button
           onClick={onClose}
           className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"

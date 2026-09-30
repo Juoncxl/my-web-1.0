@@ -9,7 +9,7 @@ import { AssetCard } from './AssetCard';
 import { CreatorProfilePreview, type CreatorProfilePreviewAnchor } from './CreatorProfilePreview';
 import type { VaultTabType } from './PersonalVaultHeader';
 import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
-import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
+import { isWorkOwnedBy, resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 
 interface AssetCollectionViewProps {
   activeView: 'feed' | 'vault';
@@ -370,17 +370,18 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
             <div className="cv-asset-grid">
               {sortedAssets.map(asset => {
                 const folder = folders.find(item => item.id === asset.folderId);
+                const ownsAsset = isWorkOwnedBy(asset, currentUser || (currentUserId ? { id: currentUserId } : null));
                 return (
                   <AssetCard
                     key={asset.id}
                     asset={asset}
                     allAssets={allAssets}
-                    viewerMode={asset.userId === currentUserId ? 'owner' : 'public'}
+                    viewerMode={ownsAsset ? 'owner' : 'public'}
                     folderName={folder?.name}
                     folderIcon={folder?.icon}
                     onClick={onOpenAsset}
-                    onEdit={asset.userId === currentUserId ? onEditAsset : undefined}
-                    onDelete={asset.userId === currentUserId ? onDeleteAsset : undefined}
+                    onEdit={ownsAsset ? onEditAsset : undefined}
+                    onDelete={ownsAsset ? onDeleteAsset : undefined}
                     onLike={onLike}
                     onBookmark={onBookmark}
                     onFork={onFork}
@@ -390,7 +391,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
                     onSelectCategory={onSelectCategory}
                     onSelectTag={onSelectTag}
                     onOpenMoveToFolder={onOpenMoveToFolder}
-                    isOwner={asset.userId === currentUserId}
+                    isOwner={ownsAsset}
                     isBookmarked={bookmarkedAssetIds.includes(asset.id)}
                     isLiked={likedAssetIds.includes(asset.id)}
                     isTrashMode={activeVaultTab === 'trash'}

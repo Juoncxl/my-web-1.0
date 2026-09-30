@@ -11,7 +11,7 @@ export const AUDIENCE_RATING_LABELS: Record<AssetAudienceRating, string> = {
   '18_plus': '18+'
 };
 
-export const CATEGORIES: Record<AssetCategory, CategoryMeta> = {
+const CATEGORY_DEFINITIONS: Record<AssetCategory, CategoryMeta> = {
   character: {
     id: 'character',
     name: 'โปรไฟล์ตัวละคร',
@@ -73,6 +73,13 @@ export const CATEGORIES: Record<AssetCategory, CategoryMeta> = {
     description: 'SillyTavern Card V2, JSON Presets, และ Configs ต่างๆ'
   }
 };
+
+/** Display order for category tabs and pickers: Collab and App first so visitors find them quickly. */
+export const CATEGORY_ORDER: AssetCategory[] = ['collab', 'app_data', 'character', 'lore', 'ui_code', 'prompts'];
+
+export const CATEGORIES = Object.fromEntries(
+  CATEGORY_ORDER.map(category => [category, CATEGORY_DEFINITIONS[category]])
+) as Record<AssetCategory, CategoryMeta>;
 
 export const KAOMOJI_COLLECTIONS = [
   {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectPublicCreatorKeys, resolvePublicCreatorKey } from './publicCreatorIdentity';
+import { collectPublicCreatorKeys, isWorkOwnedBy, resolvePublicCreatorKey } from './publicCreatorIdentity';
 
 describe('public creator identity resolution', () => {
   it('uses publicCreatorId when a Google Work has no userId', () => {
@@ -27,5 +27,14 @@ describe('public creator identity resolution', () => {
       { publicCreatorId: '   ', userId: undefined },
       {}
     ])).toEqual(['cxlc_0123456789abcdef0123456789abcdef', 'legacy-user-id']);
+  });
+
+  it('recognises the Owner on public feed Works that carry no userId', () => {
+    const owner = { id: 'owner-id', publicCreatorId: 'cxlc_0123456789abcdef0123456789abcdef' };
+    expect(isWorkOwnedBy({ userId: '', publicCreatorId: owner.publicCreatorId }, owner)).toBe(true);
+    expect(isWorkOwnedBy({ userId: 'owner-id' }, owner)).toBe(true);
+    expect(isWorkOwnedBy({ userId: '', publicCreatorId: 'cxlc_other' }, owner)).toBe(false);
+    expect(isWorkOwnedBy({ userId: '' }, { id: 'owner-id' })).toBe(false);
+    expect(isWorkOwnedBy({ userId: '', publicCreatorId: owner.publicCreatorId }, null)).toBe(false);
   });
 });

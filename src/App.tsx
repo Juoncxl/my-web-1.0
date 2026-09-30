@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import type { Asset, AssetCategory, AssetStatus } from './types';
+import { isWorkOwnedBy } from './lib/publicCreatorIdentity';
 import {
   canCreateOwnedAsset
 } from './lib/accessPolicy';
@@ -657,8 +658,8 @@ function MainApp() {
         allAssets={assets}
         folders={foldersWithCounts}
         onMoveToFolder={handleOpenMoveToFolder}
-        isOwner={viewingAsset?.userId === currentUser?.id}
-        creatorProfile={viewingAsset && viewingAsset.userId === currentUser?.id ? currentUser : null}
+        isOwner={isWorkOwnedBy(viewingAsset, currentUser)}
+        creatorProfile={isWorkOwnedBy(viewingAsset, currentUser) ? currentUser : null}
         isBookmarked={viewingAsset ? bookmarkedAssetIds.includes(viewingAsset.id) : false}
         isLiked={viewingAsset ? likedAssetIds.includes(viewingAsset.id) : false}
         isTrashMode={activeVaultTab === 'trash'}
