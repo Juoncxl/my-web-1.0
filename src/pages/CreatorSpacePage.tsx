@@ -186,7 +186,8 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     { assets: allKnownAssets, folders: knownFolders, isAssetsLoading: isLoadingAssets, isFoldersLoading: isLoadingFolders },
     authLoading
   );
-  const creatorSpaceRenderState = getCreatorSpaceRenderState({ authLoading, isProfileLoading, profile, isNotFound });  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const creatorSpaceRenderState = getCreatorSpaceRenderState({ authLoading, isProfileLoading, profile, isNotFound });
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [selectedAssetOriginFolderId, setSelectedAssetOriginFolderId] = useState<string | null>(null);
