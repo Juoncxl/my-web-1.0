@@ -145,7 +145,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {/* Create Asset Button */}
-            {!creatorMode && <button
+            {!creatorMode && isAuthenticated && <button
               onClick={onOpenCreateModal}
               className="cv-create-button flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all active:scale-95 cursor-pointer"
             >

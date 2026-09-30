@@ -70,6 +70,9 @@ const CONTENT_TYPE_CARD_LABELS: Record<NonNullable<Asset['contentTypes']>[number
   bot_prompt: '🧩 พรอมต์ / OOC / เทมเพลตบอท'
 };
 
+// Content type labels already carry their own emoji; avoid showing two in a row.
+const LEADING_EMOJI = /^\s*\p{Extended_Pictographic}/u;
+
 function getStandardCardCategoryLabel(asset: Asset, fallback: string): string {
   if (asset.contentTypeLabels?.length) return asset.contentTypeLabels.join(' · ');
   if (asset.contentTypes?.length) return asset.contentTypes.map(type => CONTENT_TYPE_CARD_LABELS[type]).join(' · ');
@@ -186,7 +189,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const mainImage = asset.previewImage || asset.previewImages?.[0];
   const snippetSource = display.isCollaborationFocused ? asset.shortDescription || '' : display.summary || asset.content;
   const snippet = snippetSource.replace(/[#*`_]/g, '').trim();
-  const resolvedCreatorProfile = creatorProfile || (currentUser?.id === asset.userId ? currentUser : null);
+  const resolvedCreatorProfile = creatorProfile || (isOwner || currentUser?.id === asset.userId ? currentUser : null);
   const creator = resolveWorkCreator(asset, resolvedCreatorProfile);
   const linkedCollaboration = asset.collaborationAssetId
     ? allAssets.find(candidate => candidate.id === asset.collaborationAssetId && candidate.category === 'collab')
@@ -286,7 +289,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             className="cv-cover-category"
             aria-label={`กรองหมวด ${categoryLabel}`}
           >
-            <span aria-hidden="true">{categoryMeta.emoji}</span>
+            {!LEADING_EMOJI.test(categoryLabel) && <span aria-hidden="true">{categoryMeta.emoji}</span>}
             <span className="cv-cover-category-label">{categoryLabel}</span>
           </button>
           <div className="cv-cover-meta">
@@ -294,14 +297,14 @@ export const AssetCard: React.FC<AssetCardProps> = ({
               <span aria-hidden="true">{statusMeta.emoji}</span>
               <span className="cv-cover-status-label">{statusMeta.name}</span>
             </span>
-            <span
+            {isOwner && <span
               className="cv-cover-visibility"
               role="img"
               aria-label={isPublicFeedVisibility(asset) ? 'สาธารณะ' : 'ส่วนตัว'}
               title={isPublicFeedVisibility(asset) ? 'สาธารณะ' : 'ส่วนตัว'}
             >
               {isPublicFeedVisibility(asset) ? <Globe className="w-3 h-3" aria-hidden="true" /> : <Lock className="w-3 h-3" aria-hidden="true" />}
-            </span>
+            </span>}
           </div>
         </div>
 
@@ -333,7 +336,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           </div>
         </div>
 
-        {(!collaboration || snippet) && <p className="cv-card-snippet">{snippet || 'ยังไม่มีคำอธิบายสำหรับผลงานชิ้นนี้'}</p>}
+        {snippet && <p className="cv-card-snippet">{snippet}</p>}
 
         {collaboration && <CollabCardSummary collaboration={collaboration} />}
         {visibleLinkedCollaboration && <div className="cv-card-collab-link" title={`เชื่อมกับคอลแลป ${visibleLinkedCollaboration.title}`}>
