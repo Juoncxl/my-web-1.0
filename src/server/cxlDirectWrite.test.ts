@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { cxlAssetFromRecord, DirectWriteError, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
+import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
+import { directMediaBegin, directMediaChunk, directMediaFinalize } from './cxlDirectMedia';
 
 const PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_version','search_chunk_count','search_index_token'];
 const PUBLIC_HEADERS = ['id','title','category','status','updated_at','tags','short_description','file_id','active','cover_ref','summary_json'];
@@ -22,7 +23,9 @@ function fakeGoogle() {
       WorkCreatorMap: [['schemaVersion','workId','publicCreatorId'], [1, WORK, 'cxlc_' + 'a'.repeat(32)]]
     }
   };
-  const files: Record<string, { name: string; parent: string; content: unknown }> = {
+  type FakeFile = { name: string; parent: string; content?: unknown; bytes?: Buffer; mimeType?: string; props?: Record<string, string>; perms?: { id: string; type: string; role?: string }[] };
+  const sessions: Record<string, { meta: Record<string, any>; total: number; received: Buffer; fileId?: string }> = {};
+  const files: Record<string, FakeFile> = {
     rec3: { name: `${WORK}__r3.json`, parent: 'privFolder', content: {
       revision: 3, row: { id: WORK, user_id: OWNER, title: 'Old', category: 'prompts', status: 'finished', visibility: 'public', is_public: true, created_at: '2026-08-01', preview_image: 'media:m1', preview_images: ['media:m1'] },
       mediaRecords: [{ id: 'm1', asset_id: WORK, purpose: 'gallery', is_cover: true, sort_order: 0, delivery: 'vercel_proxy', mime_type: 'image/png' }],
@@ -57,13 +60,45 @@ function fakeGoogle() {
       const grid = book[sheet];
       if (op === 'append') { grid.push(...JSON.parse(String(init.body)).values); return ok({}); }
       if (init.method === 'PUT') {
-        JSON.parse(String(init.body)).values.forEach((values: unknown[], i: number) => { grid[r1 - 1 + i] = values; });
+        JSON.parse(String(init.body)).values.forEach((values: unknown[], i: number) => {
+          const row = grid[r1 - 1 + i] = [...(grid[r1 - 1 + i] || [])];
+          values.forEach((value, j) => { row[c1 + j] = value; });
+        });
         return ok({});
       }
       const values = grid.slice(r1 - 1, Math.min(grid.length, r2)).map(row => row.slice(c1, c2 + 1));
       return ok({ values });
     }
+    const headers = new Headers(init.headers);
+    const describe = (id: string) => {
+      const f = files[id];
+      return { id, name: f.name, parents: [f.parent], size: String(f.bytes?.length ?? 0), mimeType: f.mimeType || 'application/json',
+        sha256Checksum: f.bytes ? createHash('sha256').update(f.bytes).digest('hex') : undefined, createdTime: '2026-10-01T00:00:00.000Z', appProperties: f.props };
+    };
+    // Resumable upload sessions (media bytes).
+    if (url.hostname === 'upload.test') {
+      const session = sessions[url.pathname.split('/').pop()!];
+      const range = headers.get('content-range') || '';
+      const status = () => session.received.length >= session.total
+        ? new Response(JSON.stringify(describe(session.fileId!)), { status: 200 })
+        : new Response(null, { status: 308, headers: session.received.length ? { Range: `bytes=0-${session.received.length - 1}` } : {} });
+      if (range.startsWith('bytes */')) return status();
+      const [, start] = range.match(/^bytes (\d+)-/)!;
+      if (Number(start) !== session.received.length) return new Response(null, { status: 400 });
+      session.received = Buffer.concat([session.received, Buffer.from(init.body as Uint8Array)]);
+      if (session.received.length >= session.total) {
+        const id = `media${nextId++}`;
+        files[id] = { name: session.meta.name, parent: session.meta.parents[0], bytes: session.received, mimeType: session.meta.mimeType, props: { ...session.meta.appProperties }, perms: [] };
+        session.fileId = id;
+      }
+      return status();
+    }
     if (url.pathname.startsWith('/upload/drive/v3/files')) {
+      if (url.searchParams.get('uploadType') === 'resumable') {
+        const sid = `s${nextId++}`;
+        sessions[sid] = { meta: JSON.parse(String(init.body)), total: Number(headers.get('x-upload-content-length')), received: Buffer.alloc(0) };
+        return new Response('{}', { status: 200, headers: { Location: `https://upload.test/session/${sid}` } });
+      }
       const body = String(init.body), parts = body.split(/--cxl-[^\r\n]+/).map(part => part.split('\r\n\r\n')[1]?.trim()).filter(Boolean);
       const meta = JSON.parse(parts[0]), content = JSON.parse(parts[1]);
       const existing = url.pathname.split('/').pop()!;
@@ -71,13 +106,37 @@ function fakeGoogle() {
       const id = `new${nextId++}`; files[id] = { name: meta.name, parent: meta.parents[0], content }; return ok({ id });
     }
     if (url.pathname === '/drive/v3/files') {
-      const q = url.searchParams.get('q')!, parent = q.match(/'([^']+)' in parents/)![1], name = q.match(/name = '([^']+)'/)![1];
-      return ok({ files: Object.entries(files).filter(([, f]) => f.parent === parent && f.name === name).map(([id]) => ({ id })) });
+      const q = url.searchParams.get('q')!;
+      const prop = q.match(/appProperties has \{ key='([^']+)' and value='([^']+)' \}/);
+      const parent = q.match(/'([^']+)' in parents/)?.[1], name = q.match(/name = '([^']+)'/)?.[1];
+      const matches = Object.keys(files).filter(id => {
+        const f = files[id];
+        if (prop) return f.props?.[prop[1]] === prop[2];
+        if (q.includes("name contains 'cxl-work-media-'")) return /^cxl-work-media-[a-f0-9-]{36}\./.test(f.name);
+        return f.parent === parent && f.name === name;
+      });
+      return ok({ files: matches.map(describe) });
+    }
+    const permMatch = url.pathname.match(/^\/drive\/v3\/files\/([^/]+)\/permissions(?:\/([^/]+))?$/);
+    if (permMatch) {
+      const file = files[permMatch[1]]; file.perms = file.perms || [];
+      if (init.method === 'POST') { file.perms.push({ id: `p${nextId++}`, ...JSON.parse(String(init.body)) }); return ok({}); }
+      if (init.method === 'DELETE') { file.perms = file.perms.filter(p => p.id !== permMatch[2]); return new Response(null, { status: 204 }); }
+      return ok({ permissions: file.perms });
     }
     const fileMatch = url.pathname.match(/^\/drive\/v3\/files\/([^/]+)$/);
     if (fileMatch) {
       const file = files[fileMatch[1]];
-      return url.searchParams.get('alt') === 'media' ? ok(file.content) : ok({ parents: [file.parent] });
+      if (init.method === 'DELETE') { delete files[fileMatch[1]]; return new Response(null, { status: 204 }); }
+      if (init.method === 'PATCH') { file.props = { ...file.props, ...JSON.parse(String(init.body)).appProperties }; return ok({ id: fileMatch[1] }); }
+      if (url.searchParams.get('alt') === 'media') {
+        if (file.bytes) {
+          const range = headers.get('range')?.match(/bytes=(\d+)-(\d+)/);
+          return range ? new Response(file.bytes.subarray(Number(range[1]), Number(range[2]) + 1), { status: 206 }) : new Response(file.bytes, { status: 200 });
+        }
+        return ok(file.content);
+      }
+      return ok({ parents: [file.parent] });
     }
     throw new Error(`Unexpected request ${input}`);
   });
@@ -124,14 +183,140 @@ describe('direct Work update', () => {
     expect(JSON.parse(String(publicRow[PUBLIC_HEADERS.indexOf('summary_json')]))).toMatchObject({ summaryVersion: 2, asset: { id: WORK, title: 'New title', isPublic: true } });
   });
 
-  it('falls back to Apps Script before writing when media or visibility change', async () => {
+  it('leaves trash changes to softDelete/restore and rejects inline or unknown media, without writing', async () => {
     const google = fakeGoogle();
     vi.stubGlobal('fetch', google.fetchMock);
     const options = { requestId: REQUEST, expectedRevision: 3 };
-    await expect(directUpdateWork([WORK, { previewImages: [] }, options], OWNER, google.env)).resolves.toMatchObject({ fallback: true });
-    await expect(directUpdateWork([WORK, { visibility: 'private' }, options], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'visibility_or_trash_changed' });
-    await expect(directUpdateWork([WORK, { title: 'x' }, { ...options, mediaIds: ['a'] }], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'media_upload' });
+    await expect(directUpdateWork([WORK, { deletedAt: '2026-10-01T00:00:00.000Z' }, options], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'trash_changed' });
+    await expect(directUpdateWork([WORK, { previewImage: 'data:image/png;base64,AAAA' }, options], OWNER, google.env)).rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
+    await expect(directUpdateWork([WORK, { title: 'x' }, { ...options, mediaIds: ['33333333-3333-4333-8333-333333333333'] }], OWNER, google.env)).rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
     expect(Object.keys(google.files)).toEqual(['rec3', 'pubfile3']);
+  });
+
+  it('answers a retried update that already committed without writing again', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const args = [WORK, { title: 'Once' }, { requestId: REQUEST, expectedRevision: 3 }];
+    await directUpdateWork(args, OWNER, google.env);
+    const filesAfterFirst = Object.keys(google.files).length;
+    // The retry still names the old revision, like a browser retrying a lost response.
+    (google.sheets.priv[''][1] as unknown[])[PRIVATE_HEADERS.indexOf('file_id')] = Object.entries(google.files).find(([, file]) => file.name === `${WORK}__r4.json` && file.parent === 'privFolder')![0];
+    await expect(directUpdateWork(args, OWNER, google.env)).resolves.toMatchObject({ fallback: false, data: { data: { title: 'Once', revision: 4 } } });
+    expect(google.sheets.priv[''][1][PRIVATE_HEADERS.indexOf('revision')]).toBe(4);
+    expect(Object.keys(google.files).length).toBeGreaterThanOrEqual(filesAfterFirst);
+    await expect(directUpdateWork([WORK, { title: 'Different' }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env)).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
+  it('creates a private Work as Apps Script would: revision file, index row, search chunks, no public row', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const input = { title: 'ใหม่', category: 'prompts', status: 'draft', visibility: 'private', content: 'hello world', tags: ['a'], userId: OWNER };
+    const result = await directCreateWork([input, { requestId: REQUEST }], OWNER, google.env);
+    expect(result.fallback).toBe(false);
+    const id = `asset_${REQUEST.replace(/-/g, '')}`;
+    const saved = Object.values(google.files).find(file => file.name === `${id}__r1.json`)!;
+    expect(saved.parent).toBe('privFolder');
+    expect(saved.content).toMatchObject({ revision: 1, createRequestId: REQUEST, lastWriteOperation: 'create', lastWriteFingerprint: writeFingerprint('create', input), row: { id, user_id: OWNER, is_public: false } });
+    const row = google.sheets.priv[''].find(values => values[0] === id)!;
+    expect(row[PRIVATE_HEADERS.indexOf('create_request_id')]).toBe(REQUEST);
+    expect(JSON.parse(String(row[PRIVATE_HEADERS.indexOf('summary_json')])).asset).toMatchObject({ id, title: 'ใหม่', visibility: 'private' });
+    expect(google.sheets.priv.OwnerSearchIndex.some(values => values[0] === id && String(values[2]).includes('hello world'))).toBe(true);
+    expect(google.sheets.pub[''].some(values => values[0] === id)).toBe(false);
+  });
+
+  it('creates a public Work with its creator mapping and public projection', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const input = { title: 'สาธารณะ', category: 'lore', status: 'finished', visibility: 'public', userId: OWNER };
+    await expect(directCreateWork([input, { requestId: REQUEST }], OWNER, google.env)).resolves.toMatchObject({ fallback: false });
+    const id = `asset_${REQUEST.replace(/-/g, '')}`;
+    expect(google.sheets.pub.WorkCreatorMap.some(values => values[1] === id && values[2] === google.env.publicCreatorId)).toBe(true);
+    const publicRow = google.sheets.pub[''].find(values => values[0] === id)!;
+    expect(publicRow[PUBLIC_HEADERS.indexOf('active')]).toBe('true');
+    expect(Object.values(google.files).some(file => file.name === `${id}__r1.json` && file.parent === 'pubFolder')).toBe(true);
+  });
+
+  it('rejects creates referencing media that was never uploaded and answers a repeated create request', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    await expect(directCreateWork([{ title: 'x', category: 'lore', previewImage: 'media:abc', userId: OWNER }, { requestId: REQUEST }], OWNER, google.env)).rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
+    const input = { title: 'x', category: 'lore', userId: OWNER, visibility: 'private' };
+    await directCreateWork([input, { requestId: REQUEST }], OWNER, google.env);
+    const rows = google.sheets.priv[''].length;
+    await expect(directCreateWork([input, { requestId: REQUEST }], OWNER, google.env)).resolves.toMatchObject({ fallback: false, data: { data: { id: `asset_${REQUEST.replace(/-/g, '')}` } } });
+    expect(google.sheets.priv[''].length).toBe(rows);
+    await expect(directCreateWork([{ title: 'x', userId: OWNER }, { requestId: '22222222-2222-4333-8444-555555555555' }], OWNER, google.env)).rejects.toMatchObject({ code: 'INVALID_WORK' });
+  });
+
+  it('moves a public Work to Trash (deactivating its public row) and restores it', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    await expect(directSetTrash('works.softDelete', WORK, OWNER, google.env)).resolves.toMatchObject({ fallback: false, data: { success: true } });
+    let row = google.sheets.priv[''][1];
+    expect(row[PRIVATE_HEADERS.indexOf('deleted_at')]).toBeTruthy();
+    expect(row[PRIVATE_HEADERS.indexOf('revision')]).toBe(4);
+    expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('false');
+
+    await expect(directSetTrash('works.restore', WORK, OWNER, google.env)).resolves.toMatchObject({ fallback: false });
+    row = google.sheets.priv[''][1];
+    expect(row[PRIVATE_HEADERS.indexOf('deleted_at')]).toBe('');
+    expect(row[PRIVATE_HEADERS.indexOf('revision')]).toBe(5);
+    expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('true');
+  });
+
+  it('uploads an image, attaches it to a Work, then retires it when removed', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    google.files.seed = { name: 'cxl-work-media-00000000-0000-4000-8000-000000000000.png', parent: 'mediaFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {} };
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 7)]);
+    const mediaId = '33333333-3333-4333-8333-333333333333', uploadId = '44444444-4444-4444-8444-444444444444';
+    const sha256 = createHash('sha256').update(png).digest('hex');
+    const begin = { uploadId, mediaId, workId: WORK, totalFileSize: png.length, rawChunkSize: 2 * 1024 * 1024, totalChunks: 1, mimeType: 'image/png', sha256, purpose: 'gallery', contextId: null, sortOrder: 1, isCover: false };
+    await expect(directMediaBegin(begin, OWNER, google.env)).resolves.toMatchObject({ finalized: false });
+    await expect(directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, google.env)).resolves.toMatchObject({ stored: true });
+    await expect(directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, google.env)).resolves.toMatchObject({ idempotent: true });
+    await expect(directMediaFinalize({ uploadId, mediaId }, OWNER, google.env)).resolves.toMatchObject({ finalized: true, mediaId });
+    const media = Object.values(google.files).find(file => file.props?.cxlMediaId === mediaId)!;
+    expect(media).toMatchObject({ name: `cxl-work-media-${mediaId}.png`, parent: 'mediaFolder', props: { cxlState: 'finalized' } });
+    expect(Object.values(google.files).some(file => file.name.includes('session'))).toBe(false);
+    await expect(directMediaBegin(begin, OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+
+    const attached = await directUpdateWork([WORK, { previewImages: ['media:m1', `media:${mediaId}`] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: [mediaId] }], OWNER, google.env);
+    expect(attached.fallback).toBe(false);
+    const r4 = Object.values(google.files).find(file => file.name === `${WORK}__r4.json` && file.parent === 'privFolder')!.content as Record<string, any>;
+    expect(r4.mediaRecords.find((m: { id: string }) => m.id === mediaId)).toMatchObject({ delivery: 'vercel_proxy', purpose: 'gallery', sort_order: 1, is_cover: false, sharing_access: 'private' });
+    expect(media.props?.cxlState).toBe('attached');
+
+    await directUpdateWork([WORK, { previewImages: ['media:m1'] }, { requestId: '55555555-5555-4555-8555-555555555555', expectedRevision: 4 }], OWNER, google.env);
+    const r5 = Object.values(google.files).find(file => file.name === `${WORK}__r5.json` && file.parent === 'privFolder')!.content as Record<string, any>;
+    expect(r5.mediaRecords.some((m: { id: string }) => m.id === mediaId)).toBe(false);
+    expect(media.props?.cxlState).toBe('retired');
+  });
+
+  it('rejects attaching an upload that does not match its placement, and removing legacy media', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1', 'media:33333333-3333-4333-8333-333333333333'] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: ['33333333-3333-4333-8333-333333333333'] }], OWNER, google.env))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
+    const record = (google.files.rec3.content as Record<string, any>);
+    record.mediaRecords.push({ id: 'legacy', purpose: 'gallery', drive_file_id: 'legacyFile', sharing_access: 'public' });
+    record.cxlAsset.previewImages = ['media:m1', 'media:legacy'];
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1'] }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
+  });
+
+  it('turns a public Work private: legacy images lose their public link and the public row is deactivated', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const record = (google.files.rec3.content as Record<string, any>);
+    record.mediaRecords.push({ id: 'legacy', purpose: 'gallery', drive_file_id: 'legacyFile', storage_path: 'old/path', sharing_access: 'public' });
+    record.row.preview_images = ['media:m1', 'media:legacy'];
+    record.cxlAsset.previewImages = ['media:m1', 'media:legacy'];
+    google.files.legacyFile = { name: 'legacy.png', parent: 'old', bytes: Buffer.from('x'), perms: [{ id: 'anyone1', type: 'anyone', role: 'reader' }] };
+    await expect(directUpdateWork([WORK, { visibility: 'private', isPublic: false }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env)).resolves.toMatchObject({ fallback: false });
+    expect(google.files.legacyFile.perms).toEqual([]);
+    expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('false');
+    expect(google.sheets.priv[''][1][PRIVATE_HEADERS.indexOf('is_public')]).toBe('false');
   });
 
   it('rejects a stale revision without writing', async () => {

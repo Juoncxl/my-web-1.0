@@ -52,8 +52,12 @@ async function saveGoogleWork(action: 'works.create' | 'works.update', idOrAsset
 }
 
 async function fetchPublicSnapshot(options: FetchAssetsOptions = {}) {
-  const response = await fetch('/api/cxl/public-works', {
+  // The signed-in Owner (whose CSRF cookie is readable) skips the CDN copy so a Work
+  // they just made public appears immediately; guests keep the cached feed.
+  const ownerSignedIn = typeof document !== 'undefined' && document.cookie.split(';').some(item => item.trim().startsWith('__Host-cxl_csrf='));
+  const response = await fetch(ownerSignedIn ? '/api/cxl/public-works?fresh=1' : '/api/cxl/public-works', {
     method: 'GET',
+    cache: ownerSignedIn ? 'no-store' : 'default',
     // Preview deployments are protected by Vercel Authentication. The page
     // can load while an `omit` request drops that same-origin auth cookie and
     // receives Vercel's 401 JSON instead of the public snapshot.

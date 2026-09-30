@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { DirectWriteError, fail } from './cxlDirectErrors.js';
+import { findWorkMediaFile, markWorkMediaState, setLegacyMediaSharing, type WorkMediaFile } from './cxlDirectMedia.js';
 
 /**
  * Direct Work update (step 3.1 of the Apps Script → Google API migration).
@@ -31,10 +33,7 @@ const PUBLIC_SUMMARY_MAX_CHARS = 45000;
 const CXL_WRITE_FIELDS = ['authorName','authorAvatar','title','icon','category','shortDescription','contentTypeLabels','contentTypes','presentationMetadata','publicCollaboration','collaborationAssetId','contentBlocks','content','uiCodeSnippet','previewImage','previewImages','folderId','isPublic','visibility','status','tags','linkedAssetIds','deletedAt','likesCount','forkCount','forkedFromId','forkedFromAuthor','versions','media','collaboration'];
 const TIMEOUT_MS = 10_000;
 
-export class DirectWriteError extends Error {
-  constructor(message: string, readonly code: string, readonly committed = false) { super(message); }
-}
-const fail = (code: string, message: string): never => { throw new DirectWriteError(message, code); };
+export { DirectWriteError };
 
 export interface DirectWriteEnv {
   ownerToken: string;
@@ -370,7 +369,7 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   const id = String(workId || '');
   if (!/^asset_[A-Za-z0-9_-]{1,96}$/.test(id)) return { fallback: true, reason: 'invalid_id' };
   if (!options || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(String(options.requestId || ''))) return { fallback: true, reason: 'invalid_request_id' };
-  if (Array.isArray(options.mediaIds) && options.mediaIds.length) return { fallback: true, reason: 'media_upload' };
+  const mediaIds: string[] = Array.isArray(options.mediaIds) ? options.mediaIds.map(String) : [];
   validateUpdatePayload(updates);
   const requestId = String(options.requestId).toLowerCase();
   const fingerprint = writeFingerprint('update', { id, updates, expectedRevision: options.expectedRevision });
@@ -384,7 +383,12 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   const previousFileId = String(indexed.file_id || '');
   if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
   const record = await driveJson(env, previousFileId);
-  if (record.lastWriteRequestId === requestId) return { fallback: true, reason: 'idempotent_retry' };
+  if (record.lastWriteRequestId === requestId) {
+    // Retried request that already committed (Apps Script's idempotent path): answer it again.
+    if (record.lastWriteFingerprint !== fingerprint) fail('IDEMPOTENCY_KEY_REUSED', 'Update requestId was already used with different Work data');
+    if (isPublicRow(record.row || {})) await publishWork(env, record).catch(error => { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); });
+    return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
+  }
 
   if (!Number.isInteger(Number(options.expectedRevision)) || Number(options.expectedRevision) < 1) fail('REVISION_REQUIRED', 'Expected revision is required for update');
   if (Number(options.expectedRevision) !== (Number(record.revision) || 1) || (Number(record.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work revision is stale; reload before saving');
@@ -403,13 +407,14 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   const lastVersion = (existingAsset.versions || []).at(-1);
   asset.versions = changed ? (existingAsset.versions || []).concat([{ version: (lastVersion?.version + 1) || 1, updatedAt: now, title: asset.title, summary: 'บันทึกการแก้ไขเนื้อหา' }]) : existingAsset.versions || [];
 
-  // Supported case only: no media, gallery, visibility or trash transitions.
-  const before = mediaReferences(existingAsset), after = mediaReferences(asset);
-  if (after.inline) return { fallback: true, reason: 'inline_media' };
-  if (!sameJson([...new Set(before.refs)].sort(), [...new Set(after.refs)].sort())) return { fallback: true, reason: 'media_changed' };
-  if (!sameJson(existingAsset.previewImage || '', asset.previewImage || '') || !sameJson(existingAsset.previewImages || [], asset.previewImages || [])) return { fallback: true, reason: 'gallery_changed' };
+  // Trash changes go through works.softDelete / works.restore.
+  if (String(asset.deletedAt || '') !== String(record.row?.deleted_at || '')) return { fallback: true, reason: 'trash_changed' };
+  rejectUnsupportedWorkMedia(asset, existingAsset, mediaIds);
   const wasPublic = isPublicRow(record.row || {});
-  if (asset.visibility !== (record.row?.visibility || 'private') || String(asset.deletedAt || '') !== String(record.row?.deleted_at || '')) return { fallback: true, reason: 'visibility_or_trash_changed' };
+  record.mediaRecords = record.mediaRecords || [];
+  const previousMediaRecords = record.mediaRecords.slice();
+  const previousMediaIds = referencedMediaIds(cxlAssetFromRecord(record));
+  const attachedMedia = await attachWorkMedia(record, asset, mediaIds, id, ownerUserId, env);
 
   // A Work may still reference a folder deleted since; drop it unless this request chose it.
   if (asset.folderId) {
@@ -421,19 +426,8 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   }
 
   // Apply the saveOwnerWork_ row update.
+  applyRowInput(record, asset);
   const r = record.row;
-  const input = { title: asset.title, author_name: asset.authorName || '', author_avatar: asset.authorAvatar || '', icon: asset.icon,
-    category: asset.category, status: asset.status, visibility: asset.visibility || (asset.isPublic ? 'public' : 'private'), short_description: asset.shortDescription || '',
-    content_type_labels: asset.contentTypeLabels || [], content_types: asset.contentTypes || [], presentation_metadata: asset.presentationMetadata || null,
-    public_collaboration: asset.publicCollaboration || null, folder_id: asset.folderId || '', tags: asset.tags || [], content: asset.content || '', ui_code_snippet: asset.uiCodeSnippet || '',
-    content_blocks: asset.contentBlocks || [], preview_image: asset.previewImage || '', preview_images: asset.previewImages || [], collaboration_asset_id: asset.collaborationAssetId || null,
-    deleted_at: asset.deletedAt || null };
-  Object.assign(r, input);
-  if (!String(r.title || '').trim()) fail('INVALID_WORK', 'ต้องระบุชื่อผลงาน');
-  if (!['character','lore','ui_code','prompts','collab','app_data'].includes(r.category)) fail('INVALID_WORK', 'หมวดหมู่ไม่ถูกต้อง');
-  if (!['idea','draft','in_progress','finished','archived'].includes(r.status)) fail('INVALID_WORK', 'สถานะไม่ถูกต้อง');
-  if (!['public','private'].includes(r.visibility)) fail('INVALID_WORK', 'การมองเห็นไม่ถูกต้อง');
-  if (r.category === 'collab') r.collaboration_asset_id = null;
   if (r.collaboration_asset_id) {
     const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', String(r.collaboration_asset_id));
     const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
@@ -443,69 +437,371 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   record.collaborationDraft = asset.category === 'collab' ? (asset.collaboration || null) : null;
   record.cxlAsset = asset;
   record.lastWriteRequestId = requestId; record.lastWriteOperation = 'update'; record.lastWriteFingerprint = fingerprint;
-  record.mediaRecords = record.mediaRecords || [];
+  const retiredMediaIds = await settleRecordMedia(record, previousMediaIds, env);
   record.revision = (Number(record.revision) || 1) + 1;
   const nowPublic = isPublicRow(r);
-
-  // Public preconditions are checked before anything is written.
-  let publicFolderId = '', publicRowNumber = 0, publicHeaders: string[] = [];
-  if (nowPublic) {
-    publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
-    if (PUBLIC_HEADERS.some((header, index) => publicHeaders[index] !== header)) return { fallback: true, reason: 'public_headers' };
-    const publicRows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
-    if (publicRows.length !== 1) return { fallback: true, reason: 'public_row_missing' };
-    publicRowNumber = publicRows[0];
-    const publicRow = await readRow(env, env.publicSheetId, '', publicHeaders, publicRowNumber);
-    if (!publicRow.file_id) return { fallback: true, reason: 'public_file_missing' };
-    publicFolderId = await driveParent(env, String(publicRow.file_id));
-    const mapHeaders = await sheetHeaders(env, env.publicSheetId, 'WorkCreatorMap!');
-    const mapRows = await findRows(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, 'workId', id);
-    if (mapRows.length !== 1) return { fallback: true, reason: 'creator_map_missing' };
-    const map = await readRow(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, mapRows[0]);
-    if (String(map.publicCreatorId || '') !== env.publicCreatorId) return { fallback: true, reason: 'creator_map_mismatch' };
-  }
   const privateFolderId = await driveParent(env, previousFileId);
 
   // 1) canonical revision, 2) search chunks, 3) private index (commit point).
   const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
   const metadata = privateMeta(record, '', artifacts);
-  const fileId = await putJsonRevision(env, privateFolderId, `${id}__r${record.revision}.json`, record);
-  metadata.file_id = fileId;
-  const searchHeaders = await sheetHeaders(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`);
-  if (artifacts.chunks.length) {
-    const rows = artifacts.chunks.map((text, index) => {
-      const item: Row = { work_id: id, chunk_index: index, search_text: text, search_version: artifacts.version, updated_at: artifacts.updatedAt, index_token: artifacts.token };
-      return searchHeaders.map(key => item[key] === undefined ? '' : item[key]);
-    });
-    await google(env, `${sheetsBase(env.privateSheetId)}/values/${encodeURIComponent(`${OWNER_SEARCH_SHEET}!A1`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: rows })
-    });
-  }
+  metadata.file_id = await putJsonRevision(env, privateFolderId, `${id}__r${record.revision}.json`, record);
+  const searchHeaders = await appendSearchChunks(env, id, artifacts);
   // Re-check the revision right before the commit point (Apps Script may have written meanwhile).
   const latest = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
   if (String(latest.id) !== id || (Number(latest.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work revision changed before save; reload before saving');
-  const indexValues = privateHeaders.map(header => {
-    if (header === 'search_text') return '';
-    if (Object.prototype.hasOwnProperty.call(metadata, header)) return metadata[header] === undefined || metadata[header] === null ? '' : metadata[header];
-    return latest[header] ?? '';
-  });
-  await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [indexValues]);
+  await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [privateIndexValues(privateHeaders, metadata, latest)]);
 
-  // After the commit point: public projection, then stale search cleanup.
+  // After the commit point: media state, public projection, stale search cleanup.
   try {
-    if (nowPublic) {
-      const pub = projection(record);
-      const publicFileId = await putJsonRevision(env, publicFolderId, `${id}__r${record.revision}.json`, pub);
-      const publicValues = PUBLIC_HEADERS.map(header => ({ id: pub.id, title: pub.title, category: pub.category, status: pub.status, updated_at: pub.updated_at, tags: JSON.stringify(pub.tags),
-        short_description: pub.short_description || '', file_id: publicFileId, active: 'true', cover_ref: pub.preview_image || '', summary_json: publicSummaryJson(pub) } as Row)[header] ?? '');
-      await writeRange(env, env.publicSheetId, `A${publicRowNumber}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRowNumber}`, [publicValues]);
-    }
+    await markMediaAfterCommit(env, attachedMedia, retiredMediaIds, previousMediaRecords, id, record.revision);
+    if (nowPublic) await publishWork(env, record);
+    else if (wasPublic) await deactivatePublicWork(env, id);
     await removeStaleSearchChunks(env, id, artifacts.token, searchHeaders);
   } catch (error) {
     throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true);
   }
-  void wasPublic;
   return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
+}
+
+// ------------------------------------------------------------- Work media
+
+type Placement = { id: string; purpose: string; contextId: string | null; sortOrder: number; isCover: boolean; references: Placement[] };
+
+/** Port of mediaWorkReferenceMap_. */
+function mediaReferenceMap(asset: Json): Record<string, Placement> {
+  const refs: Record<string, Placement> = {};
+  const add = (value: unknown, purpose: string, contextId: unknown, sortOrder: number, isCover: boolean, declaredMediaId?: unknown) => {
+    const match = typeof value === 'string' ? value.match(/^media:([A-Za-z0-9_-]+)$/i) : null;
+    if (!match) return;
+    const id = match[1];
+    if (declaredMediaId && String(declaredMediaId) !== id) fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media identity does not match its canonical reference.');
+    const placement = { id, purpose, contextId: (contextId as string) || null, sortOrder: Number(sortOrder) || 0, isCover: !!isCover, references: [] as Placement[] };
+    if (!refs[id]) refs[id] = { ...placement, references: [placement] }; else refs[id].references.push(placement);
+  };
+  const icon = asset?.icon;
+  if (icon && icon.type === 'image') add(icon.value, 'icon', null, 0, false, icon.mediaId);
+  const preview: unknown[] = Array.isArray(asset?.previewImages) ? asset.previewImages : [];
+  preview.forEach((value, index) => add(value, 'gallery', null, index, value === asset.previewImage));
+  if (typeof asset?.previewImage === 'string' && asset.previewImage && !preview.includes(asset.previewImage)) add(asset.previewImage, 'gallery', null, preview.length, true);
+  (Array.isArray(asset?.contentBlocks) ? asset.contentBlocks : []).forEach((block: Json, index: number) => {
+    if (block && block.type === 'Image') add(block.body, 'prompt_example', block.id, index, false, block.mediaId);
+  });
+  const collaboration = asset && (asset.collaboration || asset.publicCollaboration);
+  (Array.isArray(collaboration?.participants) ? collaboration.participants : []).forEach((participant: Json) => {
+    (Array.isArray(participant?.referenceImages) ? participant.referenceImages : []).forEach((image: Json, index: number) => {
+      if (typeof image === 'string') add(image, 'collab_reference', participant.id, index, false, null);
+      else if (image) add(image.src, 'collab_reference', participant.id, index, false, image.mediaId);
+    });
+  });
+  return refs;
+}
+
+/** Port of mediaWorkReferencedIds_: every `media:<id>` string anywhere in the asset. */
+function referencedMediaIds(asset: Json): Set<string> {
+  return new Set(mediaReferences(asset).refs.filter(ref => ref.startsWith('media:')).map(ref => ref.slice(6)));
+}
+
+/** Port of rejectUnsupportedWorkMedia_. */
+function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, mediaIds: string[]): void {
+  const now = mediaReferences(asset);
+  if (now.inline) fail('UNSUPPORTED_MEDIA_MUTATION', 'Inline media must be uploaded before saving a Work.');
+  const uniqueRefs = [...new Set(now.refs)];
+  const oldRefs = existing ? [...new Set(mediaReferences(existing).refs)] : [];
+  const removed = oldRefs.filter(ref => !uniqueRefs.includes(ref));
+  if (removed.some(ref => {
+    if (!ref.startsWith('media:')) return true;
+    const media = (existing?.media || []).find((item: Json) => item && item.id === ref.slice(6));
+    return !media || media.delivery !== 'vercel_proxy';
+  })) fail('UNSUPPORTED_MEDIA_MUTATION', 'Only attached Google Work media can be replaced or removed in this flow.');
+  const newRefs = uniqueRefs.filter(ref => !oldRefs.includes(ref));
+  if (newRefs.some(ref => !ref.startsWith('media:'))) fail('UNSUPPORTED_MEDIA_MUTATION', 'New legacy media references are not supported.');
+  const newIds = newRefs.map(ref => ref.slice(6)).sort();
+  if (newIds.join('|') !== [...mediaIds].sort().join('|')) fail('UNSUPPORTED_MEDIA_MUTATION', 'Every new Work media reference must match a finalized upload.');
+  const placements = mediaReferenceMap(asset);
+  if (newIds.some(id => !placements[id])) fail('UNSUPPORTED_MEDIA_MUTATION', 'New Work media must use an icon, gallery, or content image placement.');
+}
+
+/** Port of mediaWorkAttach_, with the manifest read from the media file's appProperties. */
+async function attachWorkMedia(record: Json, asset: Json, mediaIds: string[], workId: string, ownerUserId: string, env: DirectWriteEnv): Promise<WorkMediaFile[]> {
+  const placements = mediaReferenceMap(asset);
+  if (new Set(mediaIds).size !== mediaIds.length || mediaIds.some(id => !REQUEST_ID_RE.test(id))) fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media attachment list is invalid');
+  const attached: WorkMediaFile[] = [];
+  for (const id of mediaIds) {
+    const placement = placements[id];
+    const file = await findWorkMediaFile(env, id);
+    const p = file?.props || {};
+    const matches = placement && placement.references.some(ref => ref.purpose === p.cxlPurpose && String(ref.contextId || '') === String(p.cxlContextId || '')
+      && Number(ref.sortOrder) === Number(p.cxlSortOrder) && Boolean(ref.isCover) === (p.cxlIsCover === 'true'));
+    if (!file || !placement || p.cxlOwner !== ownerUserId || p.cxlWorkId !== workId || p.cxlMediaId !== id || p.cxlDelivery !== 'vercel_proxy'
+      || !['finalized', 'attached'].includes(p.cxlState) || !matches)
+      fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media upload does not match this Owner, Work, or image placement.');
+    const existing = (record.mediaRecords || []).find((m: Json) => m.id === id);
+    if (existing && String(existing.drive_file_id || '') !== file!.id) fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media identity is already attached to a different file.');
+    if (!existing) record.mediaRecords.push({ id, asset_id: workId, storage_path: `google-work-media/${id}`, purpose: p.cxlPurpose, context_id: p.cxlContextId || null,
+      mime_type: file!.mimeType, file_size: file!.size, sort_order: Number(p.cxlSortOrder), is_cover: p.cxlIsCover === 'true',
+      drive_file_id: file!.id, drive_url: null, delivery: 'vercel_proxy', sharing_access: 'private', sha256: p.cxlSha256,
+      created_at: file!.createdTime, updated_at: new Date().toISOString() });
+    attached.push(file!);
+  }
+  return attached;
+}
+
+/** saveOwnerWork_ media steps after the row fields are applied. Returns vercel_proxy media IDs no longer referenced. */
+async function settleRecordMedia(record: Json, previousIds: Set<string>, env: DirectWriteEnv): Promise<string[]> {
+  const r = record.row;
+  // A public Work may not carry unassigned or orphaned collaboration images.
+  if (r.visibility === 'public' && (record.mediaRecords || []).some((m: Json) => {
+    if (!m.drive_file_id) return false;
+    if (m.purpose === 'unassigned') return true;
+    if (m.purpose !== 'collab' && m.purpose !== 'collab_reference') return false;
+    return !(record.collaborationDraft?.participants || []).some((p: Json) => (p.referenceImages || []).some((x: Json) => (typeof x === 'string' ? x : (x.src || x.storageKey || '')) === `media:${m.id}`));
+  })) fail('INVALID_WORK', 'ยังมีรูปที่ไม่ได้ระบุว่าเป็นภาพรวมงานหรือของผู้เข้าร่วม');
+  // mediaWorkSyncPlacementMetadata_
+  const placements = mediaReferenceMap(cxlAssetFromRecord(record));
+  (record.mediaRecords || []).forEach((item: Json) => {
+    if (item.delivery !== 'vercel_proxy' || !placements[item.id]) return;
+    const gallery = placements[item.id].references.filter(ref => ref.purpose === 'gallery');
+    item.is_cover = gallery.some(ref => ref.isCover);
+    if (gallery.length) item.sort_order = Math.min(...gallery.map(ref => Number(ref.sortOrder) || 0));
+  });
+  // shareRecordMedia_ (legacy media only; proxy media is private by construction)
+  const refs: string[] = [r.preview_image].concat(r.preview_images || []);
+  (record.collaborationDraft?.participants || []).forEach((p: Json) => (p.referenceImages || []).forEach((x: Json) => refs.push(typeof x === 'string' ? x : (x.src || x.storageKey || ''))));
+  const publicAccess = isPublicRow(r);
+  for (const m of record.mediaRecords || []) {
+    if (!m.drive_file_id || m.delivery === 'vercel_proxy') continue;
+    const visible = publicAccess && (refs.includes(`media:${m.id}`) || refs.includes(m.storage_path));
+    const access = visible ? 'public' : 'private';
+    if (m.sharing_access === access) continue;
+    await setLegacyMediaSharing(env, String(m.drive_file_id), visible);
+    m.sharing_access = access;
+  }
+  const nextIds = referencedMediaIds(cxlAssetFromRecord(record));
+  const retired = [...previousIds].filter(id => !nextIds.has(id) && (record.mediaRecords || []).some((m: Json) => m.id === id && m.delivery === 'vercel_proxy'));
+  record.mediaRecords = (record.mediaRecords || []).filter((m: Json) => m.delivery !== 'vercel_proxy' || nextIds.has(m.id));
+  return retired;
+}
+
+/** After the commit point: record attach/retire state on the media files (best effort, like Apps Script manifests). */
+async function markMediaAfterCommit(env: DirectWriteEnv, attached: WorkMediaFile[], retiredIds: string[], previousRecords: Json[], workId: string, revision: number): Promise<void> {
+  for (const file of attached) await markWorkMediaState(env, file.id, { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) });
+  for (const id of retiredIds) {
+    const media = previousRecords.find(m => m.id === id);
+    if (media?.drive_file_id) await markWorkMediaState(env, String(media.drive_file_id), { cxlState: 'retired', cxlRetiredAt: new Date().toISOString(), cxlRetiredRevision: String(revision) }).catch(() => undefined);
+  }
+}
+
+// ------------------------------------------------------- shared write steps
+
+async function appendRows(env: DirectWriteEnv, spreadsheetId: string, sheetPrefix: string, rows: unknown[][]): Promise<void> {
+  if (!rows.length) return;
+  await google(env, `${sheetsBase(spreadsheetId)}/values/${encodeURIComponent(`${sheetPrefix}A1`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: rows })
+  });
+}
+
+async function appendSearchChunks(env: DirectWriteEnv, workId: string, artifacts: ReturnType<typeof ownerSearchArtifacts>): Promise<string[]> {
+  const searchHeaders = await sheetHeaders(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`);
+  await appendRows(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`, artifacts.chunks.map((text, index) => {
+    const item: Row = { work_id: workId, chunk_index: index, search_text: text, search_version: artifacts.version, updated_at: artifacts.updatedAt, index_token: artifacts.token };
+    return searchHeaders.map(key => item[key] === undefined ? '' : item[key]);
+  }));
+  return searchHeaders;
+}
+
+function privateIndexValues(headers: string[], metadata: Row, previous: Row | null): unknown[] {
+  return headers.map(header => {
+    if (header === 'search_text') return '';
+    if (Object.prototype.hasOwnProperty.call(metadata, header)) return metadata[header] === undefined || metadata[header] === null ? '' : metadata[header];
+    return previous?.[header] ?? '';
+  });
+}
+
+/** Parent folder of the first index row that has a file, i.e. where Apps Script keeps these JSON files. */
+async function folderOfIndexedFiles(env: DirectWriteEnv, spreadsheetId: string, headers: string[]): Promise<string | null> {
+  const index = headers.indexOf('file_id');
+  if (index < 0) return null;
+  const letter = columnLetter(index);
+  const fileId = (await sheetValues(env, spreadsheetId, `${letter}2:${letter}`)).map(row => String(row[0] ?? '')).find(Boolean);
+  return fileId ? driveParent(env, fileId) : null;
+}
+
+/** Port of upsertWorkCreatorMap_ + syncPublic_ for a public Work. */
+async function publishWork(env: DirectWriteEnv, record: Json): Promise<void> {
+  const id = String(record.row.id);
+  const mapHeaders = await sheetHeaders(env, env.publicSheetId, 'WorkCreatorMap!');
+  const schemaIndex = mapHeaders.indexOf('schemaVersion'), workIndex = mapHeaders.indexOf('workId'), creatorIndex = mapHeaders.indexOf('publicCreatorId');
+  if (schemaIndex < 0 || workIndex < 0 || creatorIndex < 0) fail('CREATOR_MAPPING_MISSING', 'Public Work creator map schema is invalid');
+  const mapRows = await findRows(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, 'workId', id);
+  if (mapRows.length > 1) fail('CREATOR_MAPPING_AMBIGUOUS', 'Work has duplicate public creator mappings');
+  if (mapRows.length) {
+    const map = await readRow(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, mapRows[0]);
+    if (String(map.publicCreatorId || '') && String(map.publicCreatorId) !== env.publicCreatorId) fail('CREATOR_MAPPING_CONFLICT', 'Work is mapped to a different public creator');
+  } else {
+    const row = mapHeaders.map(() => '' as unknown); row[schemaIndex] = 1; row[workIndex] = id; row[creatorIndex] = env.publicCreatorId;
+    await appendRows(env, env.publicSheetId, 'WorkCreatorMap!', [row]);
+  }
+  const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
+  if (PUBLIC_HEADERS.some((header, index) => publicHeaders[index] !== header)) fail('PUBLIC_SYNC_PENDING', 'Public index headers are unexpected');
+  const publicRows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
+  if (publicRows.length > 1) fail('PUBLIC_SYNC_PENDING', 'Public index contains duplicate Work rows');
+  const existing = publicRows.length ? await readRow(env, env.publicSheetId, '', publicHeaders, publicRows[0]) : null;
+  const publicFolderId = existing?.file_id ? await driveParent(env, String(existing.file_id)) : await folderOfIndexedFiles(env, env.publicSheetId, publicHeaders);
+  if (!publicFolderId) fail('PUBLIC_SYNC_PENDING', 'Public projection folder is unknown');
+  const pub = projection(record);
+  const publicFileId = await putJsonRevision(env, publicFolderId!, `${id}__r${record.revision}.json`, pub);
+  const values = PUBLIC_HEADERS.map(header => ({ id: pub.id, title: pub.title, category: pub.category, status: pub.status, updated_at: pub.updated_at, tags: JSON.stringify(pub.tags),
+    short_description: pub.short_description || '', file_id: publicFileId, active: 'true', cover_ref: pub.preview_image || '', summary_json: publicSummaryJson(pub) } as Row)[header] ?? '');
+  if (publicRows.length) await writeRange(env, env.publicSheetId, `A${publicRows[0]}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRows[0]}`, [values]);
+  else await appendRows(env, env.publicSheetId, '', [values]);
+}
+
+/** Port of deactivatePublicWork_. */
+async function deactivatePublicWork(env: DirectWriteEnv, workId: string): Promise<void> {
+  const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
+  const activeIndex = publicHeaders.indexOf('active');
+  if (activeIndex < 0) return;
+  const rows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', workId);
+  for (const rowNumber of rows) await writeRange(env, env.publicSheetId, `${columnLetter(activeIndex)}${rowNumber}`, [['false']]);
+}
+
+const REQUEST_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+
+function applyRowInput(record: Json, asset: Json): void {
+  Object.assign(record.row, { title: asset.title, author_name: asset.authorName || '', author_avatar: asset.authorAvatar || '', icon: asset.icon,
+    category: asset.category, status: asset.status, visibility: asset.visibility || (asset.isPublic ? 'public' : 'private'), short_description: asset.shortDescription || '',
+    content_type_labels: asset.contentTypeLabels || [], content_types: asset.contentTypes || [], presentation_metadata: asset.presentationMetadata || null,
+    public_collaboration: asset.publicCollaboration || null, folder_id: asset.folderId || '', tags: asset.tags || [], content: asset.content || '', ui_code_snippet: asset.uiCodeSnippet || '',
+    content_blocks: asset.contentBlocks || [], preview_image: asset.previewImage || '', preview_images: asset.previewImages || [], collaboration_asset_id: asset.collaborationAssetId || null,
+    deleted_at: asset.deletedAt || null });
+  const r = record.row;
+  if (!String(r.title || '').trim()) fail('INVALID_WORK', 'ต้องระบุชื่อผลงาน');
+  if (!['character','lore','ui_code','prompts','collab','app_data'].includes(r.category)) fail('INVALID_WORK', 'หมวดหมู่ไม่ถูกต้อง');
+  if (!['idea','draft','in_progress','finished','archived'].includes(r.status)) fail('INVALID_WORK', 'สถานะไม่ถูกต้อง');
+  if (!['public','private'].includes(r.visibility)) fail('INVALID_WORK', 'การมองเห็นไม่ถูกต้อง');
+  if (r.category === 'collab') r.collaboration_asset_id = null;
+}
+
+// ------------------------------------------------------------------ create
+
+/**
+ * works.create args as Apps Script receives them: [assetInput (userId injected), { requestId, mediaIds? }].
+ * Media-bearing creates fall back to Apps Script.
+ */
+export async function directCreateWork(args: unknown[], ownerUserId: string, env: DirectWriteEnv): Promise<DirectUpdateResult> {
+  const [assetInput, options] = args as [Json, Json];
+  if (!options || !REQUEST_ID_RE.test(String(options.requestId || ''))) return { fallback: true, reason: 'invalid_request_id' };
+  const mediaIds: string[] = Array.isArray(options.mediaIds) ? options.mediaIds.map(String) : [];
+  if (!assetInput || typeof assetInput !== 'object' || Array.isArray(assetInput)) fail('INVALID_WORK', 'Work payload is invalid');
+  if (Object.keys(assetInput).some(key => !CXL_WRITE_FIELDS.includes(key) && key !== 'userId')) fail('INVALID_WORK', 'Work payload contains unsupported fields');
+  if (!String(assetInput.title || '').trim()) fail('INVALID_WORK', 'Work title is required');
+  validateUpdatePayload(Object.fromEntries(Object.entries(assetInput).filter(([key]) => key !== 'userId')));
+  const requestId = String(options.requestId).toLowerCase();
+  const id = `asset_${requestId.replace(/-/g, '')}`;
+  const fingerprint = writeFingerprint('create', assetInput);
+
+  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+  // A retried create (same requestId) that already committed is answered again, like Apps Script.
+  const retried = await findRows(env, env.privateSheetId, '', privateHeaders, 'create_request_id', requestId);
+  if (retried.length) {
+    const row = await readRow(env, env.privateSheetId, '', privateHeaders, retried[0]);
+    const existing = await driveJson(env, String(row.file_id));
+    if (existing.createRequestId !== requestId || existing.lastWriteFingerprint !== fingerprint) fail('IDEMPOTENCY_KEY_REUSED', 'Create requestId was already used with different Work data');
+    if (isPublicRow(existing.row || {})) await publishWork(env, existing).catch(error => { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); });
+    return { fallback: false, data: { data: cxlAssetFromRecord(existing), error: null } };
+  }
+  if ((await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id)).length) fail('IDEMPOTENCY_KEY_REUSED', 'Create requestId conflicts with an existing Work');
+
+  const now = new Date().toISOString();
+  const asset: Json = clone(assetInput);
+  asset.id = id; asset.userId = ownerUserId; asset.authorName = asset.authorName || 'Creator'; asset.createdAt = now; asset.updatedAt = now;
+  asset.visibility = asset.visibility || (asset.isPublic === false ? 'private' : 'public'); asset.isPublic = asset.visibility === 'public'; asset.status = asset.status || 'finished'; asset.deletedAt = null;
+  asset.likesCount = 0; asset.forkCount = 0; asset.forkedFromId = null; asset.forkedFromAuthor = null; asset.linkedAssetIds = [];
+  asset.versions = [{ version: 1, updatedAt: now, title: asset.title, summary: 'สร้างผลงานเริ่มต้น' }]; asset.media = [];
+  rejectUnsupportedWorkMedia(asset, null, mediaIds);
+  if (asset.folderId && !(await env.ownerFolderIds()).includes(String(asset.folderId))) fail('INVALID_FOLDER', 'Selected folder is unavailable for this Owner');
+
+  const record: Json = { schemaVersion: 1, sourceSha256: null, revision: 0, row: { id, user_id: ownerUserId, created_at: now, versions: [] }, collaborationDraft: null, collaborationDraftMeta: null, mediaRecords: [] };
+  const attachedMedia = await attachWorkMedia(record, asset, mediaIds, id, ownerUserId, env);
+  applyRowInput(record, asset);
+  const r = record.row;
+  if (r.collaboration_asset_id) {
+    const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', String(r.collaboration_asset_id));
+    const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
+    if (!linked || linked.category !== 'collab') fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+  }
+  r.is_public = r.visibility === 'public'; r.updated_at = now;
+  record.collaborationDraft = asset.category === 'collab' ? (asset.collaboration || null) : null;
+  record.cxlAsset = asset;
+  record.createRequestId = requestId;
+  record.lastWriteRequestId = requestId; record.lastWriteOperation = 'create'; record.lastWriteFingerprint = fingerprint;
+  await settleRecordMedia(record, new Set(), env);
+  record.revision = 1;
+
+  const privateFolderId = await folderOfIndexedFiles(env, env.privateSheetId, privateHeaders);
+  if (!privateFolderId) return { fallback: true, reason: 'private_folder_unknown' };
+  const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
+  const metadata = privateMeta(record, '', artifacts);
+  metadata.file_id = await putJsonRevision(env, privateFolderId, `${id}__r1.json`, record);
+  await appendSearchChunks(env, id, artifacts);
+  await appendRows(env, env.privateSheetId, '', [privateIndexValues(privateHeaders, metadata, null)]);
+
+  try {
+    await markMediaAfterCommit(env, attachedMedia, [], [], id, record.revision);
+    if (isPublicRow(r)) await publishWork(env, record);
+  } catch (error) {
+    throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true);
+  }
+  return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
+}
+
+// -------------------------------------------------------- trash / restore
+
+/** Port of mutateCxlWorkDeletionApi_ for works.softDelete and works.restore. */
+export async function directSetTrash(action: 'works.softDelete' | 'works.restore', workId: unknown, ownerUserId: string, env: DirectWriteEnv): Promise<{ fallback: true; reason: string } | { fallback: false; data: { success: true; error: null } }> {
+  const id = String(workId || '');
+  if (!/^asset_[A-Za-z0-9_-]{1,96}$/.test(id)) fail('INVALID_WORK', 'Work ID is invalid');
+  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+  const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+  if (rowNumbers.length !== 1) return rowNumbers.length ? fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows') : fail('WORK_NOT_FOUND', 'Work was not found');
+  const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+  const previousFileId = String(indexed.file_id || '');
+  if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
+  const record = await driveJson(env, previousFileId);
+  const asset = cxlAssetFromRecord(record);
+  if (String(record.row?.user_id || asset.userId || '') !== ownerUserId) fail('WORK_NOT_OWNED', 'Work is not owned by this authenticated Owner');
+  if (String(record.row?.id) !== id) fail('WORK_NOT_FOUND', 'Work was not found');
+  const wasPublic = isPublicRow(record.row);
+
+  const deleting = action === 'works.softDelete';
+  const now = new Date().toISOString();
+  if (deleting && !record.row.deleted_at) record.row.deleted_at = now;
+  if (!deleting && record.row.deleted_at) record.row.deleted_at = '';
+  record.row.updated_at = now; record.revision = (Number(record.revision) || 0) + 1;
+  record.cxlAsset = Object.assign({}, asset, { deletedAt: record.row.deleted_at || null, updatedAt: now, revision: record.revision });
+
+  const privateFolderId = await driveParent(env, previousFileId);
+  const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
+  const searchHeaders = await appendSearchChunks(env, id, artifacts);
+  const metadata = privateMeta(record, '', artifacts);
+  metadata.file_id = await putJsonRevision(env, privateFolderId, `${id}__r${record.revision}.json`, record);
+  const latest = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+  if (String(latest.id) !== id || (Number(latest.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work changed before this update; reload and try again');
+  await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [privateIndexValues(privateHeaders, metadata, latest)]);
+
+  try {
+    await removeStaleSearchChunks(env, id, artifacts.token, searchHeaders);
+    if (deleting) await deactivatePublicWork(env, id);
+    // finishCxlPublicProjection_: republish a public Work; deactivate one that stopped being public.
+    else if (isPublicRow(record.row)) await publishWork(env, record);
+    else if (wasPublic) await deactivatePublicWork(env, id);
+  } catch (error) {
+    throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true);
+  }
+  return { fallback: false, data: { success: true, error: null } };
 }
 
 async function removeStaleSearchChunks(env: DirectWriteEnv, workId: string, keepToken: string, headers: string[]): Promise<void> {

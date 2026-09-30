@@ -46,6 +46,12 @@ function cachedRead<T>(key: string, ttlMs: number, load: () => Promise<T>): Prom
   return value;
 }
 const PUBLIC_READ_CACHE_MS = 60_000;
+
+/** Drop this instance's cached public list so the next read reflects a just-saved change. */
+export function invalidatePublicReadCache(): void {
+  readCache.delete('public-index');
+  readCache.delete('public-projection-ids');
+}
 // Canonical record files are written under a new name per revision, so a file ID's content is stable.
 const RECORD_FILE_CACHE_MS = 5 * 60_000;
 
