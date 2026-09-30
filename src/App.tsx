@@ -33,6 +33,7 @@ import { isGoogleWorksReadBackend } from './data/cxlDataService';
 import { CATEGORIES, STATUS_PRESETS } from './lib/constants';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
+const CollabSchedulePage = React.lazy(() => import('./pages/CollabSchedulePage').then(module => ({ default: module.CollabSchedulePage })));
 const CreatorSpacePage = React.lazy(() => import('./pages/CreatorSpacePage').then(module => ({ default: module.CreatorSpacePage })));
 const WorkDetailModal = React.lazy(() => import('./components/WorkDetailModal').then(module => ({ default: module.WorkDetailModal })));
 const AIAssistantModal = React.lazy(() => import('./components/AIAssistantModal').then(module => ({ default: module.AIAssistantModal })));
@@ -89,6 +90,7 @@ function MainApp() {
   const creatorSlug = profileRoute?.slug || null;
   const legacyProfileRedirect = getLegacyProfileRedirect(window.location.pathname, window.location.search, currentUser);
   const workRoute = window.location.pathname.match(/^\/work\/([^/]+)(?:\/(edit))?\/?$/i);
+  const isScheduleRoute = /^\/schedule\/?$/i.test(window.location.pathname);
 
   // Navigation State
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
@@ -276,6 +278,7 @@ function MainApp() {
         closeAssetView();
         navigate('/');
       }
+      if (isScheduleRoute) navigate('/');
       setActiveView('feed');
       setSelectedTag(null);
       return;
@@ -287,7 +290,7 @@ function MainApp() {
     }
     setActiveView(view);
     setSelectedTag(null);
-  }, [authLoading, closeAssetView, currentUser, navigate, openAuthModal, workRoute?.[1]]);
+  }, [authLoading, closeAssetView, currentUser, isScheduleRoute, navigate, openAuthModal, workRoute?.[1]]);
 
   const handleVaultTabChange = useCallback((tab: VaultTabType) => {
     setActiveVaultTab(tab);
@@ -616,7 +619,9 @@ function MainApp() {
                 </button>
               </div>
             )}
-            <DiscoverPage collectionProps={collectionProps} />
+            {isScheduleRoute
+              ? <CollabSchedulePage assets={assets} isLoading={isLoadingAssets} onBack={() => navigate('/')} onOpenAsset={handleOpenAssetView} />
+              : <DiscoverPage collectionProps={collectionProps} onOpenSchedule={() => { navigate('/schedule'); window.scrollTo({ top: 0 }); }} />}
           </main>
 
           <footer className="cv-footer border-t py-6 mt-12">
