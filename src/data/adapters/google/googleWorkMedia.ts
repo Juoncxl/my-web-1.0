@@ -63,8 +63,21 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
     pending.push({ ...draft, blob, mimeType, fileSize: blob.size });
   }
 
+  // Hydrated display URLs (including legacy media without scope) map back to their stored ref.
+  const refFromDisplayUrl = (source: string): string | undefined => {
+    if (!source.includes('/api/cxl/media')) return undefined;
+    try {
+      const url = new URL(source, 'https://cxl.invalid');
+      const ref = url.searchParams.get('ref') || '';
+      return url.pathname === '/api/cxl/media' && (!asset.id || url.searchParams.get('workId') === asset.id)
+        && /^(?:media:[A-Za-z0-9_-]{1,128}|cxl-media:[a-f0-9]{64})$/i.test(ref) ? ref : undefined;
+    } catch { return undefined; }
+  };
   const toReference = (source: string, mediaId?: string): string => {
-    const id = mediaId || (source.startsWith('media:') ? source.slice('media:'.length) : '') || attachedMediaIdForSource(source) || '';
+    const displayRef = mediaId ? undefined : refFromDisplayUrl(source);
+    if (displayRef?.startsWith('cxl-media:')) return displayRef;
+    const id = mediaId || (source.startsWith('media:') ? source.slice('media:'.length) : '') || attachedMediaIdForSource(source)
+      || (displayRef ? displayRef.slice('media:'.length) : '') || '';
     if (isInlineMediaUrl(source)) {
       const upload = id ? byMediaId.get(id) : undefined;
       if (!upload || upload.source !== source) throw new Error('รูปใน Work ไม่มี media identity ที่คงที่');

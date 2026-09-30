@@ -118,6 +118,16 @@ describe('Google standard Work media upload foundation', () => {
     }
   });
 
+  it('maps hydrated legacy media URLs back to their stored refs when saving', async () => {
+    const workId = 'asset_1234567890abcdef1234567890abcdef';
+    const legacyUrl = `/api/cxl/media?workId=${workId}&ref=media%3Alegacy-id&v=123`;
+    const hashUrl = `/api/cxl/media?workId=${workId}&ref=cxl-media%3A${'a'.repeat(64)}`;
+    const { asset } = await prepareGoogleWorkMedia({ id: workId, previewImage: legacyUrl,
+      previewImages: [legacyUrl, hashUrl, `/api/cxl/media?workId=other&ref=media%3Ax`] });
+    expect(asset.previewImage).toBe('media:legacy-id');
+    expect(asset.previewImages).toEqual(['media:legacy-id', `cxl-media:${'a'.repeat(64)}`, '/api/cxl/media?workId=other&ref=media%3Ax']);
+  });
+
   it('hydrates one Google media identity at every standard Work placement that references it', () => {
     const workId = 'asset_1234567890abcdef1234567890abcdef';
     const shared = IDS.icon;
