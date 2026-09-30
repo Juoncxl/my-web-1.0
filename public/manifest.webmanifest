@@ -3,6 +3,7 @@
   "short_name": "CXL Studio",
   "description": "คลังส่วนตัวและพื้นที่แชร์ผลงานสำหรับครีเอเตอร์แชทบอท",
   "lang": "th",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
