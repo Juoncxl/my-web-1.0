@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { hasOwnerDriveScopes, OWNER_DRIVE_CONNECT_COOKIE, sealRefreshToken, storeOwnerDriveCredential } from '../../../src/server/cxlOwnerDrive.js';
 import {
   clearSecureCookie,
   cookieValue,
@@ -61,19 +62,36 @@ export default async function handler(req: Request, res: Response) {
       signal: AbortSignal.timeout(10_000)
     });
     if (!tokenResponse.ok) return completeError(res, config.appOrigin);
-    const tokens = await tokenResponse.json() as { id_token?: unknown };
+    const tokens = await tokenResponse.json() as { id_token?: unknown; access_token?: unknown; refresh_token?: unknown; scope?: unknown };
     if (typeof tokens.id_token !== 'string' || tokens.id_token.length > 16_384) return completeError(res, config.appOrigin);
     const identity = await validateGoogleIdToken(tokens.id_token, config, transaction.nonce);
     const email = typeof identity.email === 'string' && identity.email_verified === true ? identity.email : undefined;
     const session = createOwnerSessionToken(identity.sub as string, email, config.sessionSecret);
     const csrfToken = makeCsrfToken();
+
+    // Drive connect: identity above is already pinned to the Owner's Google account.
+    let driveResult: 'connected' | 'failed' | null = null;
+    if (cookieValue(req.headers.cookie, OWNER_DRIVE_CONNECT_COOKIE) === state) {
+      driveResult = 'failed';
+      const folderId = process.env.CXL_INCOMING_FOLDER_ID?.trim();
+      if (folderId && typeof tokens.refresh_token === 'string' && typeof tokens.access_token === 'string' && hasOwnerDriveScopes(tokens.scope)) {
+        try {
+          await storeOwnerDriveCredential(tokens.access_token, folderId, sealRefreshToken(tokens.refresh_token, config.sessionSecret, email));
+          driveResult = 'connected';
+        } catch (error) {
+          console.info(JSON.stringify({ event: 'cxl_owner_drive_connect_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+        }
+      }
+    }
+
     res.setHeader('Set-Cookie', [
       clearSecureCookie(OWNER_OIDC_TRANSACTION_COOKIE),
+      clearSecureCookie(OWNER_DRIVE_CONNECT_COOKIE),
       makeSecureCookie(OWNER_SESSION_COOKIE, session.token, OWNER_SESSION_TTL_SECONDS),
       makeSecureCookie(OWNER_CSRF_COOKIE, csrfToken, OWNER_SESSION_TTL_SECONDS, false)
     ]);
     res.statusCode = 302;
-    res.setHeader('Location', config.appOrigin);
+    res.setHeader('Location', driveResult ? `${config.appOrigin.replace(/\/$/, '')}/?drive=${driveResult}` : config.appOrigin);
     return res.end();
   } catch {
     return completeError(res, config.appOrigin);

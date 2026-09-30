@@ -10,7 +10,9 @@ import {
   Settings, 
   ChevronDown,
   Sun,
-  Moon
+  Moon,
+  HardDrive,
+  Check
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -56,6 +58,28 @@ export const Header: React.FC<HeaderProps> = ({
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Owner Drive connection: checked lazily the first time the Owner opens the menu.
+  const [driveStatus, setDriveStatus] = useState<'unknown' | 'checking' | 'connected' | 'disconnected'>('unknown');
+  useEffect(() => {
+    if (!dropdownOpen || !isAuthenticated || driveStatus !== 'unknown') return;
+    setDriveStatus('checking');
+    fetch('/api/cxl/auth/session?drive=status', { credentials: 'same-origin' })
+      .then(response => response.ok ? response.json() : null)
+      .then((body: { drive?: { connected?: boolean } } | null) => setDriveStatus(body?.drive?.connected ? 'connected' : 'disconnected'))
+      .catch(() => setDriveStatus('disconnected'));
+  }, [dropdownOpen, isAuthenticated, driveStatus]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('drive');
+    if (result !== 'connected' && result !== 'failed') return;
+    params.delete('drive');
+    window.history.replaceState({}, '', `${window.location.pathname}${params.size ? `?${params}` : ''}${window.location.hash}`);
+    setDriveStatus(result === 'connected' ? 'connected' : 'disconnected');
+    window.alert(result === 'connected'
+      ? 'เชื่อมต่อ Google Drive เรียบร้อยแล้ว ✓'
+      : 'เชื่อมต่อ Google Drive ไม่สำเร็จ กรุณาลองใหม่ และติ๊กอนุญาตทุกช่องในหน้าของ Google');
   }, []);
 
   const hasAvatar = Boolean(isAuthenticated && currentUser?.avatarUrl);
@@ -237,6 +261,17 @@ export const Header: React.FC<HeaderProps> = ({
                           <Settings className="w-4 h-4 text-purple-500" />
                           <span>ตั้งค่าบัญชี</span>
                         </button>
+                        <a
+                          href="/api/cxl/auth/login?drive=1"
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
+                          role="menuitem"
+                          title={driveStatus === 'connected' ? 'เชื่อมต่ออยู่แล้ว กดเพื่อเชื่อมต่อใหม่' : 'ให้ CXL บันทึกงานลง Google Drive ของคุณโดยตรง'}
+                        >
+                          <HardDrive className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />
+                          <span className="flex-1">{driveStatus === 'connected' ? 'Google Drive เชื่อมต่อแล้ว' : 'เชื่อมต่อ Google Drive'}</span>
+                          {driveStatus === 'connected' && <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />}
+                          {driveStatus === 'checking' && <span className="text-[10px] text-slate-400">กำลังตรวจ…</span>}
+                        </a>
                       </>
                     )}
                   </div>

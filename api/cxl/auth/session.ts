@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { directDriveGet, directOwnerReadsEnabled } from '../googleDirect.js';
+import { loadSealedOwnerDriveCredential, openRefreshToken, ownerDriveAccessToken } from '../../../src/server/cxlOwnerDrive.js';
 import {
   cookieValue,
   getOwnerAuthConfig,
@@ -30,6 +32,26 @@ export default async function handler(req: Request, res: Response) {
   if (!config) return send(res, 503, { ok: false, error: 'Owner authentication is not configured' });
   const claims = verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE));
   if (!claims) return send(res, 200, { ok: true, authenticated: false, user: null });
+
+  // `?drive=status`: prove the stored Owner Drive grant still refreshes and can reach Drive.
+  if (new URL(req.url || '/', 'https://cxl.invalid').searchParams.get('drive') === 'status') {
+    const folderId = process.env.CXL_INCOMING_FOLDER_ID?.trim();
+    if (!folderId || !directOwnerReadsEnabled()) return send(res, 200, { ok: true, drive: { connected: false, reason: 'not_configured' } });
+    try {
+      const sealed = await loadSealedOwnerDriveCredential(folderId, directDriveGet);
+      if (!sealed) return send(res, 200, { ok: true, drive: { connected: false, reason: 'not_connected' } });
+      const token = await ownerDriveAccessToken(sealed, config);
+      const about = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', {
+        headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000)
+      });
+      if (!about.ok) return send(res, 200, { ok: true, drive: { connected: false, reason: 'drive_unreachable' } });
+      const { connectedAt } = openRefreshToken(sealed, config.sessionSecret);
+      return send(res, 200, { ok: true, drive: { connected: true, connectedAt } });
+    } catch (error) {
+      console.info(JSON.stringify({ event: 'cxl_owner_drive_status_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+      return send(res, 200, { ok: true, drive: { connected: false, reason: 'grant_invalid' } });
+    }
+  }
 
   const csrfCookie = cookieValue(req.headers.cookie, OWNER_CSRF_COOKIE);
   const csrfToken = csrfCookie || makeCsrfToken();

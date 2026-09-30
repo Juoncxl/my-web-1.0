@@ -67,6 +67,11 @@ async function accessToken(): Promise<string> {
   return cachedToken.value;
 }
 
+/** Service Account Drive GET for server modules (e.g. reading the sealed Owner Drive credential). */
+export function directDriveGet(url: string): Promise<globalThis.Response> {
+  return googleGet(url);
+}
+
 async function googleGet(url: string): Promise<globalThis.Response> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${await accessToken()}` }, signal: AbortSignal.timeout(DIRECT_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`Google API request failed (HTTP ${response.status})`);
