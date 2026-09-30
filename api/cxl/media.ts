@@ -15,6 +15,10 @@ type Response = ServerResponse & {
 const GAS_TIMEOUT_MS = 12_000;
 const MAX_ICON_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+// Legacy references with no Drive file (still only in Supabase): remember the miss per
+// instance so a page of them does not spend the Sheets read quota on every view.
+const LEGACY_MISS_TTL_MS = 10 * 60_000;
+const legacyMisses = new Map<string, number>();
 
 function sendError(res: Response, status: number, error: string) {
   res.statusCode = status;
@@ -61,6 +65,13 @@ async function publicIconHandler(req: Request, res: Response) {
   // Legacy media (migrated with a drive_file_id): read from Drive directly, falling
   // back to the Temporary Public Apps Script for anything not reachable that way.
   if (ref.startsWith('media:') && directOwnerReadsEnabled()) {
+    const missKey = `${workId}|${ref}`;
+    if ((legacyMisses.get(missKey) || 0) > Date.now()) {
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', ownerSessionValid(req) ? 'private, max-age=600' : 'public, max-age=300, s-maxage=3600');
+      return res.end(JSON.stringify({ ok: false, error: 'Media is unavailable' }));
+    }
     try {
       // Public Works first; a signed-in Owner may also see legacy images of private Works.
       let direct = await directWorkMedia(workId, ref, 'public', false);
@@ -70,8 +81,8 @@ async function publicIconHandler(req: Request, res: Response) {
       if (direct) {
         const etag = `"${createHash('sha256').update(direct.bytes).digest('hex')}"`;
         cacheHeaders(res, etag);
-        // Never let the CDN keep a private Work's image.
-        if (ownerOnly) res.setHeader('Cache-Control', 'private, no-store');
+        // Never let the CDN keep a private Work's image; the Owner's own browser may.
+        if (ownerOnly) res.setHeader('Cache-Control', 'private, max-age=3600');
         res.setHeader('Content-Type', direct.mimeType);
         res.setHeader('Content-Length', String(direct.bytes.length));
         if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }
@@ -81,9 +92,11 @@ async function publicIconHandler(req: Request, res: Response) {
       // Definitive miss: no Drive file behind this reference (e.g. an image still only in
       // Supabase). Apps Script reads the same records, so skip it and let the CDN remember
       // the miss instead of re-trying dozens of images on every page view.
+      legacyMisses.set(missKey, Date.now() + LEGACY_MISS_TTL_MS);
+      if (legacyMisses.size > 2000) for (const [key, until] of legacyMisses) if (until <= Date.now()) legacyMisses.delete(key);
       res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Cache-Control', ownerSessionValid(req) ? 'private, no-store' : 'public, max-age=300, s-maxage=3600');
+      res.setHeader('Cache-Control', ownerSessionValid(req) ? 'private, max-age=600' : 'public, max-age=300, s-maxage=3600');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       return res.end(JSON.stringify({ ok: false, error: 'Media is unavailable' }));
     } catch (error) {

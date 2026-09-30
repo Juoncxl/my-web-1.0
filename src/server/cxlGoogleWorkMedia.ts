@@ -199,9 +199,11 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
     return failure(res, 503, 'MEDIA_READ_UNAVAILABLE', 'Media is unavailable');
   }
 
+  // Owner images are immutable per media ID (the URL also carries a version), so the
+  // Owner's own browser may keep them; shared caches never do.
   res.setHeader('Cache-Control', scope === 'public' && download !== '1'
     ? 'public, max-age=60, s-maxage=60, stale-while-revalidate=60'
-    : 'private, no-store');
+    : download === '1' ? 'private, no-store' : 'private, max-age=3600');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // Read straight from Drive when the Service Account is configured; the Apps Script
   // chunk path below remains the fallback (it often stalls without answering).
