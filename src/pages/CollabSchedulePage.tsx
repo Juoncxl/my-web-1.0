@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, CalendarDays, Check, ChevronDown, Copy, ListOrdered } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, ChevronDown, Copy, ListOrdered, Table2 } from 'lucide-react';
 import type { Asset } from '../types';
 import {
   buildCollabSchedule,
@@ -22,7 +22,55 @@ interface CollabSchedulePageProps {
   onOpenAsset: (asset: Asset) => void;
 }
 
-type ScheduleMode = 'agenda' | 'month';
+type ScheduleMode = 'agenda' | 'month' | 'table';
+
+const EntryIcon: React.FC<{ asset: Asset }> = ({ asset }) => {
+  const [failed, setFailed] = useState(false);
+  const icon = asset.icon;
+  if (icon?.type === 'image' && icon.value && !failed) {
+    return <img src={icon.value} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
+  }
+  return <span>{icon && icon.type !== 'image' && icon.value.length <= 8 ? icon.value : '🤝'}</span>;
+};
+
+/** Notion-style table: one row per Collab, nearest milestone first, finished rows dimmed at the end. */
+const ScheduleTable: React.FC<{ entries: CollabScheduleEntry[]; onOpen: (asset: Asset) => void }> = ({ entries, onOpen }) => (
+  <div className="cv-schedule-table-wrap">
+    <table className="cv-schedule-table">
+      <thead>
+        <tr>
+          <th scope="col">ชื่อคอลแลป</th>
+          <th scope="col">แอป</th>
+          <th scope="col">แท็ก</th>
+          <th scope="col">กำหนดถัดไป</th>
+          <th scope="col">วันที่</th>
+          <th scope="col">สถานะ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map(entry => {
+          const milestone = entry.next || entry.milestones[entry.milestones.length - 1];
+          const urgency = entry.next ? scheduleUrgency(entry.next.daysLeft) : 'past';
+          return (
+            <tr key={entry.asset.id} className={`is-${urgency}`} onClick={() => onOpen(entry.asset)}>
+              <th scope="row">
+                <button type="button" onClick={event => { event.stopPropagation(); onOpen(entry.asset); }}>
+                  <span className="cv-schedule-table-icon" aria-hidden="true"><EntryIcon asset={entry.asset} /></span>
+                  <span>{entry.name}</span>
+                </button>
+              </th>
+              <td><div className="cv-schedule-apps">{entry.platforms.map(platform => <span key={platform}>{platform}</span>)}</div></td>
+              <td className="cv-schedule-table-tag">{entry.sharedTag ? `#${entry.sharedTag.replace(/^#/, '')}` : '—'}</td>
+              <td>{milestone.label}</td>
+              <td className="cv-schedule-table-date"><time dateTime={milestone.isoDate}>{milestone.date.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}</time></td>
+              <td><span className="cv-schedule-status">{entry.next ? formatDaysLeft(entry.next.daysLeft) : 'จบแล้ว'}</span></td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+);
 
 const ScheduleCard: React.FC<{ entry: CollabScheduleEntry; onOpen: () => void }> = ({ entry, onOpen }) => {
   const urgency = entry.next ? scheduleUrgency(entry.next.daysLeft) : 'past';
@@ -98,11 +146,13 @@ export const CollabSchedulePage: React.FC<CollabSchedulePageProps> = ({ assets, 
         <div className="cv-schedule-mode" role="group" aria-label="รูปแบบการแสดง">
           <button type="button" className={mode === 'agenda' ? 'is-active' : ''} aria-pressed={mode === 'agenda'} onClick={() => setMode('agenda')}><ListOrdered aria-hidden="true" />ใกล้ถึง</button>
           <button type="button" className={mode === 'month' ? 'is-active' : ''} aria-pressed={mode === 'month'} onClick={() => setMode('month')}><CalendarDays aria-hidden="true" />รายเดือน</button>
+          <button type="button" className={mode === 'table' ? 'is-active' : ''} aria-pressed={mode === 'table'} onClick={() => setMode('table')}><Table2 aria-hidden="true" />ตาราง</button>
         </div>
       </div>
 
       {isLoading && !schedule.length ? <p className="cv-schedule-empty">กำลังโหลดกำหนดการ…</p>
         : !upcoming.length && !past.length ? <p className="cv-schedule-empty">ยังไม่มีคอลแลปที่ตั้งวันกำหนดส่งไว้</p>
+          : mode === 'table' ? <ScheduleTable entries={visible} onOpen={onOpenAsset} />
           : mode === 'agenda' ? <>
             {upcoming.length ? <div className="cv-schedule-grid">{upcoming.map(entry => <ScheduleCard key={entry.asset.id} entry={entry} onOpen={() => onOpenAsset(entry.asset)} />)}</div>
               : <p className="cv-schedule-empty">ไม่มีกำหนดการที่กำลังจะถึง</p>}
@@ -128,7 +178,7 @@ export const CollabSchedulePage: React.FC<CollabSchedulePageProps> = ({ assets, 
             )) : <p className="cv-schedule-empty">ไม่มีกำหนดการที่กำลังจะถึง</p>}
           </div>}
 
-      {past.length > 0 && (
+      {past.length > 0 && mode !== 'table' && (
         <div className="cv-schedule-past">
           <button type="button" aria-expanded={showPast} onClick={() => setShowPast(value => !value)}>
             <ChevronDown aria-hidden="true" className={showPast ? 'is-open' : ''} />ผ่านไปแล้ว ({past.length})

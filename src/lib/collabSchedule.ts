@@ -13,6 +13,7 @@ export interface CollabScheduleMilestone {
 export interface CollabScheduleEntry {
   asset: Asset;
   name: string;
+  sharedTag: string;
   platforms: string[];
   milestones: CollabScheduleMilestone[];
   /** The first milestone that has not passed yet; null when everything is over. */
@@ -66,6 +67,7 @@ export function buildCollabSchedule(assets: readonly Asset[], today = new Date()
     entries.push({
       asset,
       name: collaboration.name?.trim() || asset.title,
+      sharedTag: collaboration.sharedTag?.trim() || '',
       platforms: [...(collaboration.platforms || [])],
       milestones,
       next: milestones.find(item => item.daysLeft >= 0) || null

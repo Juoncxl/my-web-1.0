@@ -134,3 +134,93 @@
   .cv-schedule-grid,
   .cv-schedule-month ol { grid-template-columns: 1fr; }
 }
+
+/* Stand-out pass: the Home strip gets the brand gradient frame, date chips are
+   solid brand/urgency colours, and countdowns become coloured pills. */
+.cv-schedule-widget { position: relative; border: 1.5px solid transparent; background: linear-gradient(135deg, #fbf8ff, #eef5fc) padding-box, linear-gradient(120deg, #a88ce0, #6fb6d8 55%, #efbfd7) border-box; box-shadow: 0 .7rem 1.8rem rgba(111, 127, 224, .16); }
+.dark .cv-schedule-widget { border-color: transparent; background: linear-gradient(135deg, #1b1f4a, #102c52) padding-box, linear-gradient(120deg, #a88ce0, #6fb6d8 55%, #efbfd7) border-box; box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .38); }
+.cv-schedule-overline { color: #7a5cc8; }
+.dark .cv-schedule-overline { color: #c9b6ff; }
+.cv-schedule-link { border: 0; background: linear-gradient(135deg, #8f7fe0, #6fb6d8); color: #fff; box-shadow: 0 .35rem .9rem rgba(111, 127, 224, .28); }
+.cv-schedule-link:hover { background: linear-gradient(135deg, #7f6ed6, #5fa8cc); }
+.dark .cv-schedule-link { border: 0; background: linear-gradient(135deg, #8f7fe0, #6fb6d8); color: #fff; }
+.cv-schedule-date { background: linear-gradient(160deg, #8f7fe0, #6a90d4); color: #fff; box-shadow: 0 .3rem .7rem rgba(111, 127, 224, .3); }
+.cv-schedule-date small { color: rgba(255, 255, 255, .88); }
+.dark .cv-schedule-date { background: linear-gradient(160deg, #8f7fe0, #5a86cf); color: #fff; }
+.dark .cv-schedule-date small { color: rgba(255, 255, 255, .85); }
+.is-today .cv-schedule-date,
+.dark .is-today .cv-schedule-date { background: linear-gradient(160deg, #f0668f, #d63f6f); color: #fff; box-shadow: 0 .3rem .7rem rgba(214, 63, 111, .32); }
+.is-soon .cv-schedule-date,
+.dark .is-soon .cv-schedule-date { background: linear-gradient(160deg, #f6a55a, #e8853a); color: #fff; box-shadow: 0 .3rem .7rem rgba(232, 133, 58, .3); }
+.cv-schedule-widget-copy em,
+.cv-schedule-row > em { justify-self: start; border-radius: 999px; padding: .08rem .45rem; background: rgba(106, 144, 180, .14); color: #00385a; }
+.dark .cv-schedule-widget-copy em,
+.dark .cv-schedule-row > em { background: rgba(144, 181, 243, .2); color: #e4ecfb; }
+.cv-schedule-widget-item.is-today em, .cv-schedule-row.is-today > em,
+.dark .cv-schedule-widget-item.is-today em, .dark .cv-schedule-row.is-today > em { background: #d63f6f; color: #fff; }
+.cv-schedule-widget-item.is-soon em, .cv-schedule-row.is-soon > em,
+.dark .cv-schedule-widget-item.is-soon em, .dark .cv-schedule-row.is-soon > em { background: #e8853a; color: #fff; }
+.cv-schedule-card.is-today .cv-schedule-countdown,
+.dark .cv-schedule-card.is-today .cv-schedule-countdown { background: #d63f6f; color: #fff; }
+.cv-schedule-card.is-soon .cv-schedule-countdown,
+.dark .cv-schedule-card.is-soon .cv-schedule-countdown { background: #e8853a; color: #fff; }
+.cv-schedule-mode button.is-active,
+.dark .cv-schedule-mode button.is-active { background: linear-gradient(135deg, #8f7fe0, #6fb6d8); color: #fff; }
+
+/* Table view — Notion-like rows, horizontally scrollable on small screens
+   with the Collab name pinned. */
+.cv-schedule-table-wrap { overflow-x: auto; border: 1px solid rgba(106, 144, 180, .22); border-radius: 1.1rem; background: rgba(255, 255, 255, .94); box-shadow: 0 .45rem 1.3rem rgba(1, 22, 43, .06); }
+.cv-schedule-table { width: 100%; min-width: 46rem; border-collapse: collapse; font-size: .84rem; }
+.cv-schedule-table thead th { border-bottom: 1px solid rgba(106, 144, 180, .22); padding: .7rem .8rem; background: #f4f0fc; color: #5a6f89; font-size: .72rem; font-weight: 850; text-align: left; white-space: nowrap; }
+.cv-schedule-table thead th:first-child { position: sticky; left: 0; z-index: 2; }
+.cv-schedule-table tbody tr { background: #fff; cursor: pointer; transition: background .15s ease; }
+.cv-schedule-table tbody tr:hover { background: #f7f2ff; }
+.cv-schedule-table tbody tr + tr > * { border-top: 1px solid rgba(106, 144, 180, .14); }
+.cv-schedule-table td,
+.cv-schedule-table tbody th { padding: .6rem .8rem; color: #3f5572; text-align: left; vertical-align: middle; }
+.cv-schedule-table tbody th { position: sticky; left: 0; z-index: 1; min-width: 13rem; max-width: 18rem; background: inherit; font-weight: 800; }
+.cv-schedule-table tbody th button { display: flex; align-items: center; gap: .55rem; width: 100%; border: 0; padding: 0; background: none; color: #01162b; font: inherit; text-align: left; cursor: pointer; }
+.cv-schedule-table-icon { display: grid; flex: 0 0 auto; place-items: center; width: 1.7rem; height: 1.7rem; overflow: hidden; border-radius: .45rem; background: rgba(177, 153, 219, .16); font-size: 1rem; }
+.cv-schedule-table-icon img { width: 100%; height: 100%; object-fit: cover; }
+.cv-schedule-table .cv-schedule-apps { margin: 0; flex-wrap: nowrap; }
+.cv-schedule-table .cv-schedule-apps span { white-space: nowrap; }
+.cv-schedule-table td.cv-schedule-table-tag { color: #724972; font-weight: 700; white-space: nowrap; }
+.cv-schedule-table td.cv-schedule-table-date { color: #00385a; font-weight: 750; white-space: nowrap; }
+.cv-schedule-status { display: inline-flex; border-radius: 999px; padding: .18rem .55rem; background: rgba(106, 144, 180, .14); color: #00385a; font-size: .74rem; font-weight: 850; white-space: nowrap; }
+.cv-schedule-table tr.is-today .cv-schedule-status { background: #d63f6f; color: #fff; }
+.cv-schedule-table tr.is-soon .cv-schedule-status { background: #e8853a; color: #fff; }
+.cv-schedule-table tr.is-week .cv-schedule-status { background: #8f7fe0; color: #fff; }
+.cv-schedule-table tr.is-past { opacity: .55; }
+.dark .cv-schedule-table-wrap { border-color: rgba(144, 181, 243, .22); background: rgba(14, 34, 66, .92); }
+.dark .cv-schedule-table thead th { border-bottom-color: rgba(144, 181, 243, .2); background: #16294f; color: #b7c7de; }
+.dark .cv-schedule-table tbody tr { background: #0e2242; }
+.dark .cv-schedule-table tbody tr:hover { background: #17305a; }
+.dark .cv-schedule-table tbody tr + tr > * { border-top-color: rgba(144, 181, 243, .14); }
+.dark .cv-schedule-table td { color: #d3deee; }
+.dark .cv-schedule-table tbody th button { color: #f1f5ff; }
+.dark .cv-schedule-table td.cv-schedule-table-tag { color: #f0c6ea; }
+.dark .cv-schedule-table td.cv-schedule-table-date { color: #e4ecfb; }
+.dark .cv-schedule-status { background: rgba(144, 181, 243, .2); color: #e4ecfb; }
+
+/* Phone: a tighter Home strip so it does not dominate the feed. */
+@media (max-width: 767px) {
+  .cv-schedule-widget { margin-bottom: .8rem; border-radius: 1rem; padding: .65rem .7rem .7rem; }
+  .cv-schedule-widget-header { margin-bottom: .5rem; }
+  .cv-schedule-overline { font-size: .56rem; letter-spacing: .1em; }
+  .cv-schedule-overline svg { width: .75rem; height: .75rem; }
+  .cv-schedule-widget-header h2 { font-size: .84rem; }
+  .cv-schedule-link { padding: .3rem .6rem; font-size: .68rem; }
+  .cv-schedule-widget-list { gap: .45rem; }
+  .cv-schedule-widget-list > li { flex-basis: min(12.5rem, 66%); }
+  .cv-schedule-widget-item { gap: .5rem; border-radius: .8rem; padding: .42rem .5rem; }
+  .cv-schedule-widget-item .cv-schedule-date { width: 2.25rem; height: 2.4rem; border-radius: .6rem; }
+  .cv-schedule-widget-item .cv-schedule-date strong { font-size: 1.05rem; }
+  .cv-schedule-widget-item .cv-schedule-date small { font-size: .52rem; }
+  .cv-schedule-widget-copy strong { font-size: .76rem; }
+  .cv-schedule-widget-copy span { font-size: .64rem; }
+  .cv-schedule-widget-copy em { font-size: .6rem; }
+  .cv-schedule-mode { align-self: stretch; }
+  .cv-schedule-mode button { flex: 1 1 0; justify-content: center; padding: .42rem .4rem; }
+  .cv-schedule-table { font-size: .78rem; }
+  .cv-schedule-table tbody th { min-width: 10rem; }
+}
