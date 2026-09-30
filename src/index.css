@@ -10398,3 +10398,8 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .work-detail-download-menu { position: relative; display: inline-flex; }
 .work-detail-download-options { position: absolute; z-index: 5; right: 0; bottom: calc(100% + .4rem); display: grid; gap: .3rem; min-width: 10rem; border: 1px solid var(--cv-line); border-radius: .7rem; padding: .4rem; background: var(--cv-control-surface); box-shadow: 0 .8rem 2rem rgba(1, 22, 43, .18); }
 .work-detail-download-options > button { justify-content: flex-start; width: 100%; }
+
+/* Dark mode: copyable creator tags and platform scope chips stay readable. */
+.dark .work-detail-collaboration-chips .work-detail-copy-button,
+.dark .work-detail-collaboration-scope > span { border-color: rgba(214, 190, 255, .5); background: rgba(177, 153, 219, .22); color: #f1e6ff; }
+.dark .work-detail-collaboration-chips .work-detail-copy-button:hover { background: rgba(177, 153, 219, .34); }
