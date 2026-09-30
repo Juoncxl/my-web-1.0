@@ -10338,3 +10338,63 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
   .work-detail-primary-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .work-detail-participant-references { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Readability pass (2026-09-30): wider desktop feed, compact phone cards,
+   iPad three-up grid, boxed Work content and brighter dark-mode metadata. */
+@media (min-width: 1440px) {
+  .cv-shell-header > .max-w-7xl,
+  .cv-main-container { max-width: 100rem; }
+}
+@media (min-width: 1500px) {
+  .cv-asset-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-width: 600px) and (max-width: 1120px) {
+  .cv-asset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+}
+@media (max-width: 1023px) {
+  .cv-shell-header > div > .flex { height: auto; min-height: 4rem; flex-wrap: wrap; padding-block: .55rem; }
+  .cv-shell-header > div > .flex > .flex-1 { order: 3; width: 100%; max-width: none; flex: 1 1 100%; margin-inline: 0; }
+}
+@media (max-width: 767px) {
+  .cv-asset-grid .cv-card-cover { aspect-ratio: 4 / 3; }
+  .cv-asset-grid .cv-card-body { padding: .7rem .75rem .65rem; }
+  .cv-asset-grid .cv-card-snippet { display: -webkit-box; margin-top: .3rem; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .cv-asset-grid .cv-card-footer { margin-top: .55rem; padding-top: .5rem; }
+  .cv-asset-grid .cv-card-date { display: none; }
+  .cv-asset-grid .cv-card-author,
+  .cv-asset-grid .cv-card-author-preview { flex: 1 1 auto; }
+}
+
+/* Main Work content: each section is its own card, matching Collab shared information. */
+.work-detail-blocks { gap: .8rem; }
+.work-detail-block {
+  gap: .72rem;
+  border: 1px solid rgba(106, 144, 180, .28);
+  border-radius: .85rem;
+  padding: .88rem;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 .3rem .9rem rgba(1, 22, 43, .055);
+}
+.work-detail-block:first-child { border-top: 1px solid rgba(106, 144, 180, .28); padding-top: .88rem; }
+.work-detail-block > header { padding-bottom: .62rem; border-bottom: 1px solid rgba(106, 144, 180, .16); }
+.dark .work-detail-block,
+.dark .work-detail-block:first-child { border-color: rgba(144, 181, 243, .26); background: rgba(12, 30, 61, .88); box-shadow: 0 .3rem .9rem rgba(1, 8, 25, .22); }
+.dark .work-detail-block > header { border-bottom-color: rgba(144, 181, 243, .16); }
+.dark .work-detail-block > p,
+.dark .work-detail-block > aside { color: #c1d0e5; }
+
+/* Dark mode: Collab card metadata and participant cards need more contrast. */
+.dark .cv-collab-card-stats,
+.dark .cv-asset-card.is-collaboration-card .cv-collab-card-stats { color: #b7c7de; }
+.dark .cv-collab-card-stats time { color: #f0b8e0; }
+.dark .cv-collab-card-chips > span { border-color: rgba(177, 153, 219, .4); background: rgba(177, 153, 219, .16); color: #e4dbf7; }
+.dark .work-detail-participant-grid > article { border-color: rgba(144, 181, 243, .28); background: #0f2547; }
+.dark .work-detail-participant-grid > article p { color: #d3deee; }
+.dark .work-detail-participant-grid > article p strong,
+.dark .work-detail-participant-grid > article header strong { color: #f1f5ff; }
+.dark .work-detail-creator span { color: #e6b8dc; }
+
+/* Download formats live behind one footer action. */
+.work-detail-download-menu { position: relative; display: inline-flex; }
+.work-detail-download-options { position: absolute; z-index: 5; right: 0; bottom: calc(100% + .4rem); display: grid; gap: .3rem; min-width: 10rem; border: 1px solid var(--cv-line); border-radius: .7rem; padding: .4rem; background: var(--cv-control-surface); box-shadow: 0 .8rem 2rem rgba(1, 22, 43, .18); }
+.work-detail-download-options > button { justify-content: flex-start; width: 100%; }

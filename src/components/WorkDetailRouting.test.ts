@@ -54,7 +54,8 @@ describe('canonical Work Detail routing', () => {
     expect(detailSource).toContain('onDelete(asset.id)');
     expect(detailSource).toContain('onBookmark(asset.id)');
     expect(detailSource).not.toContain('onReport(asset)');
-    expect(detailSource).toContain('aria-label="แชร์ผลงาน"');
+    expect(detailSource).not.toContain('aria-label="แชร์ผลงาน"');
+    expect(detailSource).toContain('ดาวน์โหลด');
     expect(detailSource).toContain("copyToClipboard(legacyContent, 'content')");
     expect(detailSource).toContain('copyToClipboard(uiCode');
     expect(creatorSource).toContain("onRestore={activeTab === 'trash' ? onRestoreAsset : undefined}");

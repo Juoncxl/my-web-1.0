@@ -56,8 +56,11 @@ const BLOCK_LABELS: Record<WorkContentBlock['type'], string> = {
 };
 
 function WorkMark({ icon }: { icon?: AssetIcon }) {
+  const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
   if (isValidWorkIcon(icon) && icon?.type === 'image') {
-    return <img src={icon.value} alt="" />;
+    // An unreachable image icon falls back to the neutral mark instead of a broken image.
+    if (failedSrc === icon.value) return <span>✦</span>;
+    return <img src={icon.value} alt="" referrerPolicy="no-referrer" onError={() => setFailedSrc(icon.value)} />;
   }
   return <span>{isValidWorkIcon(icon) ? icon?.value : '✦'}</span>;
 }
@@ -198,6 +201,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [galleryImageError, setGalleryImageError] = useState<string | null>(null);
   const [tagCopyStatus, setTagCopyStatus] = useState<'success' | 'error' | null>(null);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isTrashConfirmationOpen, setIsTrashConfirmationOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
@@ -452,9 +456,6 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       <section className="work-detail-modal" role="dialog" aria-modal="true" aria-labelledby="work-detail-title">
         {!embedded && <header className="work-detail-header work-detail-header-actions-only">
         <div className="work-detail-header-actions">
-          {isOwner && onEdit
-            ? <button type="button" onClick={() => onEdit(asset)} aria-label="แก้ไขผลงาน" title="แก้ไขผลงาน"><Edit3 aria-hidden="true" /></button>
-            : interactionMode !== 'preview' && <button type="button" onClick={() => void handleShare()} aria-label="แชร์ผลงาน" title={shareStatus === 'success' ? 'คัดลอกลิงก์ผลงานแล้ว' : 'แชร์ผลงาน'}><Share2 aria-hidden="true" /></button>}
           <button type="button" onClick={onClose} aria-label="ปิดรายละเอียดผลงาน" title="ปิด"><X aria-hidden="true" /></button>
         </div>
       </header>}
@@ -498,7 +499,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             <div className="work-detail-meta" aria-label="ข้อมูลผลงาน">
               <span>{isPublic ? <Globe2 aria-hidden="true" /> : <LockKeyhole aria-hidden="true" />}{isPublic ? 'สาธารณะ' : 'ส่วนตัว'}</span>
               <span>{status.emoji} {status.name}</span>
-              <span><Folder aria-hidden="true" />{assignedFolder?.name || (asset.folderId ? 'ไม่พบโฟลเดอร์' : 'ยังไม่ได้เลือกโฟลเดอร์')}</span>
+              {isOwner && <span><Folder aria-hidden="true" />{assignedFolder?.name || (asset.folderId ? 'ไม่พบโฟลเดอร์' : 'ยังไม่ได้เลือกโฟลเดอร์')}</span>}
             </div>
 
             <h3 id="work-detail-title">{display.title}</h3>
@@ -655,10 +656,14 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {!isTrashMode && !isOwner && onFork && <button type="button" className="is-secondary" onClick={() => onFork(asset)}><GitFork aria-hidden="true" />Fork</button>}
             {!isTrashMode && isOwner && onMoveToFolder && <button type="button" className="is-secondary" onClick={() => onMoveToFolder(asset)}><FolderInput aria-hidden="true" />ย้ายไปโฟลเดอร์</button>}
             {!isTrashMode && isOwner && onDelete && <button type="button" className="is-danger" onClick={() => setIsTrashConfirmationOpen(true)}><Trash2 aria-hidden="true" />ย้ายลงถังขยะ</button>}
-            <button type="button" className="is-secondary work-detail-download-action" onClick={() => downloadText(markdown, `${safeFilename}.md`, 'text/markdown')}><Download aria-hidden="true" />Markdown</button>
-            <button type="button" className="is-secondary work-detail-download-action" onClick={() => downloadText(JSON.stringify(createPublicAssetExport(asset), null, 2), `${safeFilename}_vault.json`, 'text/json')}><Download aria-hidden="true" />JSON</button>
+            <div className="work-detail-download-menu">
+              <button type="button" className="is-secondary" aria-expanded={isDownloadMenuOpen} onClick={() => setIsDownloadMenuOpen(value => !value)}><Download aria-hidden="true" />ดาวน์โหลด</button>
+              {isDownloadMenuOpen && <div className="work-detail-download-options">
+                <button type="button" className="is-secondary work-detail-download-action" onClick={() => { setIsDownloadMenuOpen(false); downloadText(markdown, `${safeFilename}.md`, 'text/markdown'); }}>Markdown (.md)</button>
+                <button type="button" className="is-secondary work-detail-download-action" onClick={() => { setIsDownloadMenuOpen(false); downloadText(JSON.stringify(createPublicAssetExport(asset), null, 2), `${safeFilename}_vault.json`, 'text/json'); }}>JSON (.json)</button>
+              </div>}
+            </div>
           </div>
-          <button type="button" className="is-primary work-detail-close-action" onClick={onClose}>ปิด</button>
         </div>
       </footer>}
     </section>
