@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { cxlAssetFromRecord, DirectWriteError, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
+import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
 
 const PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_version','search_chunk_count','search_index_token'];
 const PUBLIC_HEADERS = ['id','title','category','status','updated_at','tags','short_description','file_id','active','cover_ref','summary_json'];
@@ -57,7 +57,10 @@ function fakeGoogle() {
       const grid = book[sheet];
       if (op === 'append') { grid.push(...JSON.parse(String(init.body)).values); return ok({}); }
       if (init.method === 'PUT') {
-        JSON.parse(String(init.body)).values.forEach((values: unknown[], i: number) => { grid[r1 - 1 + i] = values; });
+        JSON.parse(String(init.body)).values.forEach((values: unknown[], i: number) => {
+          const row = grid[r1 - 1 + i] = [...(grid[r1 - 1 + i] || [])];
+          values.forEach((value, j) => { row[c1 + j] = value; });
+        });
         return ok({});
       }
       const values = grid.slice(r1 - 1, Math.min(grid.length, r2)).map(row => row.slice(c1, c2 + 1));
@@ -132,6 +135,61 @@ describe('direct Work update', () => {
     await expect(directUpdateWork([WORK, { visibility: 'private' }, options], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'visibility_or_trash_changed' });
     await expect(directUpdateWork([WORK, { title: 'x' }, { ...options, mediaIds: ['a'] }], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'media_upload' });
     expect(Object.keys(google.files)).toEqual(['rec3', 'pubfile3']);
+  });
+
+  it('creates a private Work as Apps Script would: revision file, index row, search chunks, no public row', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const input = { title: 'ใหม่', category: 'prompts', status: 'draft', visibility: 'private', content: 'hello world', tags: ['a'], userId: OWNER };
+    const result = await directCreateWork([input, { requestId: REQUEST }], OWNER, google.env);
+    expect(result.fallback).toBe(false);
+    const id = `asset_${REQUEST.replace(/-/g, '')}`;
+    const saved = Object.values(google.files).find(file => file.name === `${id}__r1.json`)!;
+    expect(saved.parent).toBe('privFolder');
+    expect(saved.content).toMatchObject({ revision: 1, createRequestId: REQUEST, lastWriteOperation: 'create', lastWriteFingerprint: writeFingerprint('create', input), row: { id, user_id: OWNER, is_public: false } });
+    const row = google.sheets.priv[''].find(values => values[0] === id)!;
+    expect(row[PRIVATE_HEADERS.indexOf('create_request_id')]).toBe(REQUEST);
+    expect(JSON.parse(String(row[PRIVATE_HEADERS.indexOf('summary_json')])).asset).toMatchObject({ id, title: 'ใหม่', visibility: 'private' });
+    expect(google.sheets.priv.OwnerSearchIndex.some(values => values[0] === id && String(values[2]).includes('hello world'))).toBe(true);
+    expect(google.sheets.pub[''].some(values => values[0] === id)).toBe(false);
+  });
+
+  it('creates a public Work with its creator mapping and public projection', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const input = { title: 'สาธารณะ', category: 'lore', status: 'finished', visibility: 'public', userId: OWNER };
+    await expect(directCreateWork([input, { requestId: REQUEST }], OWNER, google.env)).resolves.toMatchObject({ fallback: false });
+    const id = `asset_${REQUEST.replace(/-/g, '')}`;
+    expect(google.sheets.pub.WorkCreatorMap.some(values => values[1] === id && values[2] === google.env.publicCreatorId)).toBe(true);
+    const publicRow = google.sheets.pub[''].find(values => values[0] === id)!;
+    expect(publicRow[PUBLIC_HEADERS.indexOf('active')]).toBe('true');
+    expect(Object.values(google.files).some(file => file.name === `${id}__r1.json` && file.parent === 'pubFolder')).toBe(true);
+  });
+
+  it('falls back for creates with media and for a repeated create request', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    await expect(directCreateWork([{ title: 'x', previewImage: 'media:abc', userId: OWNER }, { requestId: REQUEST }], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'media_references' });
+    const input = { title: 'x', category: 'lore', userId: OWNER, visibility: 'private' };
+    await directCreateWork([input, { requestId: REQUEST }], OWNER, google.env);
+    await expect(directCreateWork([input, { requestId: REQUEST }], OWNER, google.env)).resolves.toMatchObject({ fallback: true, reason: 'idempotent_retry' });
+    await expect(directCreateWork([{ title: 'x', userId: OWNER }, { requestId: '22222222-2222-4333-8444-555555555555' }], OWNER, google.env)).rejects.toMatchObject({ code: 'INVALID_WORK' });
+  });
+
+  it('moves a public Work to Trash (deactivating its public row) and restores it', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    await expect(directSetTrash('works.softDelete', WORK, OWNER, google.env)).resolves.toMatchObject({ fallback: false, data: { success: true } });
+    let row = google.sheets.priv[''][1];
+    expect(row[PRIVATE_HEADERS.indexOf('deleted_at')]).toBeTruthy();
+    expect(row[PRIVATE_HEADERS.indexOf('revision')]).toBe(4);
+    expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('false');
+
+    await expect(directSetTrash('works.restore', WORK, OWNER, google.env)).resolves.toMatchObject({ fallback: false });
+    row = google.sheets.priv[''][1];
+    expect(row[PRIVATE_HEADERS.indexOf('deleted_at')]).toBe('');
+    expect(row[PRIVATE_HEADERS.indexOf('revision')]).toBe(5);
+    expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('true');
   });
 
   it('rejects a stale revision without writing', async () => {

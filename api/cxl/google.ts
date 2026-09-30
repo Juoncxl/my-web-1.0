@@ -6,7 +6,7 @@ import { directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerRe
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
-import { DirectWriteError, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
+import { DirectWriteError, directCreateWork, directSetTrash, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -300,6 +300,7 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
 }
+const DIRECT_WRITE_ACTIONS = new Set(['works.update', 'works.create', 'works.softDelete', 'works.restore']);
 const DIRECT_WRITE_USER_ERRORS = new Set(['REVISION_CONFLICT','REVISION_REQUIRED','INVALID_WORK','INVALID_COLLAB_DRAFT','INVALID_FOLDER','WORK_NOT_FOUND','WORK_NOT_OWNED','INDEX_ROW_AMBIGUOUS']);
 
 function directWritesEnabled(): boolean {
@@ -495,12 +496,16 @@ export default async function handler(req: Request, res: Response) {
     const requestArgs: unknown[] = body.args;
     // Direct Google API update (Preview by default). Unsupported cases and unexpected
     // failures fall through to Apps Script, whose idempotent path repairs a partial write.
-    if (action === 'works.update' && directWritesEnabled()) {
+    if (DIRECT_WRITE_ACTIONS.has(action) && directWritesEnabled()) {
       const started = Date.now();
       try {
         const env = await directWriteEnv(authenticatedOwnerId);
         if (env) {
-          const result = await directUpdateWork(requestArgs, authenticatedOwnerId, env);
+          const result = action === 'works.update' ? await directUpdateWork(requestArgs, authenticatedOwnerId, env)
+            // Create uses the exact args Apps Script would receive (Owner userId injected) so a
+            // fallback retry recognises the same request by its fingerprint.
+            : action === 'works.create' ? await directCreateWork(ownerArgs, authenticatedOwnerId, env)
+              : await directSetTrash(action as 'works.softDelete' | 'works.restore', requestArgs[0], authenticatedOwnerId, env);
           console.info(JSON.stringify({ event: 'cxl_direct_write', action, elapsedMs: Date.now() - started, used: !result.fallback, reason: result.fallback ? result.reason : undefined }));
           if (result.fallback === false) {
             const saved = result.data;

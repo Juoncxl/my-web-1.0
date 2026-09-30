@@ -508,6 +508,208 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
 }
 
+// ------------------------------------------------------- shared write steps
+
+async function appendRows(env: DirectWriteEnv, spreadsheetId: string, sheetPrefix: string, rows: unknown[][]): Promise<void> {
+  if (!rows.length) return;
+  await google(env, `${sheetsBase(spreadsheetId)}/values/${encodeURIComponent(`${sheetPrefix}A1`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: rows })
+  });
+}
+
+async function appendSearchChunks(env: DirectWriteEnv, workId: string, artifacts: ReturnType<typeof ownerSearchArtifacts>): Promise<string[]> {
+  const searchHeaders = await sheetHeaders(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`);
+  await appendRows(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`, artifacts.chunks.map((text, index) => {
+    const item: Row = { work_id: workId, chunk_index: index, search_text: text, search_version: artifacts.version, updated_at: artifacts.updatedAt, index_token: artifacts.token };
+    return searchHeaders.map(key => item[key] === undefined ? '' : item[key]);
+  }));
+  return searchHeaders;
+}
+
+function privateIndexValues(headers: string[], metadata: Row, previous: Row | null): unknown[] {
+  return headers.map(header => {
+    if (header === 'search_text') return '';
+    if (Object.prototype.hasOwnProperty.call(metadata, header)) return metadata[header] === undefined || metadata[header] === null ? '' : metadata[header];
+    return previous?.[header] ?? '';
+  });
+}
+
+/** Parent folder of the first index row that has a file, i.e. where Apps Script keeps these JSON files. */
+async function folderOfIndexedFiles(env: DirectWriteEnv, spreadsheetId: string, headers: string[]): Promise<string | null> {
+  const index = headers.indexOf('file_id');
+  if (index < 0) return null;
+  const letter = columnLetter(index);
+  const fileId = (await sheetValues(env, spreadsheetId, `${letter}2:${letter}`)).map(row => String(row[0] ?? '')).find(Boolean);
+  return fileId ? driveParent(env, fileId) : null;
+}
+
+/** Port of upsertWorkCreatorMap_ + syncPublic_ for a public Work. */
+async function publishWork(env: DirectWriteEnv, record: Json): Promise<void> {
+  const id = String(record.row.id);
+  const mapHeaders = await sheetHeaders(env, env.publicSheetId, 'WorkCreatorMap!');
+  const schemaIndex = mapHeaders.indexOf('schemaVersion'), workIndex = mapHeaders.indexOf('workId'), creatorIndex = mapHeaders.indexOf('publicCreatorId');
+  if (schemaIndex < 0 || workIndex < 0 || creatorIndex < 0) fail('CREATOR_MAPPING_MISSING', 'Public Work creator map schema is invalid');
+  const mapRows = await findRows(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, 'workId', id);
+  if (mapRows.length > 1) fail('CREATOR_MAPPING_AMBIGUOUS', 'Work has duplicate public creator mappings');
+  if (mapRows.length) {
+    const map = await readRow(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, mapRows[0]);
+    if (String(map.publicCreatorId || '') && String(map.publicCreatorId) !== env.publicCreatorId) fail('CREATOR_MAPPING_CONFLICT', 'Work is mapped to a different public creator');
+  } else {
+    const row = mapHeaders.map(() => '' as unknown); row[schemaIndex] = 1; row[workIndex] = id; row[creatorIndex] = env.publicCreatorId;
+    await appendRows(env, env.publicSheetId, 'WorkCreatorMap!', [row]);
+  }
+  const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
+  if (PUBLIC_HEADERS.some((header, index) => publicHeaders[index] !== header)) fail('PUBLIC_SYNC_PENDING', 'Public index headers are unexpected');
+  const publicRows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
+  if (publicRows.length > 1) fail('PUBLIC_SYNC_PENDING', 'Public index contains duplicate Work rows');
+  const existing = publicRows.length ? await readRow(env, env.publicSheetId, '', publicHeaders, publicRows[0]) : null;
+  const publicFolderId = existing?.file_id ? await driveParent(env, String(existing.file_id)) : await folderOfIndexedFiles(env, env.publicSheetId, publicHeaders);
+  if (!publicFolderId) fail('PUBLIC_SYNC_PENDING', 'Public projection folder is unknown');
+  const pub = projection(record);
+  const publicFileId = await putJsonRevision(env, publicFolderId!, `${id}__r${record.revision}.json`, pub);
+  const values = PUBLIC_HEADERS.map(header => ({ id: pub.id, title: pub.title, category: pub.category, status: pub.status, updated_at: pub.updated_at, tags: JSON.stringify(pub.tags),
+    short_description: pub.short_description || '', file_id: publicFileId, active: 'true', cover_ref: pub.preview_image || '', summary_json: publicSummaryJson(pub) } as Row)[header] ?? '');
+  if (publicRows.length) await writeRange(env, env.publicSheetId, `A${publicRows[0]}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRows[0]}`, [values]);
+  else await appendRows(env, env.publicSheetId, '', [values]);
+}
+
+/** Port of deactivatePublicWork_. */
+async function deactivatePublicWork(env: DirectWriteEnv, workId: string): Promise<void> {
+  const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
+  const activeIndex = publicHeaders.indexOf('active');
+  if (activeIndex < 0) return;
+  const rows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', workId);
+  for (const rowNumber of rows) await writeRange(env, env.publicSheetId, `${columnLetter(activeIndex)}${rowNumber}`, [['false']]);
+}
+
+const REQUEST_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+
+function applyRowInput(record: Json, asset: Json): void {
+  Object.assign(record.row, { title: asset.title, author_name: asset.authorName || '', author_avatar: asset.authorAvatar || '', icon: asset.icon,
+    category: asset.category, status: asset.status, visibility: asset.visibility || (asset.isPublic ? 'public' : 'private'), short_description: asset.shortDescription || '',
+    content_type_labels: asset.contentTypeLabels || [], content_types: asset.contentTypes || [], presentation_metadata: asset.presentationMetadata || null,
+    public_collaboration: asset.publicCollaboration || null, folder_id: asset.folderId || '', tags: asset.tags || [], content: asset.content || '', ui_code_snippet: asset.uiCodeSnippet || '',
+    content_blocks: asset.contentBlocks || [], preview_image: asset.previewImage || '', preview_images: asset.previewImages || [], collaboration_asset_id: asset.collaborationAssetId || null,
+    deleted_at: asset.deletedAt || null });
+  const r = record.row;
+  if (!String(r.title || '').trim()) fail('INVALID_WORK', 'ต้องระบุชื่อผลงาน');
+  if (!['character','lore','ui_code','prompts','collab','app_data'].includes(r.category)) fail('INVALID_WORK', 'หมวดหมู่ไม่ถูกต้อง');
+  if (!['idea','draft','in_progress','finished','archived'].includes(r.status)) fail('INVALID_WORK', 'สถานะไม่ถูกต้อง');
+  if (!['public','private'].includes(r.visibility)) fail('INVALID_WORK', 'การมองเห็นไม่ถูกต้อง');
+  if (r.category === 'collab') r.collaboration_asset_id = null;
+}
+
+// ------------------------------------------------------------------ create
+
+/**
+ * works.create args as Apps Script receives them: [assetInput (userId injected), { requestId, mediaIds? }].
+ * Media-bearing creates fall back to Apps Script.
+ */
+export async function directCreateWork(args: unknown[], ownerUserId: string, env: DirectWriteEnv): Promise<DirectUpdateResult> {
+  const [assetInput, options] = args as [Json, Json];
+  if (!options || !REQUEST_ID_RE.test(String(options.requestId || ''))) return { fallback: true, reason: 'invalid_request_id' };
+  if (Array.isArray(options.mediaIds) && options.mediaIds.length) return { fallback: true, reason: 'media_upload' };
+  if (!assetInput || typeof assetInput !== 'object' || Array.isArray(assetInput)) fail('INVALID_WORK', 'Work payload is invalid');
+  if (Object.keys(assetInput).some(key => !CXL_WRITE_FIELDS.includes(key) && key !== 'userId')) fail('INVALID_WORK', 'Work payload contains unsupported fields');
+  if (!String(assetInput.title || '').trim()) fail('INVALID_WORK', 'Work title is required');
+  validateUpdatePayload(Object.fromEntries(Object.entries(assetInput).filter(([key]) => key !== 'userId')));
+  const requestId = String(options.requestId).toLowerCase();
+  const id = `asset_${requestId.replace(/-/g, '')}`;
+  const fingerprint = writeFingerprint('create', assetInput);
+
+  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+  // A retried create (same requestId) is answered by Apps Script's idempotent path.
+  if ((await findRows(env, env.privateSheetId, '', privateHeaders, 'create_request_id', requestId)).length) return { fallback: true, reason: 'idempotent_retry' };
+  if ((await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id)).length) return { fallback: true, reason: 'id_exists' };
+
+  const now = new Date().toISOString();
+  const asset: Json = clone(assetInput);
+  asset.id = id; asset.userId = ownerUserId; asset.authorName = asset.authorName || 'Creator'; asset.createdAt = now; asset.updatedAt = now;
+  asset.visibility = asset.visibility || (asset.isPublic === false ? 'private' : 'public'); asset.isPublic = asset.visibility === 'public'; asset.status = asset.status || 'finished'; asset.deletedAt = null;
+  asset.likesCount = 0; asset.forkCount = 0; asset.forkedFromId = null; asset.forkedFromAuthor = null; asset.linkedAssetIds = [];
+  asset.versions = [{ version: 1, updatedAt: now, title: asset.title, summary: 'สร้างผลงานเริ่มต้น' }]; asset.media = [];
+  const refs = mediaReferences(asset);
+  if (refs.inline || refs.refs.length) return { fallback: true, reason: 'media_references' };
+  if (asset.folderId && !(await env.ownerFolderIds()).includes(String(asset.folderId))) fail('INVALID_FOLDER', 'Selected folder is unavailable for this Owner');
+
+  const record: Json = { schemaVersion: 1, sourceSha256: null, revision: 0, row: { id, user_id: ownerUserId, created_at: now, versions: [] }, collaborationDraft: null, collaborationDraftMeta: null, mediaRecords: [] };
+  applyRowInput(record, asset);
+  const r = record.row;
+  if (r.collaboration_asset_id) {
+    const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', String(r.collaboration_asset_id));
+    const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
+    if (!linked || linked.category !== 'collab') fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+  }
+  r.is_public = r.visibility === 'public'; r.updated_at = now;
+  record.collaborationDraft = asset.category === 'collab' ? (asset.collaboration || null) : null;
+  record.cxlAsset = asset;
+  record.createRequestId = requestId;
+  record.lastWriteRequestId = requestId; record.lastWriteOperation = 'create'; record.lastWriteFingerprint = fingerprint;
+  record.revision = 1;
+
+  const privateFolderId = await folderOfIndexedFiles(env, env.privateSheetId, privateHeaders);
+  if (!privateFolderId) return { fallback: true, reason: 'private_folder_unknown' };
+  const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
+  const metadata = privateMeta(record, '', artifacts);
+  metadata.file_id = await putJsonRevision(env, privateFolderId, `${id}__r1.json`, record);
+  await appendSearchChunks(env, id, artifacts);
+  await appendRows(env, env.privateSheetId, '', [privateIndexValues(privateHeaders, metadata, null)]);
+
+  if (isPublicRow(r)) {
+    try { await publishWork(env, record); }
+    catch (error) { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); }
+  }
+  return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
+}
+
+// -------------------------------------------------------- trash / restore
+
+/** Port of mutateCxlWorkDeletionApi_ for works.softDelete and works.restore. */
+export async function directSetTrash(action: 'works.softDelete' | 'works.restore', workId: unknown, ownerUserId: string, env: DirectWriteEnv): Promise<{ fallback: true; reason: string } | { fallback: false; data: { success: true; error: null } }> {
+  const id = String(workId || '');
+  if (!/^asset_[A-Za-z0-9_-]{1,96}$/.test(id)) fail('INVALID_WORK', 'Work ID is invalid');
+  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+  const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+  if (rowNumbers.length !== 1) return rowNumbers.length ? fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows') : fail('WORK_NOT_FOUND', 'Work was not found');
+  const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+  const previousFileId = String(indexed.file_id || '');
+  if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
+  const record = await driveJson(env, previousFileId);
+  const asset = cxlAssetFromRecord(record);
+  if (String(record.row?.user_id || asset.userId || '') !== ownerUserId) fail('WORK_NOT_OWNED', 'Work is not owned by this authenticated Owner');
+  if (String(record.row?.id) !== id) fail('WORK_NOT_FOUND', 'Work was not found');
+  const wasPublic = isPublicRow(record.row);
+
+  const deleting = action === 'works.softDelete';
+  const now = new Date().toISOString();
+  if (deleting && !record.row.deleted_at) record.row.deleted_at = now;
+  if (!deleting && record.row.deleted_at) record.row.deleted_at = '';
+  record.row.updated_at = now; record.revision = (Number(record.revision) || 0) + 1;
+  record.cxlAsset = Object.assign({}, asset, { deletedAt: record.row.deleted_at || null, updatedAt: now, revision: record.revision });
+
+  const privateFolderId = await driveParent(env, previousFileId);
+  const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
+  const searchHeaders = await appendSearchChunks(env, id, artifacts);
+  const metadata = privateMeta(record, '', artifacts);
+  metadata.file_id = await putJsonRevision(env, privateFolderId, `${id}__r${record.revision}.json`, record);
+  const latest = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+  if (String(latest.id) !== id || (Number(latest.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work changed before this update; reload and try again');
+  await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [privateIndexValues(privateHeaders, metadata, latest)]);
+
+  try {
+    await removeStaleSearchChunks(env, id, artifacts.token, searchHeaders);
+    if (deleting) await deactivatePublicWork(env, id);
+    // finishCxlPublicProjection_: republish a public Work; deactivate one that stopped being public.
+    else if (isPublicRow(record.row)) await publishWork(env, record);
+    else if (wasPublic) await deactivatePublicWork(env, id);
+  } catch (error) {
+    throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true);
+  }
+  return { fallback: false, data: { success: true, error: null } };
+}
+
 async function removeStaleSearchChunks(env: DirectWriteEnv, workId: string, keepToken: string, headers: string[]): Promise<void> {
   const workIndex = headers.indexOf('work_id'), tokenIndex = headers.indexOf('index_token');
   if (workIndex < 0 || tokenIndex < 0) return;
