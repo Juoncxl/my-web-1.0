@@ -9,7 +9,6 @@ import { ConfirmationDialog } from './ConfirmationDialog';
 import {
   Bookmark as BookmarkIcon,
   FileEdit,
-  Flag,
   FolderInput,
   GitFork,
   Globe,
@@ -18,8 +17,10 @@ import {
   Lock,
   MoreHorizontal,
   RotateCcw,
+  Share2,
   Trash2
 } from 'lucide-react';
+import { getWorkShareUrl } from '../lib/workSharing';
 import { getWorkDisplayPresentation, type CollaborationDisplayContext } from '../lib/workDisplayPresentation';
 import { shouldOpenAssetCardFromTarget } from './assetCardInteraction';
 
@@ -220,7 +221,16 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     callback?.();
   };
 
-  const handleCategoryClick = (event: React.MouseEvent) => {
+  const handleShare = () => {
+    const url = getWorkShareUrl(asset.id, window.location.origin);
+    if (typeof navigator.share === 'function') {
+      void navigator.share({ title: cardTitle, url }).catch(() => undefined);
+      return;
+    }
+    void navigator.clipboard?.writeText(url).then(() => window.alert('คัดลอกลิงก์ผลงานแล้ว'), () => window.prompt('คัดลอกลิงก์ผลงาน', url));
+  };
+
+  const handleCategoryClick =(event: React.MouseEvent) => {
     event.stopPropagation();
     onSelectCategory?.(asset.category);
   };
@@ -347,7 +357,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
               {menuOpen && (
                 <div data-card-action className="cv-card-menu" onClick={event => event.stopPropagation()}>
                   {!isTrashMode && !isOwner && onFork && <button type="button" onClick={handleMenuAction(() => onFork(asset))}><GitFork className="w-3.5 h-3.5" />Fork เข้าคลังของฉัน</button>}
-                  {!isTrashMode && !isOwner && onReport && <button type="button" onClick={handleMenuAction(() => onReport(asset))}><Flag className="w-3.5 h-3.5" />รายงานผลงาน</button>}
+                  {!isTrashMode && !isOwner && interactionMode === 'live' && <button type="button" onClick={handleMenuAction(handleShare)}><Share2 className="w-3.5 h-3.5" />แชร์ผลงาน</button>}
                   {!isTrashMode && isOwner && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}
                   {!isTrashMode && isOwner && onOpenMoveToFolder && <button type="button" onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}><FolderInput className="w-3.5 h-3.5" />ย้ายไปยังโฟลเดอร์</button>}
                   {!isTrashMode && isOwner && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}

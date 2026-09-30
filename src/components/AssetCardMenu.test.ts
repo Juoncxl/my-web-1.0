@@ -24,7 +24,8 @@ describe('Work Card three-dot menu dismissal', () => {
 
   it('routes the other menu actions through the existing closing handler', () => {
     expect(assetCardSource).toContain('onClick={handleMenuAction(() => onFork(asset))}');
-    expect(assetCardSource).toContain('onClick={handleMenuAction(() => onReport(asset))}');
+    expect(assetCardSource).toContain('onClick={handleMenuAction(handleShare)}');
+    expect(assetCardSource).not.toContain('รายงานผลงาน');
     expect(assetCardSource).toContain('onClick={handleMenuAction(() => onEdit(asset))}');
     expect(assetCardSource).toContain('onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}');
     expect(assetCardSource).toContain('onClick={handleMenuAction(() => onDelete(asset))}');

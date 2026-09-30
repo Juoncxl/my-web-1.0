@@ -58,7 +58,7 @@ interface CreatorSpacePageProps {
   onPermanentDeleteAsset?: (assetId: string) => void;
 }
 
-const CATEGORY_ORDER: Array<AssetCategory | 'all'> = ['all', 'character', 'lore', 'ui_code', 'prompts', 'collab', 'app_data'];
+const CATEGORY_ORDER: Array<AssetCategory | 'all'> = ['all', 'collab', 'app_data', 'character', 'lore', 'ui_code', 'prompts'];
 const DEFAULT_WIDGETS: CreatorWidgetType[] = ['folder', 'playlist', 'todo', 'note', 'status', 'goal', 'gallery', 'clock', 'weather', 'calendar'];
 const DEFAULT_RAILS: Record<CreatorWidgetType, 'left' | 'right'> = { folder: 'left', playlist: 'left', todo: 'left', note: 'left', status: 'right', links: 'right', goal: 'right', gallery: 'right', clock: 'right', weather: 'right', calendar: 'left', single_image: 'right', decoration: 'left' };
 const DEFAULT_SPANS: Record<string, number> = { portfolio: 9, folder: 4, playlist: 4, todo: 4, note: 4, status: 4, links: 4, goal: 6, gallery: 6, clock: 4, weather: 4, calendar: 4 };

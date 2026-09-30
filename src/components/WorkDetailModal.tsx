@@ -452,7 +452,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       <section className="work-detail-modal" role="dialog" aria-modal="true" aria-labelledby="work-detail-title">
         {!embedded && <header className="work-detail-header work-detail-header-actions-only">
         <div className="work-detail-header-actions">
-          {!isOwner && onReport && <button type="button" onClick={() => onReport(asset)} aria-label="รายงานผลงาน" title="รายงานผลงาน"><Flag aria-hidden="true" /></button>}
+          {isOwner && onEdit
+            ? <button type="button" onClick={() => onEdit(asset)} aria-label="แก้ไขผลงาน" title="แก้ไขผลงาน"><Edit3 aria-hidden="true" /></button>
+            : interactionMode !== 'preview' && <button type="button" onClick={() => void handleShare()} aria-label="แชร์ผลงาน" title={shareStatus === 'success' ? 'คัดลอกลิงก์ผลงานแล้ว' : 'แชร์ผลงาน'}><Share2 aria-hidden="true" /></button>}
           <button type="button" onClick={onClose} aria-label="ปิดรายละเอียดผลงาน" title="ปิด"><X aria-hidden="true" /></button>
         </div>
       </header>}
