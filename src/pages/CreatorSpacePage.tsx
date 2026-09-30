@@ -186,14 +186,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     { assets: allKnownAssets, folders: knownFolders, isAssetsLoading: isLoadingAssets, isFoldersLoading: isLoadingFolders },
     authLoading
   );
-  const creatorSpaceRenderState = getCreatorSpaceRenderState({ authLoading, isProfileLoading, profile, isNotFound });
-  // TEMP (Preview debugging of missing private Works): read with `__cxlProfileDebug` in the console.
-  (window as unknown as Record<string, unknown>).__cxlProfileDebug = {
-    build: 'profile-debug-1', known: allKnownAssets.length, knownPrivate: allKnownAssets.filter(asset => asset.visibility === 'private').length,
-    knownUserIds: [...new Set(allKnownAssets.map(asset => asset.userId))], selected: assets.length,
-    currentUserId: currentUser?.id, currentPublicCreatorId: currentUser?.publicCreatorId, profileId: profile?.id, profilePublicCreatorId: profile?.publicCreatorId
-  };
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const creatorSpaceRenderState = getCreatorSpaceRenderState({ authLoading, isProfileLoading, profile, isNotFound });  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [selectedAssetOriginFolderId, setSelectedAssetOriginFolderId] = useState<string | null>(null);
