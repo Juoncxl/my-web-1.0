@@ -7,6 +7,7 @@ import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 import { DirectWriteError, directCreateWork, directSetTrash, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
+import { directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -301,7 +302,7 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   return false;
 }
 const DIRECT_WRITE_ACTIONS = new Set(['works.update', 'works.create', 'works.softDelete', 'works.restore']);
-const DIRECT_WRITE_USER_ERRORS = new Set(['REVISION_CONFLICT','REVISION_REQUIRED','INVALID_WORK','INVALID_COLLAB_DRAFT','INVALID_FOLDER','WORK_NOT_FOUND','WORK_NOT_OWNED','INDEX_ROW_AMBIGUOUS']);
+const DIRECT_WRITE_USER_ERRORS = new Set(['REVISION_CONFLICT','REVISION_REQUIRED','INVALID_WORK','INVALID_COLLAB_DRAFT','INVALID_FOLDER','WORK_NOT_FOUND','WORK_NOT_OWNED','INDEX_ROW_AMBIGUOUS','UNSUPPORTED_MEDIA_MUTATION','IDEMPOTENCY_KEY_REUSED']);
 
 function directWritesEnabled(): boolean {
   const setting = process.env.CXL_DIRECT_WRITES?.trim().toLowerCase();
@@ -494,6 +495,26 @@ export default async function handler(req: Request, res: Response) {
                 ? [{ uploadId: (body.args[0] as Record<string, unknown>).uploadId }]
                 : body.args;
     const requestArgs: unknown[] = body.args;
+    // Direct media uploads: all three steps must use the same path (Apps Script cannot see
+    // a direct upload session), so there is no Apps Script fallback once the Owner is connected.
+    if (MEDIA_UPLOAD_ACTIONS.has(action) && directWritesEnabled()) {
+      const env = await directWriteEnv(authenticatedOwnerId).catch(() => null);
+      if (env) {
+        const started = Date.now();
+        try {
+          const input = requestArgs[0] as Record<string, unknown>;
+          const data = action === 'media.upload.begin' ? await directMediaBegin(input, authenticatedOwnerId, env)
+            : action === 'media.upload.chunk' ? await directMediaChunk(input, authenticatedOwnerId, env)
+              : await directMediaFinalize(input, authenticatedOwnerId, env);
+          console.info(JSON.stringify({ event: 'cxl_direct_media_upload', action, elapsedMs: Date.now() - started }));
+          return send(res, 200, { ok: true, data });
+        } catch (error) {
+          const code = error instanceof DirectWriteError ? error.code : undefined;
+          console.info(JSON.stringify({ event: 'cxl_direct_media_upload_failed', action, code, reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
+          return send(res, ownerErrorStatus(code), { ok: false, error: error instanceof Error ? error.message.slice(0, 300) : 'Media upload failed', ...(code ? { code } : {}) });
+        }
+      }
+    }
     // Direct Google API update (Preview by default). Unsupported cases and unexpected
     // failures fall through to Apps Script, whose idempotent path repairs a partial write.
     if (DIRECT_WRITE_ACTIONS.has(action) && directWritesEnabled()) {
@@ -518,6 +539,13 @@ export default async function handler(req: Request, res: Response) {
         console.info(JSON.stringify({ event: 'cxl_direct_write_failed', action, code, committed: error instanceof DirectWriteError && error.committed, reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
         if (error instanceof DirectWriteError && !error.committed && DIRECT_WRITE_USER_ERRORS.has(error.code))
           return send(res, ownerErrorStatus(error.code), { ok: false, error: error.message, code: error.code });
+        // Media uploaded through the direct path is invisible to Apps Script, so a save that
+        // attaches it cannot fall back; report the failure and let the browser retry.
+        const writeOptions = (action === 'works.create' ? requestArgs[1] : action === 'works.update' ? requestArgs[2] : null) as Record<string, unknown> | null;
+        if (Array.isArray(writeOptions?.mediaIds) && writeOptions.mediaIds.length) {
+          const code = error instanceof DirectWriteError ? error.code : undefined;
+          return send(res, ownerErrorStatus(code), { ok: false, error: error instanceof Error ? error.message.slice(0, 300) : 'Work save failed', ...(code ? { code } : {}) });
+        }
       }
     }
     const verifyWrite = (action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action)) && directOwnerReadsEnabled()
