@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fetchPublicWorksSnapshot } from './google.js';
+import { invalidatePublicReadCache } from './googleDirect.js';
+import { ownerSessionValid } from '../../src/server/cxlGoogleWorkMedia.js';
 
 type Request = IncomingMessage;
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -39,10 +41,14 @@ function previewTiming(res: Response, timing: Awaited<ReturnType<typeof fetchPub
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'GET') return send(res, 405, { ok: false, error: 'Method not allowed' });
   const startedAt = Date.now();
+  // The signed-in Owner asks for `?fresh=1` so a Work just made public shows at once;
+  // guests keep the CDN copy (refreshed within a minute) to protect the Sheets quota.
+  const fresh = new URL(req.url || '/', 'https://cxl.invalid').searchParams.get('fresh') === '1' && ownerSessionValid(req);
   try {
+    if (fresh) invalidatePublicReadCache();
     const { works, timing } = await fetchPublicWorksSnapshot();
     const etag = `"${createHash('sha256').update(JSON.stringify(works)).digest('base64url')}"`;
-    res.setHeader('Cache-Control', PUBLIC_CACHE_CONTROL);
+    res.setHeader('Cache-Control', fresh ? 'private, no-store' : PUBLIC_CACHE_CONTROL);
     res.setHeader('ETag', etag);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     previewTiming(res, timing, Date.now() - startedAt);

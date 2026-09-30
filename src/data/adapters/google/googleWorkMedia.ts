@@ -255,14 +255,21 @@ export function hydrateGoogleWorkMediaResult<T extends { data?: Asset | Asset[] 
   return result;
 }
 
-/** Upload one file at a time, with one <=2 MiB chunk request in flight. */
+/** Files upload up to three at a time; each file sends its <=2 MiB chunks in order. */
 export async function uploadGoogleWorkMedia(
   pending: GooglePendingWorkMedia[],
   { workId }: GoogleWorkMediaUploadOptions
 ): Promise<string[]> {
-  const attachedMediaIds: string[] = [];
-  for (const item of pending) {
-    const bytes = new Uint8Array(await item.blob.arrayBuffer());
+  let next = 0;
+  const worker = async () => {
+    while (next < pending.length) await uploadOneGoogleWorkMedia(pending[next++], workId);
+  };
+  await Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
+  return pending.map(item => item.mediaId);
+}
+
+async function uploadOneGoogleWorkMedia(item: GooglePendingWorkMedia, workId: string): Promise<void> {
+  const bytes = new Uint8Array(await item.blob.arrayBuffer());
     const sha256 = await sha256Hex(bytes);
     const totalChunks = Math.ceil(bytes.length / GOOGLE_WORK_MEDIA_CHUNK_BYTES);
     const begin = await callGoogleBackend<{ uploadId: string; finalized?: boolean }>('media.upload.begin', [{
@@ -284,7 +291,4 @@ export async function uploadGoogleWorkMedia(
       // mediaId lets the server confirm a stalled finalize from Drive; it is not sent to Apps Script.
       await callGoogleBackend('media.upload.finalize', [{ uploadId: begin.uploadId, mediaId: item.mediaId }]);
     }
-    attachedMediaIds.push(item.mediaId);
-  }
-  return attachedMediaIds;
 }

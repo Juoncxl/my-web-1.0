@@ -68,8 +68,9 @@ describe('Google server transport boundary', () => {
     vi.stubGlobal('fetch', fetchMock);
     const result = await googleDataAdapter.works.fetch({ publicOnly: true });
 
+    // Guests (no readable Owner CSRF cookie) use the CDN-cacheable route.
     expect(fetchMock).toHaveBeenCalledWith('/api/cxl/public-works', {
-      method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' }
+      method: 'GET', cache: 'default', credentials: 'same-origin', headers: { Accept: 'application/json' }
     });
     expect(result.data?.map(asset => asset.id)).toEqual(['asset_public']);
     expect(result.data?.[0].content).toBe('public content');
