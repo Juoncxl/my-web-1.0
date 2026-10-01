@@ -58,14 +58,25 @@ function toMediaFile(file: Json): WorkMediaFile {
     sha256: String(file.sha256Checksum || '').toLowerCase(), createdTime: String(file.createdTime || ''), props: (file.appProperties || {}) as Record<string, string> };
 }
 
+const STATE_RANK: Record<string, number> = { attached: 0, finalized: 1, uploading: 2 };
+const SAME_UPLOAD_PROPS = ['cxlWorkId', 'cxlOwner', 'cxlSha256', 'cxlPurpose', 'cxlContextId', 'cxlSortOrder', 'cxlIsCover'];
+
 /** The canonical media file carrying this mediaId in its appProperties (or legacy name), if any. */
 export async function findWorkMediaFile(env: DirectMediaEnv, mediaId: string): Promise<WorkMediaFile | null> {
   if (!UUID_RE.test(mediaId)) return null;
   const query = `appProperties has { key='cxlMediaId' and value='${quote(mediaId)}' } and trashed = false`;
-  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(${FILE_FIELDS})&pageSize=3&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: Json[] };
-  const files = (listed.files || []).filter(file => !String(file.name || '').includes('session'));
-  if (files.length > 1) fail('MEDIA_UPLOAD_DUPLICATE_FILE', 'Work media storage contains duplicate upload files');
-  return files[0] ? toMediaFile(files[0]) : null;
+  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(${FILE_FIELDS})&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: Json[] };
+  const files = (listed.files || []).filter(file => !String(file.name || '').includes('session')).map(toMediaFile);
+  if (files.length <= 1) return files[0] || null;
+  // A retried save could upload the same image twice. Identical copies are healed: keep the
+  // furthest-along (then oldest) and move the rest to Drive trash. Anything else stays an error.
+  const [first] = files;
+  const identical = files.every(file => file.sha256 && file.sha256 === first.sha256 && file.size === first.size && file.mimeType === first.mimeType
+    && SAME_UPLOAD_PROPS.every(key => (file.props[key] || '') === (first.props[key] || '')) && file.props.cxlState in STATE_RANK);
+  if (!identical) fail('MEDIA_UPLOAD_DUPLICATE_FILE', 'Work media storage contains duplicate upload files');
+  const [keep, ...extra] = [...files].sort((a, b) => STATE_RANK[a.props.cxlState] - STATE_RANK[b.props.cxlState] || a.createdTime.localeCompare(b.createdTime));
+  for (const file of extra) await trashDriveFile(env, file.id);
+  return keep;
 }
 
 export async function markWorkMediaState(env: DirectMediaEnv, fileId: string, props: Record<string, string>): Promise<void> {
@@ -138,6 +149,11 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
     const manifest = mediaFileManifest(existing);
     if (!metadataMatches(manifest, input, ownerUserId)) fail('MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT', 'Media identity is already bound to different Work data');
     if (['finalized', 'attached'].includes(manifest.state) && existing.size === input.totalFileSize) return { uploadId: input.uploadId, mediaId: input.mediaId, finalized: true };
+    // Bytes already landed but finalize never ran (e.g. the earlier save timed out): finalize that file instead of uploading a second copy.
+    if (manifest.state === 'uploading' && existing.size === Number(input.totalFileSize)) {
+      await verifyAndFinalize(env, existing, String(input.sha256).toLowerCase(), String(input.mimeType));
+      return { uploadId: input.uploadId, mediaId: input.mediaId, finalized: true };
+    }
   }
   const folderId = await workMediaFolderId(env);
   const known = await findSessionFile(env, folderId, input.uploadId);
@@ -239,6 +255,22 @@ function signatureMime(bytes: Buffer): string {
   return '';
 }
 
+/** Check the stored bytes (checksum + image signature), make the file private and mark it finalized. */
+async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expectedSha256: string, mimeType: string): Promise<void> {
+  let sha256 = file.sha256;
+  let head: Buffer;
+  if (!sha256) {
+    const bytes = Buffer.from(await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(file.id)}?alt=media&supportsAllDrives=true`)).arrayBuffer());
+    sha256 = createHash('sha256').update(bytes).digest('hex'); head = bytes.subarray(0, 16);
+  } else {
+    head = Buffer.from(await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(file.id)}?alt=media&supportsAllDrives=true`, { headers: { Range: 'bytes=0-15' } }, [206])).arrayBuffer());
+  }
+  if (sha256 !== expectedSha256) fail('MEDIA_UPLOAD_FINAL_CHECKSUM', 'Work media checksum did not match');
+  if (signatureMime(head) !== mimeType) fail('MEDIA_UPLOAD_MIME_MISMATCH', 'Work media type did not match its binary signature');
+  await ensurePrivate(env, file.id);
+  if (file.props.cxlState === 'uploading') await markWorkMediaState(env, file.id, { cxlState: 'finalized', cxlFinalizedAt: new Date().toISOString() });
+}
+
 export async function directMediaFinalize(input: Json, ownerUserId: string, env: DirectMediaEnv): Promise<Json> {
   const folderId = await workMediaFolderId(env);
   const known = await findSessionFile(env, folderId, input.uploadId);
@@ -259,18 +291,7 @@ export async function directMediaFinalize(input: Json, ownerUserId: string, env:
     if (!file) fail('MEDIA_UPLOAD_MEDIA_INVALID', 'Uploaded Work media could not be found');
   }
   if (file!.size !== Number(session.totalFileSize)) fail('MEDIA_UPLOAD_CHUNK_CHECKSUM', 'Work media upload size did not match');
-  let sha256 = file!.sha256;
-  let head: Buffer;
-  if (!sha256) {
-    const bytes = Buffer.from(await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(file!.id)}?alt=media&supportsAllDrives=true`)).arrayBuffer());
-    sha256 = createHash('sha256').update(bytes).digest('hex'); head = bytes.subarray(0, 16);
-  } else {
-    head = Buffer.from(await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(file!.id)}?alt=media&supportsAllDrives=true`, { headers: { Range: 'bytes=0-15' } }, [206])).arrayBuffer());
-  }
-  if (sha256 !== String(session.sha256)) fail('MEDIA_UPLOAD_FINAL_CHECKSUM', 'Work media checksum did not match');
-  if (signatureMime(head) !== session.mimeType) fail('MEDIA_UPLOAD_MIME_MISMATCH', 'Work media type did not match its binary signature');
-  await ensurePrivate(env, file!.id);
-  if (file!.props.cxlState === 'uploading') await markWorkMediaState(env, file!.id, { cxlState: 'finalized', cxlFinalizedAt: new Date().toISOString() });
+  await verifyAndFinalize(env, file!, String(session.sha256), String(session.mimeType));
   await drive(env, `${DRIVE_FILES}/${encodeURIComponent(known!.id)}?supportsAllDrives=true`, { method: 'DELETE' }, [404]);
   return { uploadId: input.uploadId, mediaId: session.mediaId, finalized: true };
 }

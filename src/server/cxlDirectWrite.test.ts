@@ -306,6 +306,46 @@ describe('direct Work update', () => {
     expect(media.props?.cxlState).toBe('retired');
   });
 
+  it('finalizes an already-uploaded image on a retried save, and heals identical duplicate uploads', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    google.files.seed = { name: 'cxl-work-media-00000000-0000-4000-8000-000000000000.png', parent: 'mediaFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {} };
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 9)]);
+    const mediaId = '33333333-3333-4333-8333-333333333333';
+    const sha256 = createHash('sha256').update(png).digest('hex');
+    const begin = (uploadId: string) => ({ uploadId, mediaId, workId: WORK, totalFileSize: png.length, rawChunkSize: 2 * 1024 * 1024, totalChunks: 1, mimeType: 'image/png', sha256, purpose: 'gallery', contextId: null, sortOrder: 1, isCover: false });
+    // First save: bytes land in Drive, but finalize never runs.
+    const firstUpload = '44444444-4444-4444-8444-444444444444';
+    await directMediaBegin(begin(firstUpload), OWNER, google.env);
+    await directMediaChunk({ uploadId: firstUpload, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, google.env);
+    const uploaded = () => Object.values(google.files).filter(file => file.props?.cxlMediaId === mediaId && !file.trashed && !file.name.includes('session'));
+    expect(uploaded().map(file => file.props?.cxlState)).toEqual(['uploading']);
+    // Retried save with a fresh upload id: no second copy, the existing file is finalized.
+    await expect(directMediaBegin(begin('55555555-5555-4555-8555-555555555555'), OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+    expect(uploaded().map(file => file.props?.cxlState)).toEqual(['finalized']);
+
+    // A duplicate left by the old behaviour is healed when the Work is saved.
+    const [keepId] = Object.entries(google.files).find(([, file]) => file.props?.cxlMediaId === mediaId)!;
+    google.files.dupe = { ...google.files[keepId], props: { ...google.files[keepId].props, cxlState: 'uploading' }, createdTime: '2026-10-01T01:00:00.000Z' };
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1', `media:${mediaId}`] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: [mediaId] }], OWNER, google.env))
+      .resolves.toMatchObject({ fallback: false });
+    expect(google.files.dupe.trashed).toBe(true);
+    expect(google.files[keepId].props?.cxlState).toBe('attached');
+  });
+
+  it('still refuses two different files claiming the same media id', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const mediaId = '33333333-3333-4333-8333-333333333333';
+    const props = { cxlMediaId: mediaId, cxlWorkId: WORK, cxlOwner: OWNER, cxlPurpose: 'gallery', cxlSortOrder: '1', cxlIsCover: 'false', cxlState: 'finalized', cxlDelivery: 'vercel_proxy' };
+    google.files.a = { name: `cxl-work-media-${mediaId}.png`, parent: 'mediaFolder', bytes: Buffer.from('aaaa'), mimeType: 'image/png', props: { ...props, cxlSha256: 'a' } };
+    google.files.b = { name: `cxl-work-media-${mediaId}.png`, parent: 'mediaFolder', bytes: Buffer.from('bbbb'), mimeType: 'image/png', props: { ...props, cxlSha256: 'b' } };
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1', `media:${mediaId}`] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: [mediaId] }], OWNER, google.env))
+      .rejects.toMatchObject({ code: 'MEDIA_UPLOAD_DUPLICATE_FILE' });
+    expect(google.files.a.trashed).toBeFalsy();
+    expect(google.files.b.trashed).toBeFalsy();
+  });
+
   it('rejects attaching an upload that does not match its placement', async () => {
     const google = fakeGoogle();
     vi.stubGlobal('fetch', google.fetchMock);
