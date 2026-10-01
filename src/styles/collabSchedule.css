@@ -251,6 +251,12 @@
 .dark .cv-schedule-progress.is-late { color: #f2c27a; }
 .dark .cv-schedule-progress.is-overdue,
 .dark .cv-schedule-milestones li.is-overdue time { color: #ff9aab; }
+/* Month mode, "ผ่านไปแล้ว": same rows as the upcoming months, quieter. */
+.cv-schedule-months.is-past .cv-schedule-row { opacity: .72; }
+.cv-schedule-months.is-past .cv-schedule-date,
+.dark .cv-schedule-months.is-past .cv-schedule-date { background: linear-gradient(160deg, #a3b1c6, #8796ad); box-shadow: none; }
+.cv-schedule-months.is-past .cv-schedule-month h2 { font-size: 1.1rem; }
+
 @media (max-width: 720px) {
   .cv-schedule-hero-actions { justify-content: stretch; }
   .cv-schedule-hero-actions .cv-schedule-copy { flex: 1 1 0; justify-content: center; }

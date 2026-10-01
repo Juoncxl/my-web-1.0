@@ -124,6 +124,20 @@ export function groupScheduleByMonth(entries: readonly CollabScheduleEntry[], in
   return [...months.values()];
 }
 
+/** Milestones that have passed, grouped by month, most recent month and day first. */
+export function groupPastScheduleByMonth(entries: readonly CollabScheduleEntry[]): CollabScheduleMonth[] {
+  const months = new Map<string, CollabScheduleMonth>();
+  entries
+    .flatMap(entry => entry.milestones.filter(item => item.daysLeft < 0).map(milestone => ({ entry, milestone })))
+    .sort((a, b) => b.milestone.date.getTime() - a.milestone.date.getTime())
+    .forEach(item => {
+      const key = item.milestone.isoDate.slice(0, 7);
+      if (!months.has(key)) months.set(key, { key, label: formatMonthLabel(item.milestone.date), items: [] });
+      months.get(key)!.items.push(item);
+    });
+  return [...months.values()];
+}
+
 export function formatShortThaiDate(date: Date): string {
   return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
 }
@@ -133,7 +147,7 @@ export function formatMonthLabel(date: Date): string {
 }
 
 export function formatDaysLeft(daysLeft: number): string {
-  if (daysLeft < 0) return 'ผ่านไปแล้ว';
+  if (daysLeft < 0) return `ผ่านไป ${-daysLeft} วัน`;
   if (daysLeft === 0) return 'วันนี้';
   if (daysLeft === 1) return 'พรุ่งนี้';
   return `อีก ${daysLeft} วัน`;
