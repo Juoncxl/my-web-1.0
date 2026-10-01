@@ -29,7 +29,8 @@
 .cv-schedule-widget-item.is-today em, .cv-schedule-row.is-today > em { color: #c02f60; }
 .cv-schedule-widget-item.is-soon em, .cv-schedule-row.is-soon > em { color: #b3591a; }
 
-.cv-schedule-page { display: grid; gap: 1.1rem; }
+/* minmax(0, 1fr): the filter strip and table scroll inside their own box instead of widening the page on phones. */
+.cv-schedule-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.1rem; }
 .cv-schedule-back { display: inline-flex; align-items: center; justify-self: start; gap: .35rem; border: 0; padding: .2rem 0; background: none; color: #6a90b4; font-size: .82rem; font-weight: 800; cursor: pointer; }
 .cv-schedule-back:hover { color: #5b3f8f; }
 .cv-schedule-back svg { width: 1rem; height: 1rem; }
