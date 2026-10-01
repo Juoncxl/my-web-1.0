@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { injectShareMeta, shareImageUrl, shareMeta } from './share';
+import { injectShareMeta, shareImageUrl, shareMeta } from '../../../api/cxl/share';
 
 const ORIGIN = 'https://cxl.example';
 const SHELL = `<!doctype html><html><head>
