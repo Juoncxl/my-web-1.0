@@ -48,7 +48,8 @@ describe('12E.2 final Work Card + Work Detail visual redesign', () => {
     expect(cardSource).toContain('statusMeta.name');
     expect(cardSource).toContain('<h3>{cardTitle}</h3>');
     expect(cardSource).toContain('display.summary || asset.content');
-    expect(cardSource).toContain('className="cv-card-date"');
+    // Cards drop the author/date footer; Work Detail still shows both.
+    expect(cardSource).not.toContain('className="cv-card-footer"');
     expect(redesignStyles).toContain('.cv-card-title-row h3 { color: #01162b; font-size: 1.1rem;');
     expect(redesignStyles).toContain('.cv-card-snippet { min-height: 3.1rem;');
   });

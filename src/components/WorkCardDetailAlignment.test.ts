@@ -12,7 +12,6 @@ const cleanupCss = cssSource.slice(cssSource.indexOf('Phase 1.5N Item 12E.1'));
 describe('12E.1 Work Card and Work Detail presentation cleanup', () => {
   it('uses the explicit cover before gallery media, keeps its source intact, and presents Card cover as a square', () => {
     expect(cardSource).toContain('const mainImage = asset.previewImage || asset.previewImages?.[0];');
-    expect(cardSource).toContain('cv-card-author-avatar-fallback');
     expect(cardSource).not.toContain('images.unsplash.com');
     expect(cleanupCss).toContain('.cv-card-cover { aspect-ratio: 1 / 1; }');
     expect(cssSource).toContain('.cv-card-cover-image { width: 100%; height: 100%; display: block; object-fit: cover;');

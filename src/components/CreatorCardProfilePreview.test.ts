@@ -10,7 +10,6 @@ describe('public Creator identity on Work cards', () => {
   it('loads canonical public profiles for cards instead of restoring legacy avatar blobs', () => {
     expect(collectionSource).toContain('usePublicCreatorProfiles(allAssets, currentUser)');
     expect(collectionSource).toContain('creatorProfile={creatorProfilesById.get(resolvePublicCreatorKey(asset)) || null}');
-    expect(cardSource).toContain('resolveWorkCreator(asset, resolvedCreatorProfile)');
   });
 
   it('loads the same canonical public profile in Work Detail for signed-out visitors', () => {
@@ -20,8 +19,6 @@ describe('public Creator identity on Work cards', () => {
   });
 
   it('opens a compact creator profile without opening the Work card', () => {
-    expect(cardSource).toContain('event.stopPropagation();');
-    expect(cardSource).toContain('onPreviewCreator?.(resolvedCreatorProfile, event.currentTarget)');
     expect(collectionSource).toContain('<CreatorProfilePreview profile={previewCreator} anchor={previewAnchor} onClose={closeCreatorPreview} />');
     expect(previewSource).toContain('ดูโปรไฟล์เต็ม');
     expect(previewSource).toContain('getCanonicalProfilePath(profile)');
