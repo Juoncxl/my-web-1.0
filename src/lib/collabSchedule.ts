@@ -46,6 +46,11 @@ function parseDeadlineDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** Stable milestone key; the Owner's done ticks are stored against it. */
+export function milestoneKey(assetId: string, date: string, label?: string): string {
+  return `${assetId}|${date.slice(0, 10)}|${(label || '').trim()}`;
+}
+
 export function buildCollabSchedule(assets: readonly Asset[], today = new Date()): CollabScheduleEntry[] {
   const base = startOfDay(today).getTime();
   const entries: CollabScheduleEntry[] = [];
@@ -56,7 +61,8 @@ export function buildCollabSchedule(assets: readonly Asset[], today = new Date()
       const date = parseDeadlineDate(deadline.date);
       if (!date) return [];
       return [{
-        id: `${asset.id}:${deadline.id}`,
+        // Public projections drop deadline ids, so key by Work + date + label instead.
+        id: milestoneKey(asset.id, deadline.date, deadline.label),
         label: deadline.label?.trim() || DEFAULT_LABELS[deadline.kind] || DEFAULT_LABELS.custom,
         date,
         isoDate: deadline.date.slice(0, 10),
@@ -142,6 +148,28 @@ export function scheduleUrgency(daysLeft: number): ScheduleUrgency {
   if (daysLeft <= 7) return 'week';
   return 'later';
 }
+
+/** Owner-only progress: milestone key → ISO time it was ticked done. */
+export type CollabProgress = Record<string, string>;
+
+export type MilestoneProgress = 'early' | 'on-time' | 'late' | 'overdue' | 'open';
+
+export function milestoneProgress(milestone: CollabScheduleMilestone, progress: CollabProgress): MilestoneProgress {
+  const doneAt = progress[milestone.id];
+  if (!doneAt) return milestone.daysLeft < 0 ? 'overdue' : 'open';
+  const done = new Date(doneAt);
+  if (Number.isNaN(done.getTime())) return 'open';
+  const doneDay = startOfDay(done).getTime();
+  const dueDay = milestone.date.getTime();
+  return doneDay < dueDay ? 'early' : doneDay === dueDay ? 'on-time' : 'late';
+}
+
+export const MILESTONE_PROGRESS_LABELS: Record<Exclude<MilestoneProgress, 'open'>, string> = {
+  early: 'เสร็จก่อนกำหนด',
+  'on-time': 'เสร็จตรงวัน',
+  late: 'เสร็จหลังกำหนด',
+  overdue: 'เลยกำหนด'
+};
 
 /** Plain-text schedule for pasting into chats or Notion. */
 export function scheduleToText(entries: readonly CollabScheduleEntry[], title = 'กำหนดการคอลแลป'): string {

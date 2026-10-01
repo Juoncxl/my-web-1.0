@@ -224,3 +224,33 @@
   .cv-schedule-table { font-size: .78rem; }
   .cv-schedule-table tbody th { min-width: 10rem; }
 }
+
+/* Owner-only: hero actions, done ticks and progress badges. Visitors render none of these. */
+.cv-schedule-hero-actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; }
+.cv-schedule-progress-error { margin: .75rem 0 0; color: #b4233a; font-size: .8rem; font-weight: 700; }
+.cv-schedule-milestones li:has(.cv-schedule-tick) { grid-template-columns: 1.45rem 4.3rem minmax(0, 1fr) auto; align-items: center; }
+.cv-schedule-tick { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; border: 1.5px solid rgba(106, 144, 180, .55); border-radius: .4rem; padding: 0; background: #fff; color: #fff; cursor: pointer; }
+.cv-schedule-tick.is-checked { border-color: #6fae8f; background: #6fae8f; }
+.cv-schedule-tick:disabled { opacity: .55; cursor: progress; }
+.cv-schedule-tick svg { width: .85rem; height: .85rem; stroke-width: 3; }
+.cv-schedule-progress { display: inline-flex; align-items: center; margin-left: .4rem; border-radius: 999px; padding: .1rem .5rem; font-size: .68rem; font-style: normal; font-weight: 800; line-height: 1.5; text-decoration: none; white-space: nowrap; }
+.cv-schedule-milestones .cv-schedule-progress { margin-left: 0; }
+.cv-schedule-progress.is-early,
+.cv-schedule-progress.is-on-time { background: rgba(111, 174, 143, .16); color: #2f7553; }
+.cv-schedule-progress.is-late { background: rgba(224, 168, 79, .18); color: #8a5a12; }
+.cv-schedule-progress.is-overdue { background: rgba(214, 69, 90, .14); color: #b4233a; }
+.cv-schedule-milestones li.is-done .cv-schedule-progress { display: inline-flex; }
+.cv-schedule-milestones li.is-overdue { background: rgba(214, 69, 90, .07); color: #8d1c2e; font-weight: 700; }
+.cv-schedule-milestones li.is-overdue time { color: #b4233a; }
+.dark .cv-schedule-tick { border-color: rgba(144, 181, 243, .5); background: rgba(10, 27, 55, .9); }
+.dark .cv-schedule-tick.is-checked { border-color: #5fa483; background: #5fa483; }
+.dark .cv-schedule-milestones li.is-overdue { background: rgba(214, 69, 90, .14); color: #ffb3bf; }
+.dark .cv-schedule-progress.is-early,
+.dark .cv-schedule-progress.is-on-time { color: #8fd8b3; }
+.dark .cv-schedule-progress.is-late { color: #f2c27a; }
+.dark .cv-schedule-progress.is-overdue,
+.dark .cv-schedule-milestones li.is-overdue time { color: #ff9aab; }
+@media (max-width: 720px) {
+  .cv-schedule-hero-actions { justify-content: stretch; }
+  .cv-schedule-hero-actions .cv-schedule-copy { flex: 1 1 0; justify-content: center; }
+}

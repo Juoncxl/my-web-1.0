@@ -74,7 +74,7 @@ describe('AssetCard article capture navigation', () => {
   });
   it.each([
     ['cv-bookmark-button', 'onBookmark'], ['cv-like-button', 'onLike'],
-    ['cv-cover-category', 'onSelectCategory'], ['cv-card-author-preview', 'onPreviewCreator'],
+    ['cv-cover-category', 'onSelectCategory'],
     ['cv-more-button', null]
   ])('keeps %s independent during capture', (className, action) => {
     const { article, actions } = render();

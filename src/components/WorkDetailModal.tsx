@@ -650,8 +650,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
               {isOwner && onEdit && <button type="button" className="is-secondary" onClick={() => onEdit(asset)}><Edit3 aria-hidden="true" />แก้ไขผลงาน</button>}
             </>}
           </div>
-          <button type="button" className="is-secondary work-detail-more-toggle" aria-expanded={isMobileActionsOpen} aria-controls="work-detail-secondary-actions" onClick={() => setIsMobileActionsOpen(value => !value)}><MoreHorizontal aria-hidden="true" />เพิ่มเติม</button>
-          <div id="work-detail-secondary-actions" className={`work-detail-secondary-actions ${isMobileActionsOpen ? 'is-open' : ''}`}>
+          {/* Visitors only have Share and Download, so they need no overflow menu. */}
+          {(isOwner || isTrashMode) && <button type="button" className="is-secondary work-detail-more-toggle" aria-expanded={isMobileActionsOpen} aria-controls="work-detail-secondary-actions" onClick={() => setIsMobileActionsOpen(value => !value)}><MoreHorizontal aria-hidden="true" />เพิ่มเติม</button>}
+          <div id="work-detail-secondary-actions" className={`work-detail-secondary-actions ${isMobileActionsOpen || !(isOwner || isTrashMode) ? 'is-open' : ''}`}>
             {isTrashMode && onPermanentDelete && <button type="button" className="is-danger" onClick={() => setIsPermanentDeleteConfirmationOpen(true)}><Trash2 aria-hidden="true" />ลบถาวร</button>}
             {!isTrashMode && !isOwner && onFork && <button type="button" className="is-secondary" onClick={() => onFork(asset)}><GitFork aria-hidden="true" />Fork</button>}
             {!isTrashMode && isOwner && onMoveToFolder && <button type="button" className="is-secondary" onClick={() => onMoveToFolder(asset)}><FolderInput aria-hidden="true" />ย้ายไปโฟลเดอร์</button>}

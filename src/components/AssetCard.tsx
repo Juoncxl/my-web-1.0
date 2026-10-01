@@ -1,10 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Asset, AssetCategory, PublicAssetCollaboration, User } from '../types';
-import { resolveWorkCreator } from '../lib/workPresentation';
 import { isPublicFeedVisibility, isValidWorkIcon } from '../lib/assetVisibility';
-import { useAuth } from '../context/AuthContext';
 import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
-import { formatShortDate } from '../lib/dateUtils';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import {
   Bookmark as BookmarkIcon,
@@ -119,7 +116,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   onDelete,
   onLike,
   onBookmark,
-  onFork,
   onReport,
   onRestore,
   onPermanentDelete,
@@ -131,8 +127,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   isBookmarked = false,
   isLiked = false,
   isTrashMode = false,
-  creatorProfile = null,
-  onPreviewCreator,
   allAssets = [],
   viewerMode = 'public',
   interactionMode = 'live',
@@ -140,7 +134,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   categoryLabelOverride,
   collaborationDisplayContext
 }) => {
-  const { currentUser } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   const [iconFailed, setIconFailed] = useState(false);
@@ -189,8 +182,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const mainImage = asset.previewImage || asset.previewImages?.[0];
   const snippetSource = display.isCollaborationFocused ? asset.shortDescription || '' : display.summary || asset.content;
   const snippet = snippetSource.replace(/[#*`_]/g, '').trim();
-  const resolvedCreatorProfile = creatorProfile || (isOwner || currentUser?.id === asset.userId ? currentUser : null);
-  const creator = resolveWorkCreator(asset, resolvedCreatorProfile);
   const linkedCollaboration = asset.collaborationAssetId
     ? allAssets.find(candidate => candidate.id === asset.collaborationAssetId && candidate.category === 'collab')
     : undefined;
@@ -224,7 +215,8 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     callback?.();
   };
 
-  const handleShare = () => {
+  const handleShare = (event: React.MouseEvent) => {
+    event.stopPropagation();
     const url = getWorkShareUrl(asset.id, window.location.origin);
     if (typeof navigator.share === 'function') {
       void navigator.share({ title: cardTitle, url }).catch(() => undefined);
@@ -236,11 +228,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const handleCategoryClick =(event: React.MouseEvent) => {
     event.stopPropagation();
     onSelectCategory?.(asset.category);
-  };
-
-  const handleCreatorPreview = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (resolvedCreatorProfile) onPreviewCreator?.(resolvedCreatorProfile, event.currentTarget);
   };
 
   const handleCardSurfaceClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -334,6 +321,21 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             <h3>{cardTitle}</h3>
             {asset.forkedFromAuthor && <p className="cv-fork-note"><GitFork className="w-3 h-3" />โคลนจาก @{asset.forkedFromAuthor}</p>}
           </div>
+          {/* The Owner gets a management menu; visitors get a one-tap share. */}
+          {(isOwner || isTrashMode) && <div ref={menuRef} className="cv-card-menu-wrap cv-card-title-menu">
+            <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
+            {menuOpen && (
+              <div data-card-action className="cv-card-menu" onClick={event => event.stopPropagation()}>
+                {!isTrashMode && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}
+                {!isTrashMode && onOpenMoveToFolder && <button type="button" onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}><FolderInput className="w-3.5 h-3.5" />ย้ายไปยังโฟลเดอร์</button>}
+                {!isTrashMode && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}
+                {isTrashMode && onRestore && <button type="button" onClick={handleMenuAction(() => onRestore(asset.id))}><RotateCcw className="w-3.5 h-3.5" />กู้คืนผลงาน</button>}
+                {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => setIsPermanentDeleteConfirmationOpen(true))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
+                {folderName && <span className="cv-card-menu-folder">{folderIcon || '📁'} {folderName}</span>}
+              </div>
+            )}
+          </div>}
+          {!isOwner && !isTrashMode && interactionMode === 'live' && <button type="button" onClick={handleShare} aria-label="แชร์ผลงาน" className="cv-more-button cv-card-share-button"><Share2 className="w-4 h-4" /></button>}
         </div>
 
         {snippet && <p className="cv-card-snippet">{snippet}</p>}
@@ -343,35 +345,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           <span>คอลแลป</span><strong>{visibleLinkedCollaboration.publicCollaboration?.name || visibleLinkedCollaboration.title}</strong>
         </div>}
 
-        <footer className="cv-card-footer">
-          {resolvedCreatorProfile && onPreviewCreator ? <button type="button" className="cv-card-author cv-card-author-preview" onClick={handleCreatorPreview} aria-label={`ดูโปรไฟล์ย่อของ ${creator.displayName}`}>
-            {creator.avatarUrl ? <img src={creator.avatarUrl} alt="" referrerPolicy="no-referrer" /> : <span className="cv-card-author-avatar-fallback" aria-hidden="true">{getTitleMark(creator.displayName)}</span>}
-            <span className="min-w-0"><span>{creator.displayName}</span></span>
-          </button> : <div className="cv-card-author">
-            {creator.avatarUrl ? <img src={creator.avatarUrl} alt="" referrerPolicy="no-referrer" /> : <span className="cv-card-author-avatar-fallback" aria-hidden="true">{getTitleMark(creator.displayName)}</span>}
-            <div className="min-w-0"><p>{creator.displayName}</p></div>
-          </div>}
-
-          <time className="cv-card-date" dateTime={asset.createdAt}>{formatShortDate(asset.createdAt)}</time>
-
-          <div className="cv-card-actions">
-            <div ref={menuRef} className="cv-card-menu-wrap">
-              <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
-              {menuOpen && (
-                <div data-card-action className="cv-card-menu" onClick={event => event.stopPropagation()}>
-                  {!isTrashMode && !isOwner && onFork && <button type="button" onClick={handleMenuAction(() => onFork(asset))}><GitFork className="w-3.5 h-3.5" />Fork เข้าคลังของฉัน</button>}
-                  {!isTrashMode && !isOwner && interactionMode === 'live' && <button type="button" onClick={handleMenuAction(handleShare)}><Share2 className="w-3.5 h-3.5" />แชร์ผลงาน</button>}
-                  {!isTrashMode && isOwner && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}
-                  {!isTrashMode && isOwner && onOpenMoveToFolder && <button type="button" onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}><FolderInput className="w-3.5 h-3.5" />ย้ายไปยังโฟลเดอร์</button>}
-                  {!isTrashMode && isOwner && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}
-                  {isTrashMode && onRestore && <button type="button" onClick={handleMenuAction(() => onRestore(asset.id))}><RotateCcw className="w-3.5 h-3.5" />กู้คืนผลงาน</button>}
-                  {isTrashMode && onPermanentDelete && <button type="button" onClick={handleMenuAction(() => setIsPermanentDeleteConfirmationOpen(true))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ลบถาวร</button>}
-                  {folderName && <span className="cv-card-menu-folder">{folderIcon || '📁'} {folderName}</span>}
-                </div>
-              )}
-            </div>
-          </div>
-        </footer>
       </div>
     </article>
     <ConfirmationDialog

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import handler from './public-works';
+import handler from '../../../api/cxl/public-works';
 
 const makeWork = (id: string, overrides: Record<string, unknown> = {}) => ({
   id, userId: 'creator-1', authorName: 'Creator', title: id, category: 'character', status: 'finished',

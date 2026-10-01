@@ -23,8 +23,9 @@ describe('Work Card three-dot menu dismissal', () => {
   });
 
   it('routes the other menu actions through the existing closing handler', () => {
-    expect(assetCardSource).toContain('onClick={handleMenuAction(() => onFork(asset))}');
-    expect(assetCardSource).toContain('onClick={handleMenuAction(handleShare)}');
+    // The card menu is Owner/Trash only; visitors get a one-tap share button instead.
+    expect(assetCardSource).toContain('{(isOwner || isTrashMode) && <div ref={menuRef}');
+    expect(assetCardSource).toContain('className="cv-more-button cv-card-share-button"');
     expect(assetCardSource).not.toContain('รายงานผลงาน');
     expect(assetCardSource).toContain('onClick={handleMenuAction(() => onEdit(asset))}');
     expect(assetCardSource).toContain('onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}');

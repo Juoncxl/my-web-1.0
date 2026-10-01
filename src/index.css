@@ -10356,7 +10356,7 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
   .cv-shell-header > div > .flex > .flex-1 { order: 3; width: 100%; max-width: none; flex: 1 1 100%; margin-inline: 0; }
 }
 @media (max-width: 767px) {
-  .cv-asset-grid .cv-card-cover { aspect-ratio: 4 / 3; }
+  .cv-asset-grid .cv-card-cover { aspect-ratio: 1 / 1; }
   .cv-asset-grid .cv-card-body { padding: .7rem .75rem .65rem; }
   .cv-asset-grid .cv-card-snippet { display: -webkit-box; margin-top: .3rem; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .cv-asset-grid .cv-card-footer { margin-top: .55rem; padding-top: .5rem; }
@@ -10403,3 +10403,15 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .dark .work-detail-collaboration-chips .work-detail-copy-button,
 .dark .work-detail-collaboration-scope > span { border-color: rgba(214, 190, 255, .5); background: rgba(177, 153, 219, .22); color: #f1e6ff; }
 .dark .work-detail-collaboration-chips .work-detail-copy-button:hover { background: rgba(177, 153, 219, .34); }
+
+/* Card ⋯ menu lives at the end of the title row (Owner only). */
+.cv-card-title-row .cv-card-title-menu { flex: none; margin-left: auto; }
+.cv-card-title-row .cv-card-title-menu .cv-card-menu { top: calc(100% + .35rem); bottom: auto; }
+
+/* Visitors: Share and Download side by side on phones, no overflow menu. */
+@media (max-width: 720px) {
+  .work-detail-footer[data-work-detail-actions="visitor"] .work-detail-footer-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-detail-footer[data-work-detail-actions="visitor"] .work-detail-primary-actions { grid-template-columns: minmax(0, 1fr); }
+  .work-detail-footer[data-work-detail-actions="visitor"] .work-detail-secondary-actions { display: contents; }
+  .work-detail-footer[data-work-detail-actions="visitor"] .work-detail-download-menu > button { width: 100%; min-height: 2.35rem; font-size: .68rem; }
+}

@@ -6,6 +6,10 @@
       "destination": "/privacy.html"
     },
     {
+      "source": "/work/:id",
+      "destination": "/api/cxl/share?id=:id"
+    },
+    {
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }
