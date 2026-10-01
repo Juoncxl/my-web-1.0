@@ -6,8 +6,8 @@ import { directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerRe
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
-import { DirectWriteError, directCreateWork, directSetTrash, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
-import { directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
+import { DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
+import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -301,8 +301,8 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
 }
-const DIRECT_WRITE_ACTIONS = new Set(['works.update', 'works.create', 'works.softDelete', 'works.restore']);
-const DIRECT_WRITE_USER_ERRORS = new Set(['REVISION_CONFLICT','REVISION_REQUIRED','INVALID_WORK','INVALID_COLLAB_DRAFT','INVALID_FOLDER','WORK_NOT_FOUND','WORK_NOT_OWNED','INDEX_ROW_AMBIGUOUS','UNSUPPORTED_MEDIA_MUTATION','IDEMPOTENCY_KEY_REUSED']);
+const DIRECT_WRITE_ACTIONS = new Set(['works.update', 'works.create', 'works.softDelete', 'works.restore', 'works.permanentDelete']);
+const DIRECT_WRITE_USER_ERRORS = new Set(['WORK_NOT_IN_TRASH','REVISION_CONFLICT','REVISION_REQUIRED','INVALID_WORK','INVALID_COLLAB_DRAFT','INVALID_FOLDER','WORK_NOT_FOUND','WORK_NOT_OWNED','INDEX_ROW_AMBIGUOUS','UNSUPPORTED_MEDIA_MUTATION','IDEMPOTENCY_KEY_REUSED']);
 
 function directWritesEnabled(): boolean {
   const setting = process.env.CXL_DIRECT_WRITES?.trim().toLowerCase();
@@ -323,6 +323,20 @@ async function directWriteEnv(ownerUserId: string): Promise<DirectWriteEnv | nul
     privateSheetId, publicSheetId, publicCreatorId: config.publicCreatorId,
     ownerFolderIds: async () => (await directOwnerFolders(ownerUserId)).data.map(folder => String(folder.id))
   };
+}
+
+let lastMediaCleanupAt = 0;
+
+/** At most hourly per instance, after a successful save: trash retired/orphaned direct uploads. */
+async function cleanupWorkMediaHourly(env: DirectWriteEnv): Promise<void> {
+  if (Date.now() - lastMediaCleanupAt < 60 * 60 * 1000) return;
+  lastMediaCleanupAt = Date.now();
+  try {
+    const result = await cleanupWorkMedia(env);
+    console.info(JSON.stringify({ event: 'cxl_direct_media_cleanup', trashed: result.trashed }));
+  } catch (error) {
+    console.info(JSON.stringify({ event: 'cxl_direct_media_cleanup_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' }));
+  }
 }
 
 /** Keeps the Apps Script public fallback snapshot fresh; the web reads the public sheet directly. */
@@ -526,11 +540,13 @@ export default async function handler(req: Request, res: Response) {
             // Create uses the exact args Apps Script would receive (Owner userId injected) so a
             // fallback retry recognises the same request by its fingerprint.
             : action === 'works.create' ? await directCreateWork(ownerArgs, authenticatedOwnerId, env)
-              : await directSetTrash(action as 'works.softDelete' | 'works.restore', requestArgs[0], authenticatedOwnerId, env);
+              : action === 'works.permanentDelete' ? await directPermanentDelete(requestArgs[0], authenticatedOwnerId, env)
+                : await directSetTrash(action as 'works.softDelete' | 'works.restore', requestArgs[0], authenticatedOwnerId, env);
           console.info(JSON.stringify({ event: 'cxl_direct_write', action, elapsedMs: Date.now() - started, used: !result.fallback, reason: result.fallback ? result.reason : undefined }));
           if (result.fallback === false) {
             const saved = result.data;
             await rebuildPublicSnapshotSoon(endpoint.toString(), secret, authenticatedOwnerId);
+            await cleanupWorkMediaHourly(env);
             return send(res, 200, { ok: true, data: saved });
           }
         }

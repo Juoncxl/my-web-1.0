@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
-import { directMediaBegin, directMediaChunk, directMediaFinalize } from './cxlDirectMedia';
+import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
+import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from './cxlDirectMedia';
+import { sniffCreatorMediaType } from '../components/creator/creatorMediaModel';
 
 const PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_version','search_chunk_count','search_index_token'];
 const PUBLIC_HEADERS = ['id','title','category','status','updated_at','tags','short_description','file_id','active','cover_ref','summary_json'];
@@ -23,7 +24,7 @@ function fakeGoogle() {
       WorkCreatorMap: [['schemaVersion','workId','publicCreatorId'], [1, WORK, 'cxlc_' + 'a'.repeat(32)]]
     }
   };
-  type FakeFile = { name: string; parent: string; content?: unknown; bytes?: Buffer; mimeType?: string; props?: Record<string, string>; perms?: { id: string; type: string; role?: string }[] };
+  type FakeFile = { name: string; parent: string; content?: unknown; bytes?: Buffer; mimeType?: string; props?: Record<string, string>; perms?: { id: string; type: string; role?: string }[]; trashed?: boolean; createdTime?: string };
   const sessions: Record<string, { meta: Record<string, any>; total: number; received: Buffer; fileId?: string }> = {};
   const files: Record<string, FakeFile> = {
     rec3: { name: `${WORK}__r3.json`, parent: 'privFolder', content: {
@@ -49,12 +50,16 @@ function fakeGoogle() {
     if (url.hostname === 'sheets.googleapis.com' && sheetMatch) {
       const book = sheets[decodeURIComponent(sheetMatch[1])];
       const op = decodeURIComponent(url.pathname).includes(':append') ? 'append' : sheetMatch[3];
+      const tabs = Object.keys(book).map((title, index) => ({ properties: { sheetId: index, title: title || 'Index', index } }));
       if (op === 'batchUpdate') {
         const { requests } = JSON.parse(String(init.body));
-        requests.forEach((r: { deleteDimension: { range: { startIndex: number } } }) => book.OwnerSearchIndex.splice(r.deleteDimension.range.startIndex, 1));
+        requests.forEach((r: { deleteDimension: { range: { sheetId: number; startIndex: number } } }) => {
+          const title = Object.keys(book)[r.deleteDimension.range.sheetId];
+          book[title].splice(r.deleteDimension.range.startIndex, 1);
+        });
         return ok({});
       }
-      if (!sheetMatch[2]) return ok({ sheets: [{ properties: { sheetId: 0, title: 'Index' } }, { properties: { sheetId: 7, title: 'OwnerSearchIndex' } }] });
+      if (!sheetMatch[2]) return ok({ sheets: tabs });
       const range = decodeURIComponent(sheetMatch[2]).replace(/:append$/, '');
       const { sheet, r1, r2, c1, c2 } = parse(range);
       const grid = book[sheet];
@@ -73,7 +78,7 @@ function fakeGoogle() {
     const describe = (id: string) => {
       const f = files[id];
       return { id, name: f.name, parents: [f.parent], size: String(f.bytes?.length ?? 0), mimeType: f.mimeType || 'application/json',
-        sha256Checksum: f.bytes ? createHash('sha256').update(f.bytes).digest('hex') : undefined, createdTime: '2026-10-01T00:00:00.000Z', appProperties: f.props };
+        sha256Checksum: f.bytes ? createHash('sha256').update(f.bytes).digest('hex') : undefined, createdTime: f.createdTime || '2026-10-01T00:00:00.000Z', appProperties: f.props };
     };
     // Resumable upload sessions (media bytes).
     if (url.hostname === 'upload.test') {
@@ -108,11 +113,14 @@ function fakeGoogle() {
     if (url.pathname === '/drive/v3/files') {
       const q = url.searchParams.get('q')!;
       const prop = q.match(/appProperties has \{ key='([^']+)' and value='([^']+)' \}/);
-      const parent = q.match(/'([^']+)' in parents/)?.[1], name = q.match(/name = '([^']+)'/)?.[1];
+      const parent = q.match(/'([^']+)' in parents/)?.[1], name = q.match(/name = '([^']+)'/)?.[1], contains = q.match(/name contains '([^']+)'/)?.[1];
       const matches = Object.keys(files).filter(id => {
         const f = files[id];
+        if (f.trashed) return false;
         if (prop) return f.props?.[prop[1]] === prop[2];
+        if (q.includes("name contains 'cxl-work-media-session-'")) return f.name.startsWith('cxl-work-media-session-');
         if (q.includes("name contains 'cxl-work-media-'")) return /^cxl-work-media-[a-f0-9-]{36}\./.test(f.name);
+        if (contains) return f.parent === parent && f.name.includes(contains);
         return f.parent === parent && f.name === name;
       });
       return ok({ files: matches.map(describe) });
@@ -128,7 +136,12 @@ function fakeGoogle() {
     if (fileMatch) {
       const file = files[fileMatch[1]];
       if (init.method === 'DELETE') { delete files[fileMatch[1]]; return new Response(null, { status: 204 }); }
-      if (init.method === 'PATCH') { file.props = { ...file.props, ...JSON.parse(String(init.body)).appProperties }; return ok({ id: fileMatch[1] }); }
+      if (init.method === 'PATCH') {
+        const patch = JSON.parse(String(init.body));
+        if (patch.trashed) file.trashed = true;
+        file.props = { ...file.props, ...patch.appProperties };
+        return ok({ id: fileMatch[1] });
+      }
       if (url.searchParams.get('alt') === 'media') {
         if (file.bytes) {
           const range = headers.get('range')?.match(/bytes=(\d+)-(\d+)/);
@@ -317,6 +330,48 @@ describe('direct Work update', () => {
     expect(google.files.legacyFile.perms).toEqual([]);
     expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('false');
     expect(google.sheets.priv[''][1][PRIVATE_HEADERS.indexOf('is_public')]).toBe('false');
+  });
+
+  it('permanently deletes a trashed Work: index and search rows, public row, creator map, revision files and its uploads', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const record = google.files.rec3.content as Record<string, any>;
+    record.mediaRecords.push({ id: 'up1', asset_id: WORK, purpose: 'gallery', delivery: 'vercel_proxy', drive_file_id: 'upFile' });
+    record.mediaRecords.push({ id: 'legacy', purpose: 'gallery', drive_file_id: 'legacyFile' });
+    google.files.upFile = { name: 'cxl-work-media-up1.png', parent: 'mediaFolder', bytes: Buffer.from('x') };
+    google.files.legacyFile = { name: 'legacy.png', parent: 'old', bytes: Buffer.from('x') };
+    await expect(directPermanentDelete(WORK, OWNER, google.env)).rejects.toMatchObject({ code: 'WORK_NOT_IN_TRASH' });
+
+    await directSetTrash('works.softDelete', WORK, OWNER, google.env);
+    await expect(directPermanentDelete(WORK, OWNER, google.env)).resolves.toMatchObject({ data: { success: true, alreadyMissing: false } });
+    expect(google.sheets.priv[''].some(row => row[0] === WORK)).toBe(false);
+    expect(google.sheets.priv.OwnerSearchIndex.some(row => row[0] === WORK)).toBe(false);
+    expect(google.sheets.priv.OwnerSearchIndex.some(row => row[0] === 'asset_other')).toBe(true);
+    expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('active')]).toBe('false');
+    expect(google.sheets.pub.WorkCreatorMap.some(row => row[1] === WORK)).toBe(false);
+    expect(Object.values(google.files).filter(file => file.name.startsWith(`${WORK}__r`)).every(file => file.trashed)).toBe(true);
+    expect(google.files.upFile.trashed).toBe(true);
+    expect(google.files.legacyFile.trashed).toBeFalsy();
+    await expect(directPermanentDelete(WORK, OWNER, google.env)).resolves.toMatchObject({ data: { alreadyMissing: true } });
+  });
+
+  it('trashes retired, never-attached and abandoned uploads after 24 hours only', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const now = Date.parse('2026-10-03T00:00:00.000Z');
+    google.files.oldRetired = { name: 'cxl-work-media-a.png', parent: 'm', props: { cxlState: 'retired', cxlRetiredAt: '2026-10-01T00:00:00.000Z' } };
+    google.files.newRetired = { name: 'cxl-work-media-b.png', parent: 'm', props: { cxlState: 'retired', cxlRetiredAt: '2026-10-02T12:00:00.000Z' } };
+    google.files.orphan = { name: 'cxl-work-media-c.png', parent: 'm', props: { cxlState: 'finalized', cxlFinalizedAt: '2026-10-01T00:00:00.000Z' } };
+    google.files.attached = { name: 'cxl-work-media-d.png', parent: 'm', props: { cxlState: 'attached', cxlFinalizedAt: '2026-09-01T00:00:00.000Z' } };
+    await expect(cleanupWorkMedia(google.env, now)).resolves.toEqual({ trashed: 2 });
+    expect([google.files.oldRetired.trashed, google.files.newRetired.trashed, google.files.orphan.trashed, google.files.attached.trashed]).toEqual([true, undefined, true, undefined]);
+  });
+
+  it('recognises images by their bytes, including GIFs a browser reports without a type', () => {
+    expect(sniffCreatorMediaType(new TextEncoder().encode('GIF89a......'))).toBe('image/gif');
+    expect(sniffCreatorMediaType(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('image/png');
+    expect(sniffCreatorMediaType(new TextEncoder().encode('RIFF....WEBP'))).toBe('image/webp');
+    expect(sniffCreatorMediaType(new TextEncoder().encode('<svg>'))).toBe('');
   });
 
   it('rejects a stale revision without writing', async () => {

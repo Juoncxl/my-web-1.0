@@ -19,7 +19,7 @@ import {
   CREATOR_MEDIA_MAX_ITEMS,
   getCoverMedia,
   isSupportedCreatorGlobalMediaFile,
-  isSupportedCreatorMediaFile,
+  resolveCreatorMediaType,
   mediaDraftToPreviewImages,
   removeMediaItem,
   replaceMediaItem,
@@ -529,7 +529,17 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     if (!isSupportedCreatorGlobalMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 10MB ต่อรูป'); return; }
     setMediaDraft(previous => replaceMediaItem(previous, itemId, createMediaItem(URL.createObjectURL(file), file.type, itemId, crypto.randomUUID())));
   };
-  const handleIconFile = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !isSupportedCreatorMediaFile(file)) { setError('รองรับไฟล์ PNG, JPG, WebP หรือ GIF ขนาดไม่เกิน 10MB'); return; } setIconImage(URL.createObjectURL(file)); setIconStorageKey(undefined); setIconMimeType(file.type); setIconMediaId(crypto.randomUUID()); setIconKind(file.type === 'image/gif' ? 'gif' : 'image'); event.target.value = ''; };
+  const handleIconFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.target;
+    const file = input.files?.[0];
+    // The file's bytes decide its type: Windows often reports GIFs with an empty or wrong `file.type`.
+    const mimeType = file ? await resolveCreatorMediaType(file) : '';
+    input.value = '';
+    if (!file || !mimeType) { setError('รองรับไฟล์ PNG, JPG, WebP หรือ GIF ขนาดไม่เกิน 10MB'); return; }
+    const typed = file.type === mimeType ? file : new File([file], file.name, { type: mimeType });
+    setError('');
+    setIconImage(URL.createObjectURL(typed)); setIconStorageKey(undefined); setIconMimeType(mimeType); setIconMediaId(crypto.randomUUID()); setIconKind(mimeType === 'image/gif' ? 'gif' : 'image');
+  };
   const addTag = () => { const clean = tagInput.trim().replace(/^#/, ''); if (!clean || tags.includes(clean) || tags.length >= 10) return; setTags(previous => [...previous, clean]); setTagInput(''); };
   const addPlatform = () => { const clean = platformInput.trim(); if (!clean || appPlatforms.includes(clean)) return; setAppPlatforms(previous => [...previous, clean]); setPlatformInput(''); };
   const addWarning = () => { const clean = warningInput.trim(); if (!clean || contentWarnings.includes(clean)) return; setContentWarnings(previous => [...previous, clean]); setWarningInput(''); };

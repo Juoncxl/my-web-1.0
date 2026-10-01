@@ -191,6 +191,46 @@ export async function directMediaChunk(input: Json, ownerUserId: string, env: Di
   return { uploadId: input.uploadId, chunkIndex: input.chunkIndex, stored: true, idempotent: false };
 }
 
+/** Move a Drive file to the Owner's trash (recoverable for 30 days). */
+export async function trashDriveFile(env: DirectMediaEnv, fileId: string): Promise<void> {
+  await drive(env, `${DRIVE_FILES}/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true })
+  }, [404]);
+}
+
+const CLEANUP_AFTER_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_MAX_ITEMS = 10;
+
+async function listFiles(env: DirectMediaEnv, query: string): Promise<Json[]> {
+  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(${FILE_FIELDS},modifiedTime)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: Json[] };
+  return listed.files || [];
+}
+
+/**
+ * Port of mediaWorkCleanup_ for direct uploads: after 24 hours, trash media files a
+ * Work stopped using ("retired"), uploads that were never attached ("finalized"),
+ * and abandoned upload sessions. Trashed files stay recoverable in Drive for 30 days.
+ */
+export async function cleanupWorkMedia(env: DirectMediaEnv, now = Date.now()): Promise<{ trashed: number }> {
+  const cutoff = now - CLEANUP_AFTER_MS;
+  const stamp = (value: unknown) => Date.parse(String(value || '')) || 0;
+  const candidates: string[] = [];
+  for (const file of await listFiles(env, "appProperties has { key='cxlState' and value='retired' } and trashed = false")) {
+    if (stamp(file.appProperties?.cxlRetiredAt) && stamp(file.appProperties?.cxlRetiredAt) < cutoff) candidates.push(file.id);
+  }
+  for (const state of ['finalized', 'uploading']) {
+    for (const file of await listFiles(env, `appProperties has { key='cxlState' and value='${state}' } and trashed = false`)) {
+      if (stamp(file.appProperties?.cxlFinalizedAt || file.createdTime) < cutoff) candidates.push(file.id);
+    }
+  }
+  for (const file of await listFiles(env, `name contains 'cxl-work-media-session-' and modifiedTime < '${new Date(cutoff).toISOString()}' and trashed = false`)) {
+    candidates.push(file.id);
+  }
+  let trashed = 0;
+  for (const id of candidates.slice(0, CLEANUP_MAX_ITEMS)) { await trashDriveFile(env, id); trashed++; }
+  return { trashed };
+}
+
 function signatureMime(bytes: Buffer): string {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
