@@ -490,6 +490,8 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     setRequestedTab(tab);
     setSelectedFolderId(null);
     if (tab !== 'profile') setAddItemOpen(false);
+    // App chooses the Works query from the URL (Trash needs deleted Works); tell it the route changed.
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
   const setPublicPreview = (enabled: boolean) => {
     const url = new URL(window.location.href);

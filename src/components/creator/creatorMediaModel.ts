@@ -49,6 +49,27 @@ export function isSupportedCreatorMediaFile(file: { type: string; size: number }
   return CREATOR_MEDIA_MIME_TYPES.has(file.type.toLowerCase()) && file.size > 0 && file.size <= CREATOR_MEDIA_MAX_FILE_BYTES;
 }
 
+/** Image type from the file's own bytes; '' when it is not a supported image. */
+export function sniffCreatorMediaType(head: Uint8Array): string {
+  const ascii = (start: number, end: number) => String.fromCharCode(...head.subarray(start, end));
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+  if (head.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, index) => head[index] === byte)) return 'image/png';
+  if (head.length >= 6 && ['GIF87a', 'GIF89a'].includes(ascii(0, 6))) return 'image/gif';
+  if (head.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  return '';
+}
+
+/**
+ * The real image type of a picked file. Browsers derive `file.type` from the
+ * extension (often empty on Windows, or wrong for renamed files), while the
+ * server checks the bytes, so the bytes decide here too.
+ */
+export async function resolveCreatorMediaType(file: Blob & { size: number }): Promise<string> {
+  if (file.size <= 0 || file.size > CREATOR_MEDIA_MAX_FILE_BYTES) return '';
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  return sniffCreatorMediaType(head);
+}
+
 /** Global Work media v1 deliberately accepts static images only. Legacy GIF
  * entries remain readable so existing local drafts are never silently lost. */
 export function isSupportedCreatorGlobalMediaFile(file: { type: string; size: number }): boolean {

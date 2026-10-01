@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
-import { findWorkMediaFile, markWorkMediaState, setLegacyMediaSharing, type WorkMediaFile } from './cxlDirectMedia.js';
+import { findWorkMediaFile, markWorkMediaState, setLegacyMediaSharing, trashDriveFile, type WorkMediaFile } from './cxlDirectMedia.js';
 
 /**
  * Direct Work update (step 3.1 of the Apps Script → Google API migration).
@@ -802,6 +802,85 @@ export async function directSetTrash(action: 'works.softDelete' | 'works.restore
     throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true);
   }
   return { fallback: false, data: { success: true, error: null } };
+}
+
+// --------------------------------------------------------- permanent delete
+
+/** Sheet tab IDs by title; '' is the first tab (where the Index lives). */
+async function sheetTabIds(env: DirectWriteEnv, spreadsheetId: string): Promise<Record<string, number>> {
+  const meta = await (await google(env, `${sheetsBase(spreadsheetId)}?fields=sheets.properties(sheetId,title,index)`)).json() as { sheets?: { properties?: { sheetId?: number; title?: string; index?: number } }[] };
+  const ids: Record<string, number> = {};
+  (meta.sheets || []).forEach(sheet => {
+    const p = sheet.properties || {};
+    if (p.title !== undefined && p.sheetId !== undefined) ids[p.title] = p.sheetId;
+    if (p.index === 0 && p.sheetId !== undefined) ids[''] = p.sheetId;
+  });
+  return ids;
+}
+
+/** Delete 1-based sheet rows, bottom-up so earlier indices stay valid. */
+async function deleteSheetRows(env: DirectWriteEnv, spreadsheetId: string, sheetId: number | undefined, rowNumbers: number[]): Promise<void> {
+  if (sheetId === undefined || !rowNumbers.length) return;
+  const requests = [...new Set(rowNumbers)].sort((a, b) => b - a).map(row => ({ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: row - 1, endIndex: row } } }));
+  await google(env, `${sheetsBase(spreadsheetId)}:batchUpdate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) });
+}
+
+/** Port of trashWorkRevisionFiles_: every `<workId>__r*.json` in the folder. */
+async function trashRevisionFiles(env: DirectWriteEnv, folderId: string | null, workId: string): Promise<void> {
+  if (!folderId) return;
+  const query = `'${folderId.replace(/['\\]/g, '\\$&')}' in parents and name contains '${workId}__r' and trashed = false`;
+  const listed = await (await google(env, `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: { id: string; name: string }[] };
+  for (const file of listed.files || []) if (file.name.startsWith(`${workId}__r`) && /\.json$/i.test(file.name)) await trashDriveFile(env, file.id);
+}
+
+/** Port of mutateCxlWorkDeletionApi_('works.permanentDelete') + finishPermanentWorkDelete_. */
+export async function directPermanentDelete(workId: unknown, ownerUserId: string, env: DirectWriteEnv): Promise<{ fallback: false; data: { success: true; error: null; alreadyMissing: boolean } }> {
+  const id = String(workId || '');
+  if (!/^asset_[A-Za-z0-9_-]{1,96}$/.test(id)) fail('INVALID_WORK', 'Work ID is invalid');
+  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+  const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+  if (rowNumbers.length > 1) fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows');
+  let record: Json = null;
+  let privateFolderId: string | null = null;
+  if (rowNumbers.length) {
+    const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+    const fileId = String(indexed.file_id || '');
+    record = fileId ? await driveJson(env, fileId) : null;
+    if (!record) fail('WORK_NOT_FOUND', 'Work was not found');
+    const asset = cxlAssetFromRecord(record);
+    if (String(record.row?.user_id || asset.userId || '') !== ownerUserId) fail('WORK_NOT_OWNED', 'Work is not owned by this authenticated Owner');
+    if (String(record.row?.id) !== id) fail('WORK_NOT_FOUND', 'Work was not found');
+    if (!record.row.deleted_at) fail('WORK_NOT_IN_TRASH', 'Move the Work to Trash before permanent deletion');
+    privateFolderId = await driveParent(env, fileId);
+    // Commit point: remove the search rows, then the index row.
+    const tabs = await sheetTabIds(env, env.privateSheetId);
+    const searchHeaders = await sheetHeaders(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`);
+    if (searchHeaders.includes('work_id')) await deleteSheetRows(env, env.privateSheetId, tabs[OWNER_SEARCH_SHEET], await findRows(env, env.privateSheetId, `${OWNER_SEARCH_SHEET}!`, searchHeaders, 'work_id', id));
+    const confirm = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+    await deleteSheetRows(env, env.privateSheetId, tabs[''], confirm);
+  } else {
+    privateFolderId = await folderOfIndexedFiles(env, env.privateSheetId, privateHeaders);
+  }
+
+  try {
+    // Media first, while the record still says which files belonged to this Work.
+    for (const media of record?.mediaRecords || []) {
+      if (media?.delivery === 'vercel_proxy' && media.drive_file_id && String(media.asset_id || id) === id) await trashDriveFile(env, String(media.drive_file_id));
+    }
+    await deactivatePublicWork(env, id);
+    const mapHeaders = await sheetHeaders(env, env.publicSheetId, 'WorkCreatorMap!');
+    if (mapHeaders.includes('workId')) {
+      const publicTabs = await sheetTabIds(env, env.publicSheetId);
+      await deleteSheetRows(env, env.publicSheetId, publicTabs.WorkCreatorMap, await findRows(env, env.publicSheetId, 'WorkCreatorMap!', mapHeaders, 'workId', id));
+    }
+    const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
+    const publicFolderId = await folderOfIndexedFiles(env, env.publicSheetId, publicHeaders);
+    await trashRevisionFiles(env, privateFolderId, id);
+    await trashRevisionFiles(env, publicFolderId, id);
+  } catch (error) {
+    throw new DirectWriteError(error instanceof Error ? error.message : 'Permanent delete cleanup failed', 'PUBLIC_SYNC_PENDING', true);
+  }
+  return { fallback: false, data: { success: true, error: null, alreadyMissing: rowNumbers.length === 0 } };
 }
 
 async function removeStaleSearchChunks(env: DirectWriteEnv, workId: string, keepToken: string, headers: string[]): Promise<void> {
