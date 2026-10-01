@@ -2266,7 +2266,7 @@ function saveCxlWorkApi_(operation,payload,options,ownerUserId) {
   if(!ownerUserId)apiFail_('OWNER_REQUIRED','Authenticated Owner is required');
   if(!options||!/^([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(String(options.requestId||'')))apiFail_('INVALID_REQUEST_ID','A stable requestId is required');
   var mediaIds=options.mediaIds===undefined?[]:options.mediaIds;
-  if(!Array.isArray(mediaIds)||mediaIds.length>20||mediaIds.some(function(id,index){return !mediaPocUuid_(id)||mediaIds.indexOf(id)!==index;}))apiFail_('INVALID_MEDIA_UPLOAD_REQUEST','Work media attachment list is invalid');
+  if(!Array.isArray(mediaIds)||mediaIds.length>100||mediaIds.some(function(id,index){return !mediaPocUuid_(id)||mediaIds.indexOf(id)!==index;}))apiFail_('INVALID_MEDIA_UPLOAD_REQUEST','Work media attachment list is invalid');
   var requestId=String(options.requestId).toLowerCase(),assetInput=operation==='create'?payload:payload&&payload.updates,id=operation==='create'?'asset_'+requestId.replace(/-/g,'' ):String(payload&&payload.id||'');
   if(operation==='update'&&!mediaWorkOwnerSnapshotInvalidate_(id))apiFail_('WORK_MEDIA_CACHE_INVALIDATION_FAILED','Work update could not safely invalidate its media authorization cache');
   validateCxlWritePayload_(assetInput,operation);
