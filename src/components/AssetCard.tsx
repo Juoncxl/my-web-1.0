@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Asset, AssetCategory, PublicAssetCollaboration, User } from '../types';
 import { isPublicFeedVisibility, isValidWorkIcon } from '../lib/assetVisibility';
 import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
@@ -135,6 +135,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   collaborationDisplayContext
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpensUp, setMenuOpensUp] = useState(false);
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   const [iconFailed, setIconFailed] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
@@ -199,8 +200,20 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     if (interactionMode === 'live') onBookmark?.(asset.id);
   };
 
+  // The menu opens below ⋯; on the last card row it would run off the screen, so it flips above before paint.
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const menu = menuRef.current?.querySelector<HTMLElement>('.cv-card-menu');
+    const button = menuRef.current?.querySelector<HTMLElement>('.cv-more-button');
+    if (!menu || !button) return;
+    const below = window.innerHeight - button.getBoundingClientRect().bottom;
+    const above = button.getBoundingClientRect().top;
+    if (menu.offsetHeight + 12 > below && above > below) setMenuOpensUp(true);
+  }, [menuOpen]);
+
   const handleMenuToggle = (event: React.MouseEvent) => {
     event.stopPropagation();
+    setMenuOpensUp(false);
     if (menuOpen) {
       setMenuOpen(false);
       return;
@@ -325,7 +338,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           {(isOwner || isTrashMode) && <div ref={menuRef} className="cv-card-menu-wrap cv-card-title-menu">
             <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
             {menuOpen && (
-              <div data-card-action className="cv-card-menu" onClick={event => event.stopPropagation()}>
+              <div data-card-action className={menuOpensUp ? 'cv-card-menu opens-up' : 'cv-card-menu'} onClick={event => event.stopPropagation()}>
                 {!isTrashMode && onEdit && <button type="button" onClick={handleMenuAction(() => onEdit(asset))}><FileEdit className="w-3.5 h-3.5" />แก้ไขผลงาน</button>}
                 {!isTrashMode && onOpenMoveToFolder && <button type="button" onClick={handleMenuAction(() => onOpenMoveToFolder(asset))}><FolderInput className="w-3.5 h-3.5" />ย้ายไปยังโฟลเดอร์</button>}
                 {!isTrashMode && onDelete && <button type="button" onClick={handleMenuAction(() => onDelete(asset))} className="is-danger"><Trash2 className="w-3.5 h-3.5" />ย้ายไปถังขยะ</button>}

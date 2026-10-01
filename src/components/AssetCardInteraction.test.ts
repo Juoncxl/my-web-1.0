@@ -7,6 +7,7 @@ vi.mock('react', async importOriginal => ({
   ...await importOriginal<typeof import('react')>(),
   useState: vi.fn(initial => [initial, vi.fn()]),
   useEffect: vi.fn(),
+  useLayoutEffect: vi.fn(),
   useRef: vi.fn(() => ({ current: null }))
 }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));

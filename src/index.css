@@ -10407,6 +10407,7 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 /* Card ⋯ menu lives at the end of the title row (Owner only). */
 .cv-card-title-row .cv-card-title-menu { flex: none; margin-left: auto; }
 .cv-card-title-row .cv-card-title-menu .cv-card-menu { top: calc(100% + .35rem); bottom: auto; }
+.cv-card-title-row .cv-card-title-menu .cv-card-menu.opens-up { top: auto; bottom: calc(100% + .35rem); }
 
 /* Visitors: Share and Download side by side on phones, no overflow menu. */
 @media (max-width: 720px) {

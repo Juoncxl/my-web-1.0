@@ -5,6 +5,7 @@ import {
   collectSchedulePlatforms,
   filterScheduleByPlatform,
   formatDaysLeft,
+  groupPastScheduleByMonth,
   groupScheduleByMonth,
   scheduleToText,
   upcomingMilestones
@@ -59,6 +60,13 @@ describe('Collab schedule', () => {
   });
 
   it('describes countdowns in Thai', () => {
-    expect([formatDaysLeft(0), formatDaysLeft(1), formatDaysLeft(4), formatDaysLeft(-1)]).toEqual(['วันนี้', 'พรุ่งนี้', 'อีก 4 วัน', 'ผ่านไปแล้ว']);
+    expect([formatDaysLeft(0), formatDaysLeft(1), formatDaysLeft(4), formatDaysLeft(-3)]).toEqual(['วันนี้', 'พรุ่งนี้', 'อีก 4 วัน', 'ผ่านไป 3 วัน']);
+  });
+
+  it('groups passed milestones by month, most recent first, including past steps of ongoing Collabs', () => {
+    const withPastStep = [...assets, collab('mixed', 'ยังไม่จบ', [], [['📋 ส่งข้อมูล', '2026-09-20'], ['🚀 เผยแพร่', '2026-11-01']]), collab('aug', 'เดือนก่อน', [], [['🚀 เผยแพร่', '2026-08-10']])];
+    const months = groupPastScheduleByMonth(buildCollabSchedule(withPastStep, today));
+    expect(months.map(month => month.key)).toEqual(['2026-09', '2026-08']);
+    expect(months[0].items.map(item => item.milestone.isoDate)).toEqual(['2026-09-20', '2026-09-01']);
   });
 });

@@ -7,6 +7,7 @@ import {
   filterScheduleByPlatform,
   formatDaysLeft,
   formatShortThaiDate,
+  groupPastScheduleByMonth,
   groupScheduleByMonth,
   MILESTONE_PROGRESS_LABELS,
   milestoneProgress,
@@ -14,6 +15,7 @@ import {
   scheduleUrgency,
   type CollabProgress,
   type CollabScheduleEntry,
+  type CollabScheduleMonth,
   type CollabScheduleMilestone
 } from '../lib/collabSchedule';
 import { fetchCollabProgress, saveCollabProgress } from '../lib/collabProgress';
@@ -94,6 +96,31 @@ const ScheduleTable: React.FC<{ entries: CollabScheduleEntry[]; owner: OwnerProg
   </div>
 );
 
+/** Month-by-month rows; the upcoming list and the passed list share this look. */
+const ScheduleMonths: React.FC<{ months: CollabScheduleMonth[]; owner: OwnerProgress | null; onOpen: (asset: Asset) => void; isPast?: boolean }> = ({ months, owner, onOpen, isPast = false }) => (
+  <div className={`cv-schedule-months ${isPast ? 'is-past' : ''}`}>
+    {months.map(month => (
+      <section key={month.key} className="cv-schedule-month">
+        <h2>{month.label}</h2>
+        <ol>
+          {month.items.map(({ entry, milestone }) => (
+            <li key={milestone.id}>
+              <button type="button" className={`cv-schedule-row is-${scheduleUrgency(milestone.daysLeft)}`} onClick={() => onOpen(entry.asset)}>
+                <span className="cv-schedule-date" aria-hidden="true"><strong>{milestone.date.getDate()}</strong><small>{milestone.date.toLocaleDateString('th-TH', { weekday: 'short' })}</small></span>
+                <span className="cv-schedule-row-copy">
+                  <strong>{entry.name}</strong>
+                  <span>{milestone.label}{entry.platforms.length ? ` · ${entry.platforms.join(', ')}` : ''}</span>
+                </span>
+                <em>{formatDaysLeft(milestone.daysLeft)}<ProgressBadge milestone={milestone} owner={owner} /></em>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))}
+  </div>
+);
+
 const ScheduleCard: React.FC<{ entry: CollabScheduleEntry; owner: OwnerProgress | null; onOpen: () => void }> = ({ entry, owner, onOpen }) => {
   const urgency = entry.next ? scheduleUrgency(entry.next.daysLeft) : 'past';
   return (
@@ -161,6 +188,7 @@ export const CollabSchedulePage: React.FC<CollabSchedulePageProps> = ({ assets, 
   const upcoming = visible.filter(entry => entry.next);
   const past = visible.filter(entry => !entry.next);
   const months = useMemo(() => groupScheduleByMonth(visible), [visible]);
+  const pastMonths = useMemo(() => groupPastScheduleByMonth(visible), [visible]);
   const scheduleTitle = platform ? `กำหนดการคอลแลป · ${platform}` : 'กำหนดการคอลแลป';
 
   const toggle = (milestone: CollabScheduleMilestone) => {
@@ -179,7 +207,12 @@ export const CollabSchedulePage: React.FC<CollabSchedulePageProps> = ({ assets, 
       .finally(() => setPending(current => { const next = new Set(current); next.delete(milestone.id); return next; }));
   };
   const owner: OwnerProgress | null = isOwner ? { progress, pending, toggle } : null;
-  const overduePast = owner ? past.reduce((count, entry) => count + entry.milestones.filter(item => milestoneProgress(item, progress) === 'overdue').length, 0) : 0;
+  // Month mode lists every passed milestone (ongoing Collabs included); the card modes list finished Collabs.
+  const pastMilestones = pastMonths.flatMap(month => month.items.map(item => item.milestone));
+  const pastCount = mode === 'month' ? pastMilestones.length : past.length;
+  const overduePast = !owner ? 0 : mode === 'month'
+    ? pastMilestones.filter(item => milestoneProgress(item, progress) === 'overdue').length
+    : past.reduce((count, entry) => count + entry.milestones.filter(item => milestoneProgress(item, progress) === 'overdue').length, 0);
 
   const handleCopy = async () => {
     const copied = await copyPlainText(scheduleToText(upcoming, scheduleTitle)).catch(() => false);
@@ -249,35 +282,18 @@ export const CollabSchedulePage: React.FC<CollabSchedulePageProps> = ({ assets, 
           : mode === 'agenda' ? <>
             {upcoming.length ? <div className="cv-schedule-grid">{upcoming.map(entry => <ScheduleCard key={entry.asset.id} entry={entry} owner={owner} onOpen={() => onOpenAsset(entry.asset)} />)}</div>
               : <p className="cv-schedule-empty">ไม่มีกำหนดการที่กำลังจะถึง</p>}
-          </> : <div className="cv-schedule-months">
-            {months.length ? months.map(month => (
-              <section key={month.key} className="cv-schedule-month">
-                <h2>{month.label}</h2>
-                <ol>
-                  {month.items.map(({ entry, milestone }) => (
-                    <li key={milestone.id}>
-                      <button type="button" className={`cv-schedule-row is-${scheduleUrgency(milestone.daysLeft)}`} onClick={() => onOpenAsset(entry.asset)}>
-                        <span className="cv-schedule-date" aria-hidden="true"><strong>{milestone.date.getDate()}</strong><small>{milestone.date.toLocaleDateString('th-TH', { weekday: 'short' })}</small></span>
-                        <span className="cv-schedule-row-copy">
-                          <strong>{entry.name}</strong>
-                          <span>{milestone.label}{entry.platforms.length ? ` · ${entry.platforms.join(', ')}` : ''}</span>
-                        </span>
-                        <em>{formatDaysLeft(milestone.daysLeft)}<ProgressBadge milestone={milestone} owner={owner} /></em>
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-              </section>
-            )) : <p className="cv-schedule-empty">ไม่มีกำหนดการที่กำลังจะถึง</p>}
-          </div>}
+          </> : months.length ? <ScheduleMonths months={months} owner={owner} onOpen={onOpenAsset} />
+            : <p className="cv-schedule-empty">ไม่มีกำหนดการที่กำลังจะถึง</p>}
 
-      {past.length > 0 && mode !== 'table' && (
+      {pastCount > 0 && mode !== 'table' && (
         <div className="cv-schedule-past">
           <button type="button" aria-expanded={showPast} onClick={() => setShowPast(value => !value)}>
-            <ChevronDown aria-hidden="true" className={showPast ? 'is-open' : ''} />ผ่านไปแล้ว ({past.length})
+            <ChevronDown aria-hidden="true" className={showPast ? 'is-open' : ''} />ผ่านไปแล้ว ({pastCount})
             {overduePast > 0 && <span className="cv-schedule-progress is-overdue">ค้าง {overduePast}</span>}
           </button>
-          {showPast && <div className="cv-schedule-grid">{past.map(entry => <ScheduleCard key={entry.asset.id} entry={entry} owner={owner} onOpen={() => onOpenAsset(entry.asset)} />)}</div>}
+          {showPast && (mode === 'month'
+            ? <ScheduleMonths months={pastMonths} owner={owner} onOpen={onOpenAsset} isPast />
+            : <div className="cv-schedule-grid">{past.map(entry => <ScheduleCard key={entry.asset.id} entry={entry} owner={owner} onOpen={() => onOpenAsset(entry.asset)} />)}</div>)}
         </div>
       )}
     </section>
