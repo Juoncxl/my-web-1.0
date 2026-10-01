@@ -508,12 +508,8 @@ function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, mediaIds
   if (now.inline) fail('UNSUPPORTED_MEDIA_MUTATION', 'Inline media must be uploaded before saving a Work.');
   const uniqueRefs = [...new Set(now.refs)];
   const oldRefs = existing ? [...new Set(mediaReferences(existing).refs)] : [];
-  const removed = oldRefs.filter(ref => !uniqueRefs.includes(ref));
-  if (removed.some(ref => {
-    if (!ref.startsWith('media:')) return true;
-    const media = (existing?.media || []).find((item: Json) => item && item.id === ref.slice(6));
-    return !media || media.delivery !== 'vercel_proxy';
-  })) fail('UNSUPPORTED_MEDIA_MUTATION', 'Only attached Google Work media can be replaced or removed in this flow.');
+  // Any image may leave the Work (legacy ones included). Only the reference goes:
+  // legacy files stay in Drive/Supabase and their media records are kept.
   const newRefs = uniqueRefs.filter(ref => !oldRefs.includes(ref));
   if (newRefs.some(ref => !ref.startsWith('media:'))) fail('UNSUPPORTED_MEDIA_MUTATION', 'New legacy media references are not supported.');
   const newIds = newRefs.map(ref => ref.slice(6)).sort();
