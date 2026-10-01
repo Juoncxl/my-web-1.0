@@ -232,8 +232,10 @@ async function publicReadRequest(action: string, args: unknown[], ownerUserId?: 
 function validRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 }
+/** New images attached in one save; a Collab can carry several reference images per participant. */
+const MAX_NEW_WORK_MEDIA_PER_SAVE = 100;
 function validMediaIds(value: unknown): boolean {
-  return value === undefined || (Array.isArray(value) && value.length <= 20
+  return value === undefined || (Array.isArray(value) && value.length <= MAX_NEW_WORK_MEDIA_PER_SAVE
     && value.every(id => validRequestId(id)) && new Set(value).size === value.length);
 }
 function validMediaUploadArgs(action: string, args: unknown[]): boolean {

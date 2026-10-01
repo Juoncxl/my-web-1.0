@@ -522,10 +522,16 @@ function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, mediaIds
 async function attachWorkMedia(record: Json, asset: Json, mediaIds: string[], workId: string, ownerUserId: string, env: DirectWriteEnv): Promise<WorkMediaFile[]> {
   const placements = mediaReferenceMap(asset);
   if (new Set(mediaIds).size !== mediaIds.length || mediaIds.some(id => !REQUEST_ID_RE.test(id))) fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media attachment list is invalid');
+  // Look the files up a few at a time: a Collab save can attach dozens of images.
+  const found = new Map<string, WorkMediaFile | null>();
+  for (let start = 0; start < mediaIds.length; start += 8) {
+    const batch = mediaIds.slice(start, start + 8);
+    (await Promise.all(batch.map(id => findWorkMediaFile(env, id)))).forEach((file, index) => found.set(batch[index], file));
+  }
   const attached: WorkMediaFile[] = [];
   for (const id of mediaIds) {
     const placement = placements[id];
-    const file = await findWorkMediaFile(env, id);
+    const file = found.get(id) || null;
     const p = file?.props || {};
     const matches = placement && placement.references.some(ref => ref.purpose === p.cxlPurpose && String(ref.contextId || '') === String(p.cxlContextId || '')
       && Number(ref.sortOrder) === Number(p.cxlSortOrder) && Boolean(ref.isCover) === (p.cxlIsCover === 'true'));
@@ -581,7 +587,9 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
 
 /** After the commit point: record attach/retire state on the media files (best effort, like Apps Script manifests). */
 async function markMediaAfterCommit(env: DirectWriteEnv, attached: WorkMediaFile[], retiredIds: string[], previousRecords: Json[], workId: string, revision: number): Promise<void> {
-  for (const file of attached) await markWorkMediaState(env, file.id, { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) });
+  for (let start = 0; start < attached.length; start += 8) {
+    await Promise.all(attached.slice(start, start + 8).map(file => markWorkMediaState(env, file.id, { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) })));
+  }
   for (const id of retiredIds) {
     const media = previousRecords.find(m => m.id === id);
     if (media?.drive_file_id) await markWorkMediaState(env, String(media.drive_file_id), { cxlState: 'retired', cxlRetiredAt: new Date().toISOString(), cxlRetiredRevision: String(revision) }).catch(() => undefined);
