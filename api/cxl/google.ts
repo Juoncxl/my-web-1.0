@@ -360,7 +360,7 @@ function ownerErrorStatus(code: unknown): number {
   if (code === 'OWNER_REQUIRED') return 401;
   if (code === 'MEDIA_UPLOAD_NOT_CONFIGURED' || code === 'MEDIA_UPLOAD_FOLDER_NOT_PRIVATE') return 503;
   if (code === 'WORK_MEDIA_CACHE_INVALIDATION_FAILED') return 503;
-  if (code === 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' || code === 'MEDIA_UPLOAD_SESSION_EXPIRED' || code === 'MEDIA_UPLOAD_SESSION_CLOSED') return 409;
+  if (code === 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' || code === 'MEDIA_UPLOAD_SESSION_EXPIRED' || code === 'MEDIA_UPLOAD_SESSION_CLOSED' || code === 'MEDIA_UPLOAD_DUPLICATE_FILE') return 409;
   if (code === 'MEDIA_UPLOAD_CHUNK_CHECKSUM' || code === 'MEDIA_UPLOAD_CHUNK_CONFLICT' || code === 'MEDIA_UPLOAD_FINAL_CHECKSUM' || code === 'MEDIA_UPLOAD_MIME_MISMATCH') return 422;
   if (typeof code === 'string' && code.startsWith('INVALID_MEDIA_UPLOAD')) return 400;
   if (code === 'INVALID_FOLDER' || code === 'INVALID_WORK' || code === 'INVALID_COLLAB_DRAFT' || code === 'INVALID_REQUEST_ID' || code === 'REVISION_REQUIRED') return 400;
