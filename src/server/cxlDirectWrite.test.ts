@@ -306,16 +306,29 @@ describe('direct Work update', () => {
     expect(media.props?.cxlState).toBe('retired');
   });
 
-  it('rejects attaching an upload that does not match its placement, and removing legacy media', async () => {
+  it('rejects attaching an upload that does not match its placement', async () => {
     const google = fakeGoogle();
     vi.stubGlobal('fetch', google.fetchMock);
     await expect(directUpdateWork([WORK, { previewImages: ['media:m1', 'media:33333333-3333-4333-8333-333333333333'] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: ['33333333-3333-4333-8333-333333333333'] }], OWNER, google.env))
       .rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
+  });
+
+  it('removes legacy images from an old Work while keeping their files and media records', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const hashRef = `cxl-media:${'a'.repeat(64)}`;
     const record = (google.files.rec3.content as Record<string, any>);
-    record.mediaRecords.push({ id: 'legacy', purpose: 'gallery', drive_file_id: 'legacyFile', sharing_access: 'public' });
-    record.cxlAsset.previewImages = ['media:m1', 'media:legacy'];
-    await expect(directUpdateWork([WORK, { previewImages: ['media:m1'] }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env))
-      .rejects.toMatchObject({ code: 'UNSUPPORTED_MEDIA_MUTATION' });
+    record.mediaRecords.push({ id: 'legacy', purpose: 'gallery', drive_file_id: 'legacyFile', storage_path: 'old/path', sharing_access: 'public' });
+    record.row.preview_images = ['media:m1', 'media:legacy', hashRef];
+    record.cxlAsset.previewImages = ['media:m1', 'media:legacy', hashRef];
+    record.cxlAsset.icon = { type: 'image', value: hashRef };
+    google.files.legacyFile = { name: 'legacy.png', parent: 'old', bytes: Buffer.from('x'), perms: [{ id: 'anyone1', type: 'anyone', role: 'reader' }] };
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1'], icon: { type: 'emoji', value: '⭐' } }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env))
+      .resolves.toMatchObject({ fallback: false, data: { data: { previewImages: ['media:m1'] } } });
+    const r4 = Object.values(google.files).find(file => file.name === `${WORK}__r4.json` && file.parent === 'privFolder')!.content as Record<string, any>;
+    expect(r4.mediaRecords.map((m: { id: string }) => m.id)).toEqual(['m1', 'legacy']);
+    expect(google.files.legacyFile.trashed).toBeFalsy();
+    expect(google.files.legacyFile.perms).toEqual([]);
   });
 
   it('turns a public Work private: legacy images lose their public link and the public row is deactivated', async () => {

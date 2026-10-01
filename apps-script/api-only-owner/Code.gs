@@ -1742,12 +1742,7 @@ function mediaWorkSyncPlacementMetadata_(record) {
 function rejectUnsupportedWorkMedia_(asset,existing,mediaIds) {
   var refs=mediaWorkAllReferences_(asset),uniqueRefs=refs.filter(function(ref,index){return refs.indexOf(ref)===index;});
   var oldRefs=existing?mediaWorkAllReferences_(existing):[],oldSet={};oldRefs.forEach(function(ref){oldSet[ref]=true;});
-  var removedRefs=oldRefs.filter(function(ref,index){return oldRefs.indexOf(ref)===index&&uniqueRefs.indexOf(ref)<0;});
-  if(removedRefs.some(function(ref){
-    if(ref.indexOf('media:')!==0)return true;
-    var id=ref.slice(6),media=(existing&&existing.media||[]).filter(function(item){return item&&item.id===id;})[0];
-    return !media||media.delivery!=='vercel_proxy';
-  }))apiFail_('UNSUPPORTED_MEDIA_MUTATION','Only attached Google Work media can be replaced or removed in this flow.');
+  // Any image may leave the Work (legacy ones included); legacy files and their media records are kept.
   var newRefs=uniqueRefs.filter(function(ref){return !oldSet[ref];});
   var newMediaIds=newRefs.filter(function(ref){return ref.indexOf('media:')===0;}).map(function(ref){return ref.slice(6);}).sort();
   if(newRefs.some(function(ref){return ref.indexOf('media:')!==0;}))apiFail_('UNSUPPORTED_MEDIA_MUTATION','New legacy media references are not supported.');
