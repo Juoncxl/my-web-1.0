@@ -620,7 +620,7 @@ function MainApp() {
               </div>
             )}
             {isScheduleRoute
-              ? <CollabSchedulePage assets={assets} isLoading={isLoadingAssets} onBack={() => navigate('/')} onOpenAsset={handleOpenAssetView} />
+              ? <CollabSchedulePage assets={assets} isLoading={isLoadingAssets} isOwner={Boolean(currentUser)} onBack={() => navigate('/')} onOpenAsset={handleOpenAssetView} />
               : <DiscoverPage collectionProps={collectionProps} onOpenSchedule={() => { navigate('/schedule'); window.scrollTo({ top: 0 }); }} />}
           </main>
 
