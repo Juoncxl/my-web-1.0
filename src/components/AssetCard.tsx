@@ -14,8 +14,10 @@ import {
   Lock,
   MoreHorizontal,
   RotateCcw,
+  Share2,
   Trash2
 } from 'lucide-react';
+import { getWorkShareUrl } from '../lib/workSharing';
 import { getWorkDisplayPresentation, type CollaborationDisplayContext } from '../lib/workDisplayPresentation';
 import { shouldOpenAssetCardFromTarget } from './assetCardInteraction';
 
@@ -213,6 +215,16 @@ export const AssetCard: React.FC<AssetCardProps> = ({
     callback?.();
   };
 
+  const handleShare = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    const url = getWorkShareUrl(asset.id, window.location.origin);
+    if (typeof navigator.share === 'function') {
+      void navigator.share({ title: cardTitle, url }).catch(() => undefined);
+      return;
+    }
+    void navigator.clipboard?.writeText(url).then(() => window.alert('คัดลอกลิงก์ผลงานแล้ว'), () => window.prompt('คัดลอกลิงก์ผลงาน', url));
+  };
+
   const handleCategoryClick =(event: React.MouseEvent) => {
     event.stopPropagation();
     onSelectCategory?.(asset.category);
@@ -309,7 +321,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
             <h3>{cardTitle}</h3>
             {asset.forkedFromAuthor && <p className="cv-fork-note"><GitFork className="w-3 h-3" />โคลนจาก @{asset.forkedFromAuthor}</p>}
           </div>
-          {/* Only the Owner manages Works; visitors share from the detail view. */}
+          {/* The Owner gets a management menu; visitors get a one-tap share. */}
           {(isOwner || isTrashMode) && <div ref={menuRef} className="cv-card-menu-wrap cv-card-title-menu">
             <button type="button" onClick={handleMenuToggle} aria-expanded={menuOpen} aria-label="การทำงานเพิ่มเติม" className="cv-more-button"><MoreHorizontal className="w-4 h-4" /></button>
             {menuOpen && (
@@ -323,6 +335,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
               </div>
             )}
           </div>}
+          {!isOwner && !isTrashMode && interactionMode === 'live' && <button type="button" onClick={handleShare} aria-label="แชร์ผลงาน" className="cv-more-button cv-card-share-button"><Share2 className="w-4 h-4" /></button>}
         </div>
 
         {snippet && <p className="cv-card-snippet">{snippet}</p>}
