@@ -1954,7 +1954,7 @@ button.csp-music-menu:hover, button.csp-music-menu:focus-visible { outline: 0; b
   }
 }
 
-/* Creator Space parity surface. Values follow creator-space-preview.html; data remains production-backed. */
+/* Creator Space parity surface. Values follow docs/design-archive/creator-space-preview.html; data remains production-backed. */
 .csp-route { min-width: 0; background: radial-gradient(circle at 8% 10%, rgba(168, 147, 239, .15), transparent 25rem), radial-gradient(circle at 90% 75%, rgba(83, 192, 218, .12), transparent 28rem), var(--cv-page); }
 .dark .csp-route { background: radial-gradient(circle at 8% 10%, rgba(83, 91, 193, .18), transparent 23rem), radial-gradient(circle at 92% 72%, rgba(43, 157, 191, .14), transparent 28rem), var(--cv-page); }
 .csp-main { min-width: 0; }

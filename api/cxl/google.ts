@@ -7,6 +7,8 @@ import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 import { DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
+import { clientIp, PUBLIC_API_RATE_LIMIT, rateLimitRetryAfter } from '../../src/server/rateLimit.js';
+import { publicErrorMessage, RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
 
 type Request = IncomingMessage & { body?: unknown };
@@ -427,6 +429,11 @@ export async function fetchPublicWorkDetail(assetId: string) {
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
+  // Signed-out callers share a per-IP budget; the Owner's own requests are never limited.
+  if (!verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE)) && !req.headers.authorization) {
+    const retryAfter = rateLimitRetryAfter(`api:${clientIp(req)}`, PUBLIC_API_RATE_LIMIT);
+    if (retryAfter) { res.setHeader('Retry-After', String(retryAfter)); return send(res, 429, { ok: false, error: RATE_LIMITED_MESSAGE }); }
+  }
   let body: unknown;
   try { body = parseBody(req); } catch { return send(res, 400, { ok: false, error: 'Malformed JSON request' }); }
   if (!record(body) || typeof body.action !== 'string' || !Array.isArray(body.args))
@@ -438,16 +445,19 @@ export default async function handler(req: Request, res: Response) {
     if (!validPublicActionArgs(action, body.args)) return send(res, 400, { ok: false, error: `Invalid ${action} request` });
     try {
       const response = await publicOwnerGasRequest(`public.${action}`, body.args);
-      if (!record(response) || response.ok !== true) return send(res, ownerErrorStatus(record(response) ? response.code : undefined), {
-        ok: false, error: record(response) && typeof response.error === 'string' ? response.error.slice(0, 300) : 'Google public read failed',
-        ...(record(response) && typeof response.code === 'string' ? { code: response.code } : {})
-      });
+      if (!record(response) || response.ok !== true) {
+        const status = ownerErrorStatus(record(response) ? response.code : undefined);
+        console.info(JSON.stringify({ event: 'cxl_public_read_failed', action, status, reason: record(response) && typeof response.error === 'string' ? response.error.slice(0, 120) : 'malformed' }));
+        return send(res, status, { ok: false, error: publicErrorMessage(status),
+          ...(record(response) && typeof response.code === 'string' ? { code: response.code } : {}) });
+      }
       return send(res, 200, { ok: true, data: response.data });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Google public read failed';
       const status = record(error) && typeof error.status === 'number' ? error.status
         : (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
-      return send(res, status, { ok: false, error: message.slice(0, 300) });
+      console.info(JSON.stringify({ event: 'cxl_public_read_failed', action, status, reason: message.slice(0, 120) }));
+      return send(res, status, { ok: false, error: publicErrorMessage(status) });
     }
   }
   if (OWNER_ACTIONS.has(action)) {
@@ -735,7 +745,8 @@ export default async function handler(req: Request, res: Response) {
     const code = error instanceof Error ? (error as Error & { apiCode?: unknown }).apiCode : undefined;
     const status = code ? ownerErrorStatus(code) : record(error) && typeof error.status === 'number' ? error.status
       : (error instanceof Error && error.name === 'TimeoutError') || /time.?out/i.test(message) ? 504 : 502;
-    return send(res, status, { ok: false, error: message.slice(0, 300), ...(code ? { code } : {}) });
+    if (!ownerScope) console.info(JSON.stringify({ event: 'cxl_public_read_failed', action: 'works.fetch', status, reason: message.slice(0, 120) }));
+    return send(res, status, { ok: false, error: ownerScope ? message.slice(0, 300) : publicErrorMessage(status), ...(code ? { code } : {}) });
   }
 }
 

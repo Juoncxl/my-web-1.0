@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import handler from '../../../api/cxl/google';
 import { createOwnerSessionToken } from '../../../src/server/cxlOwnerAuth';
+import { resetRateLimitsForTests } from '../../../src/server/rateLimit';
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ auth: { getUser: async (token: string) => token === 'owner-session'
@@ -24,6 +25,7 @@ function invoke(body: unknown, authorization?: string, method = 'POST', extraHea
 
 describe('Vercel Google Works read proxy', () => {
   beforeEach(() => {
+    resetRateLimitsForTests();
     vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('SUPABASE_ANON_KEY', 'public-anon-key');
     vi.stubEnv('CXL_OWNER_USER_ID', 'owner-1');
@@ -350,15 +352,17 @@ describe('Vercel Google Works read proxy', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => 'not-json' }));
     const bad = await invoke({ action: 'works.fetch', args: [{}] });
     expect(bad.statusCode).toBe(502);
-    expect(bad.json.error).toContain('malformed JSON');
+    // Visitors get a generic message; the GAS detail stays in the server log.
+    expect(bad.json.error).toBe('โหลดข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
+    expect(bad.json.error).not.toContain('malformed JSON');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [{ id: 'incomplete', title: 'Missing fields' }] }) }));
     const malformedShape = await invoke({ action: 'works.fetch', args: [{}] });
     expect(malformedShape.statusCode).toBe(502);
-    expect(malformedShape.json.error).toContain('CXL Asset list shape');
+    expect(malformedShape.json.error).toBe('โหลดข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unavailable')));
     const unavailable = await invoke({ action: 'works.fetch', args: [{}] });
     expect(unavailable.statusCode).toBe(502);
-    expect(unavailable.json.error).toContain('network unavailable');
+    expect(unavailable.json.error).not.toContain('network unavailable');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new Error('deadline exceeded'), { name: 'TimeoutError' })));
     const timeout = await invoke({ action: 'works.fetch', args: [{}] });
     expect(timeout.statusCode).toBe(504);
@@ -390,7 +394,7 @@ describe('Vercel Google Works read proxy', () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(attempts);
       expect(result.statusCode).toBe(504);
-      expect(result.json.error).toMatch(/timeout/i);
+      expect(result.json.error).toBe('ระบบตอบช้ากว่าปกติ ลองใหม่อีกครั้ง');
     } finally {
       timeoutSpy.mockRestore();
     }
@@ -508,6 +512,18 @@ describe('Vercel Google Works read proxy', () => {
     expect(JSON.stringify(unsafe.json)).not.toContain('private-file');
     vi.stubEnv('VERCEL_ENV', 'production');
     expect((await invoke(action, undefined, 'POST', headers)).statusCode).toBe(404);
+  });
+
+  it('rate limits signed-out callers per IP without calling Google', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const visitor = { 'x-real-ip': '203.0.113.7' };
+    for (let i = 0; i < 120; i += 1) await invoke({ action: 'not.a.real.action', args: [] }, undefined, 'POST', visitor);
+    const limited = await invoke({ action: 'works.fetch', args: [{}] }, undefined, 'POST', visitor);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['Retry-After']).toMatch(/^\d+$/);
+    expect((await invoke({ action: 'not.a.real.action', args: [] }, undefined, 'POST', { 'x-real-ip': '203.0.113.8' })).statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

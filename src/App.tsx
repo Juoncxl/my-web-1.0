@@ -27,6 +27,7 @@ import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
 import { isKnownAppPath } from './lib/appRoutes';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { WORK_NOT_FOUND_MESSAGE } from './lib/publicApiErrors';
 import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileWorksReadScope } from './lib/profileRouting';
 import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
@@ -210,7 +211,13 @@ function MainApp() {
   // the active product surface while the Google owner backend is in use.
   const engagementActionsAvailable = false;
   const { recentlyViewedIds, trackRecentlyViewed } = useRecentlyViewed();
-  const visibleOperationError = operationError || assetLoadError;
+  // A /work/:id link whose Work was deleted, made private, or never existed.
+  // A real load failure (network, server) keeps the normal error banner instead.
+  const missingWorkId = workRoute?.[1] && workRoute[1] !== 'new' && workRoute[2] !== 'edit' ? workRoute[1] : null;
+  const isMissingWork = Boolean(missingWorkId && !authLoading && !isLoadingAssets
+    && !assets.some(asset => asset.id === missingWorkId || encodeURIComponent(asset.id) === missingWorkId)
+    && (!assetLoadError || assetLoadError === WORK_NOT_FOUND_MESSAGE));
+  const visibleOperationError = operationError || (isMissingWork ? null : assetLoadError);
 
   const {
     viewingAsset,
@@ -626,6 +633,8 @@ function MainApp() {
             )}
             {isNotFoundRoute
               ? <NotFoundPage onGoHome={() => { navigate('/'); window.scrollTo({ top: 0 }); }} />
+              : isMissingWork
+              ? <NotFoundPage title={WORK_NOT_FOUND_MESSAGE} description="ผลงานนี้อาจถูกลบ ถูกตั้งเป็นส่วนตัว หรือลิงก์ไม่ถูกต้อง" onGoHome={() => { navigate('/'); window.scrollTo({ top: 0 }); }} />
               : isScheduleRoute
               ? <CollabSchedulePage assets={assets} isLoading={isLoadingAssets} isOwner={Boolean(currentUser)} onBack={() => navigate('/')} onOpenAsset={handleOpenAssetView} />
               : <DiscoverPage collectionProps={collectionProps} onOpenSchedule={() => { navigate('/schedule'); window.scrollTo({ top: 0 }); }} />}
