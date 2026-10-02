@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { callGoogleBackend, GoogleBackendRequestError, GoogleBackendUnavailableError } from './googleTransport';
+import { callGoogleBackend, GoogleBackendRequestError, GoogleBackendUnavailableError, OWNER_SESSION_EXPIRED_MESSAGE } from './googleTransport';
 import { googleDataAdapter } from './googleDataAdapter';
 
 vi.mock('../../../lib/supabaseClient', () => ({ getSupabaseClient: () => ({ auth: { getSession: async () => ({ data: { session: { access_token: 'user-session-token' } } }) } }) }));
@@ -104,6 +104,25 @@ describe('Google server transport boundary', () => {
     expect(fetchMock.mock.calls[2][1].headers.Authorization).toBeUndefined();
     expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ action: 'folders.fetch', args: [] });
     expect(fetchMock.mock.calls[3][1].headers.Authorization).toBeUndefined();
+  });
+
+  it('asks the session endpoint to restore a missing CSRF cookie before an Owner write', async () => {
+    const doc = { cookie: '' };
+    vi.stubGlobal('document', doc);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/cxl/auth/session') { doc.cookie = '__Host-cxl_csrf=fresh-token'; return { ok: true, status: 200, json: async () => ({ ok: true }) }; }
+      return { ok: true, status: 200, json: async () => ({ ok: true, data: {} }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await callGoogleBackend('works.update', ['asset_x', {}, { requestId: 'id', expectedRevision: 1 }], true);
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/cxl/auth/session', '/api/cxl/google']);
+    expect((fetchMock.mock.calls[1] as any)[1].headers['X-CXL-CSRF']).toBe('fresh-token');
+  });
+
+  it('explains an expired Owner login in Thai instead of a CSRF error', async () => {
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, authenticated: false }) }));
+    await expect(callGoogleBackend('works.update', ['asset_x', {}, {}], true)).rejects.toThrow(OWNER_SESSION_EXPIRED_MESSAGE);
   });
 
   it('fails closed when browser fetch is unavailable', async () => {

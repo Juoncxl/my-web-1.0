@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { normalizeAssetVisibility } from '../../lib/assetVisibility';
+import { isWorkOwnedBy } from '../../lib/publicCreatorIdentity';
 import { clearWorkMutationRequestId, composerDraftKey, deleteComposerDraft, getOrCreateWorkMutationRequestId, loadComposerDraft, saveComposerDraft } from '../../lib/composerDraftStore';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
 import { CreatorContentCanvas, CreatorFocusEditor, type CreatorUiCodeView } from './CreatorContentCanvas';
@@ -514,7 +515,8 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     } satisfies Asset;
   }, [creatorProfile, draftPreview]);
   const reviewMissingNotices = getCreatorReviewMissingNotices({ title, coverImage, collaborationTitle: workMode === 'collab' ? collaboration.name : '' });
-  const availableCollaborations = useMemo(() => ownedWorks.filter(work => work.userId === creatorProfile?.id && work.category === 'collab' && work.id !== initialData?.id && !work.deletedAt), [creatorProfile?.id, initialData?.id, ownedWorks]);
+  // Public-feed rows carry the public creator id rather than userId, so match either.
+  const availableCollaborations = useMemo(() => ownedWorks.filter(work => isWorkOwnedBy(work, creatorProfile) && work.category === 'collab' && work.id !== initialData?.id && !work.deletedAt), [creatorProfile, initialData?.id, ownedWorks]);
   if (!isOpen) return null;
 
   const handleMediaUpload = (files: File[]) => {

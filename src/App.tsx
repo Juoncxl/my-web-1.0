@@ -588,6 +588,7 @@ function MainApp() {
           bookmarkedAssetIds={bookmarkedAssetIds}
           likedAssetIds={likedAssetIds}
           recentlyViewedIds={recentlyViewedIds}
+          onTrackRecentlyViewed={trackRecentlyViewed}
           onLike={engagementActionsAvailable ? handleLikeAsset : undefined}
           onBookmark={engagementActionsAvailable ? handleToggleBookmark : undefined}
           onDeleteAsset={handleDeleteVaultAsset}

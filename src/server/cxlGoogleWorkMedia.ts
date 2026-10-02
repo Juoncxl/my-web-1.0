@@ -168,6 +168,16 @@ async function waitForDrain(res: Response) {
   });
 }
 
+/**
+ * Download filename: the page's readable name (e.g. "ทหารที่รัก-เอมิน-2") when given, else the technical id.
+ * Path separators, quotes and control characters are dropped; the extension always follows the real type.
+ */
+export function attachmentDisposition(requested: string | null, fallback: string, extension: string): string {
+  const base = (requested || '').replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '').trim().slice(0, 120) || fallback;
+  const ascii = base.replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'cxl-image';
+  return `attachment; filename="${ascii}.${extension}"; filename*=UTF-8''${encodeURIComponent(`${base}.${extension}`)}`;
+}
+
 export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
   if (process.env.VERCEL_ENV !== 'preview' && process.env.CXL_GOOGLE_WORK_MEDIA_ENABLED !== '1') {
     return failure(res, 404, 'MEDIA_NOT_FOUND', 'Media is unavailable');
@@ -187,6 +197,7 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
   const mediaId = ref.startsWith('media:') ? ref.slice('media:'.length) : '';
   if (params.getAll('scope').length !== 1 || params.getAll('workId').length !== 1 || params.getAll('ref').length !== 1
     || params.getAll('download').length > 1 || (download !== null && download !== '1')
+    || params.getAll('name').length > 1 || (params.get('name') || '').length > 160
     || (scope !== 'owner' && scope !== 'public') || !/^asset_[A-Za-z0-9_-]{1,96}$/.test(workId)
     || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(mediaId)
     || ref !== `media:${mediaId}`) {
@@ -217,7 +228,7 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
         res.setHeader('Content-Length', String(direct.bytes.length));
         if (download === '1') {
           const extension = direct.mimeType === 'image/jpeg' ? 'jpg' : direct.mimeType.split('/')[1];
-          res.setHeader('Content-Disposition', `attachment; filename="cxl-${workId}-${mediaId}.${extension}"`);
+          res.setHeader('Content-Disposition', attachmentDisposition(params.get('name'), `cxl-${workId}-${mediaId}`, extension));
         }
         return res.end(direct.bytes);
       }
@@ -246,7 +257,7 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
         res.setHeader('Content-Length', String(chunk.totalFileSize));
         if (download === '1') {
           const extension = chunk.mimeType === 'image/jpeg' ? 'jpg' : chunk.mimeType.split('/')[1];
-          res.setHeader('Content-Disposition', `attachment; filename="cxl-${workId}-${mediaId}.${extension}"`);
+          res.setHeader('Content-Disposition', attachmentDisposition(params.get('name'), `cxl-${workId}-${mediaId}`, extension));
         }
       }
       digest.update(chunk.bytes);

@@ -3,11 +3,13 @@ import { directDriveGet, directOwnerReadsEnabled } from '../googleDirect.js';
 import { loadSealedOwnerDriveCredential, openRefreshToken, ownerDriveAccessToken } from '../../../src/server/cxlOwnerDrive.js';
 import {
   cookieValue,
+  createOwnerSessionToken,
   getOwnerAuthConfig,
   makeCsrfToken,
   makeSecureCookie,
   OWNER_CSRF_COOKIE,
   OWNER_SESSION_COOKIE,
+  OWNER_SESSION_RENEW_AFTER_SECONDS,
   OWNER_SESSION_TTL_SECONDS,
   selectOwnerAuthMode,
   verifyOwnerSessionToken
@@ -30,7 +32,7 @@ export default async function handler(req: Request, res: Response) {
   if (selectOwnerAuthMode(process.env.CXL_OWNER_AUTH_BACKEND) !== 'vercel') return send(res, 404, { ok: false, error: 'Owner auth mode is not enabled' });
   const config = getOwnerAuthConfig();
   if (!config) return send(res, 503, { ok: false, error: 'Owner authentication is not configured' });
-  const claims = verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE));
+  let claims = verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE));
   if (!claims) return send(res, 200, { ok: true, authenticated: false, user: null });
 
   // `?drive=status`: prove the stored Owner Drive grant still refreshes and can reach Drive.
@@ -55,8 +57,17 @@ export default async function handler(req: Request, res: Response) {
 
   const csrfCookie = cookieValue(req.headers.cookie, OWNER_CSRF_COOKIE);
   const csrfToken = csrfCookie || makeCsrfToken();
-  const csrfMaxAge = csrfCookie ? OWNER_SESSION_TTL_SECONDS : OWNER_SESSION_TTL_SECONDS;
-  if (!csrfCookie) res.setHeader('Set-Cookie', makeSecureCookie(OWNER_CSRF_COOKIE, csrfToken, csrfMaxAge, false));
+  const cookies: string[] = [];
+  // Sliding session: an Owner who keeps using the site is not signed out mid-edit.
+  if (Math.floor(Date.now() / 1000) - claims.iat >= OWNER_SESSION_RENEW_AFTER_SECONDS) {
+    const renewed = createOwnerSessionToken(claims.sub, claims.email, process.env.CXL_OWNER_SESSION_SECRET || '');
+    claims = renewed.claims;
+    cookies.push(makeSecureCookie(OWNER_SESSION_COOKIE, renewed.token, OWNER_SESSION_TTL_SECONDS));
+    cookies.push(makeSecureCookie(OWNER_CSRF_COOKIE, csrfToken, OWNER_SESSION_TTL_SECONDS, false));
+  } else if (!csrfCookie) {
+    cookies.push(makeSecureCookie(OWNER_CSRF_COOKIE, csrfToken, Math.max(60, claims.exp - Math.floor(Date.now() / 1000)), false));
+  }
+  if (cookies.length) res.setHeader('Set-Cookie', cookies);
 
   const user = {
     id: config.legacyOwnerId,

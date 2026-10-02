@@ -10,7 +10,9 @@ import {
 export const OWNER_SESSION_COOKIE = '__Host-cxl_owner';
 export const OWNER_OIDC_TRANSACTION_COOKIE = '__Host-cxl_oidc_tx';
 export const OWNER_CSRF_COOKIE = '__Host-cxl_csrf';
-export const OWNER_SESSION_TTL_SECONDS = 12 * 60 * 60;
+export const OWNER_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** A session older than this is re-issued (sliding) when the Owner's browser checks it. */
+export const OWNER_SESSION_RENEW_AFTER_SECONDS = 24 * 60 * 60;
 export const OWNER_OIDC_TRANSACTION_TTL_SECONDS = 10 * 60;
 const GOOGLE_ISSUERS = new Set(['https://accounts.google.com', 'accounts.google.com']);
 const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';

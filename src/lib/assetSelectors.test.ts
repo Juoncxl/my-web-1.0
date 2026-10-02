@@ -156,6 +156,21 @@ describe('asset selectors', () => {
     }).map(asset => asset.id)).toEqual(['matching']);
   });
 
+  it('finds Collabs by shared tag, app and participant name on the Public Feed', () => {
+    const collab = makeAsset({ id: 'collab', title: 'ทหารที่รัก', category: 'collab', publicCollaboration: {
+      name: 'ทหารที่รัก', sharedTag: '#พัทยาหวานเจี๊ยบ', platforms: ['Rubii'], sharedInformation: [], deadlines: [],
+      participants: [{ id: 'p1', isOwner: false, creatorName: 'เอมิน', houseTag: '', platforms: [], externalWorkName: 'ราฟ', referenceImages: [], linkedWorkIds: [] }]
+    } as never });
+    const search = (searchQuery: string) => selectFilteredAssets([collab, makeAsset({ id: 'other' })], {
+      activeView: 'feed', activeVaultTab: 'my_assets', bookmarkedAssetIds: [], recentlyViewedIds: [], currentUserId: undefined,
+      selectedCategory: 'all', selectedTag: null, selectedFolderId: 'all', selectedStatusFilter: 'all', visibilityFilter: 'all', searchQuery
+    }).map(asset => asset.id);
+    expect(search('พัทยา')).toEqual(['collab']);
+    expect(search('rubii')).toEqual(['collab']);
+    expect(search('เอมิน')).toEqual(['collab']);
+    expect(search('ราฟ')).toEqual(['collab']);
+  });
+
   it('does not re-run full-text filtering on compact rows already matched by the Owner server index', () => {
     const summary = makeAsset({ content: '', contentBlocks: [], uiCodeSnippet: '', title: 'Compact card title' });
     expect(selectFilteredAssets([summary], {

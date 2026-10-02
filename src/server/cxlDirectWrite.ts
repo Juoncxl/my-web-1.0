@@ -169,6 +169,13 @@ function ownerSearchText(asset: Json): string {
   const values: unknown[] = [asset.title, asset.shortDescription, asset.content, asset.authorName, asset.uiCodeSnippet];
   (asset.contentBlocks || []).forEach((block: Json) => { if (block) values.push(block.title, block.body); });
   (asset.tags || []).forEach((tag: unknown) => values.push(tag));
+  // Collab name, tag, apps, shared info and participant names (never contact details).
+  [asset.publicCollaboration, asset.collaboration].forEach((collab: Json) => {
+    if (!collab) return;
+    values.push(collab.name, collab.sharedTag, ...(collab.platforms || []));
+    (collab.sharedInformation || []).forEach((item: Json) => { if (item) values.push(item.title, item.content); });
+    (collab.participants || []).forEach((p: Json) => { if (p) values.push(p.creatorName, p.houseTag, p.externalWorkName); });
+  });
   return values.filter(value => typeof value === 'string' && value.length > 0).join('\n').toLowerCase();
 }
 

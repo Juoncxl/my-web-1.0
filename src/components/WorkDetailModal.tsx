@@ -366,6 +366,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             if (url.origin === window.location.origin && url.pathname === '/api/cxl/media'
               && ['owner', 'public'].includes(url.searchParams.get('scope') || '')) {
               url.searchParams.set('download', '1');
+              // The server's Content-Disposition wins over the anchor's download name, so send it along.
+              url.searchParams.set('name', input.filename);
               freshSource = `${url.pathname}${url.search}`;
             }
           } catch { /* fall back to fetching the displayed source below */ }
