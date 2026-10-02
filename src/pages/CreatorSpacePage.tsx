@@ -53,6 +53,7 @@ interface CreatorSpacePageProps {
   onBookmark?: (assetId: string) => void;
   onLike?: (assetId: string) => void;
   recentlyViewedIds?: string[];
+  onTrackRecentlyViewed?: (assetId: string) => void;
   onDeleteAsset?: (asset: Asset) => void;
   onRestoreAsset?: (assetId: string) => void;
   onPermanentDeleteAsset?: (assetId: string) => void;
@@ -176,7 +177,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ type, folders, assets, profile,
   </article>;
 };
 
-export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenMoveToFolder, onMoveAssetToFolder, onOpenSettingsModal, allKnownAssets = [], knownFolders = [], isLoadingAssets = false, isLoadingFolders = false, bookmarkedAssetIds = [], likedAssetIds = [], recentlyViewedIds = [], onBookmark, onLike, onDeleteAsset, onRestoreAsset, onPermanentDeleteAsset }) => {
+export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCreateAsset, onEditAsset, onOpenAuth, onOpenFolderManager, onOpenMoveToFolder, onMoveAssetToFolder, onOpenSettingsModal, allKnownAssets = [], knownFolders = [], isLoadingAssets = false, isLoadingFolders = false, bookmarkedAssetIds = [], likedAssetIds = [], recentlyViewedIds = [], onTrackRecentlyViewed, onBookmark, onLike, onDeleteAsset, onRestoreAsset, onPermanentDeleteAsset }) => {
   const { currentUser, openAuthModal, isLoading: authLoading } = useAuth();
   const [activeSlug, setActiveSlug] = useState(slug);
   const { profile, assets, folders, isProfileLoading, isAssetsLoading: isProfileAssetsLoading, isFoldersLoading: isProfileFoldersLoading, isNotFound, error, refresh } = useCreatorSpaceData(
@@ -190,8 +191,11 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  // A cover that no longer loads (e.g. legacy storage offline) falls back to the gradient instead of a broken image.
+  const [failedCoverUrl, setFailedCoverUrl] = useState('');
   const [selectedAssetOriginFolderId, setSelectedAssetOriginFolderId] = useState<string | null>(null);
   const openAssetDetail = React.useCallback(async (asset: Asset, originFolderId?: string | null) => {
+    onTrackRecentlyViewed?.(asset.id);
     const result = await cxlDataService.works.fetch({
       assetId: asset.id,
       currentUserId: currentUser?.id,
@@ -200,7 +204,7 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
     });
     setSelectedAsset(result.data[0] || asset);
     setSelectedAssetOriginFolderId(originFolderId || null);
-  }, [currentUser?.id]);
+  }, [currentUser?.id, onTrackRecentlyViewed]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => parseCanonicalProfileLocation(window.location.pathname, window.location.search)?.folderId || null);
   const openFolderDetail = React.useCallback((folderId: string) => {
     const url = new URL(window.location.href);
@@ -268,7 +272,9 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
 
   const isOwner = Boolean(profile && (currentUser?.id === profile.id ||
     (currentUser?.publicCreatorId && currentUser.publicCreatorId === (profile.publicCreatorId || profile.id))));
-  const creatorServiceId = profile?.publicCreatorId || profile?.id;
+  // The Owner's own profile row may come from the session fallback without a publicCreatorId; the saved
+  // Creator Space layout is keyed by it, so use the signed-in Owner's id instead of showing the defaults.
+  const creatorServiceId = profile?.publicCreatorId || (isOwner ? currentUser?.publicCreatorId : undefined) || profile?.id;
   const resolvedView = resolveProfileView({ requestedTab, previewPublic: previewViewer === 'public' }, isOwner);
   const activeTab = resolvedView.activeTab;
   const isEditing = isOwner && !resolvedView.isPublicView;
@@ -926,10 +932,9 @@ export const CreatorSpacePage: React.FC<CreatorSpacePageProps> = ({ slug, onCrea
       {creatorSpaceRenderState === 'profile-loading' && <section className="csp-loading" aria-label="กำลังโหลดโปรไฟล์ครีเอเตอร์"><div /><div className="csp-loading-body"><span /><span /><span /></div></section>}
       {(creatorSpaceRenderState === 'not-found' || creatorSpaceRenderState === 'profile-failed') && <section className="csp-empty csp-route-state" role="alert"><div className="csp-empty-icon"><UserRound className="h-6 w-6" /></div><h1>{creatorSpaceRenderState === 'not-found' ? 'ไม่พบโปรไฟล์ครีเอเตอร์' : 'โหลดโปรไฟล์ไม่สำเร็จ'}</h1><p>{error || (creatorSpaceRenderState === 'not-found' ? 'โปรไฟล์นี้อาจยังไม่มีอยู่ หรือ URL ไม่ถูกต้อง' : 'ระบบโปรไฟล์ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง')}</p><div className="csp-state-actions"><button type="button" onClick={() => void refresh()} className="csp-secondary-button"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</button><a href="/" className="csp-primary-button">กลับหน้าแรก</a></div></section>}
       {creatorSpaceRenderState === 'ready' && profile && <>
-       {isVercelOwnerAuth && isOwner && <p role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">โหมด Owner-only: การแก้โปรไฟล์/เลย์เอาต์ มีเดีย คอลแลบ และ engagement ยังพักไว้; บันทึก Work จะใช้ได้เมื่อเปิด GO 6A Preview write flag แยกต่างหาก</p>}
        {isCustomizeOpen && isEditing && activeTab === 'profile' && <CreatorCustomizePanel layout={layout} lockedPreset={lockedPreset} widgets={widgets} widgetRail={widgetRail} spans={spans} onLayoutChange={handleLayoutChange} onLockedPresetChange={setLockedPreset} onAddWidget={addWidget} onRemoveWidget={removeWidget} onMoveWidget={moveWidget} onMoveRail={(type, rail) => setWidgetRail(previous => ({ ...previous, [type]: rail }))} onSpanChange={handleSpanChange} onClose={() => { setIsCustomizeOpen(false); setAddItemOpen(false); }} />}
         <section className="csp-profile-header" aria-labelledby="csp-profile-title">
-           <div className="csp-cover">{profile.coverUrl ? <img src={profile.coverUrl} alt="ภาพปกโปรไฟล์" referrerPolicy="no-referrer" /> : <div className="csp-cover-fallback" aria-hidden="true" />}<span>PROFILE</span>{isEditing && <button type="button" onClick={() => setIsProfileOpen(true)}>🖼 เปลี่ยนภาพปก</button>}</div>
+           <div className="csp-cover">{profile.coverUrl && profile.coverUrl !== failedCoverUrl ? <img src={profile.coverUrl} alt="ภาพปกโปรไฟล์" referrerPolicy="no-referrer" onError={() => setFailedCoverUrl(profile.coverUrl || '')} /> : <div className="csp-cover-fallback" aria-hidden="true" />}<span>PROFILE</span>{isEditing && <button type="button" onClick={() => setIsProfileOpen(true)}>🖼 เปลี่ยนภาพปก</button>}</div>
              <div className="csp-profile-surface"><div className="csp-profile-identity"><div className="csp-avatar-column"><div className="csp-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="รูปโปรไฟล์" referrerPolicy="no-referrer" /> : <span>{getInitial(displayName)}</span>}</div><div className="csp-desktop-stats"><span><strong>{visibleAssets.length}</strong> ผลงาน</span>{isEditing && <span><strong>{visibleFolderCount}</strong> โฟลเดอร์</span>}<span><strong>{publicAssets.length}</strong> สาธารณะ</span></div></div><div className="csp-identity-copy"><div className="csp-name-row"><h1 id="csp-profile-title">{displayName}</h1>{isEditing && <><span className="csp-owner-badge">พื้นที่ส่วนตัว</span><button type="button" className="csp-edit-icon" onClick={() => setIsProfileOpen(true)} aria-label="แก้ไขข้อมูลโปรไฟล์" title="แก้ไขโปรไฟล์"><Edit3 className="h-3.5 w-3.5" /></button></>}</div><p className="csp-username">@{profile.username || 'ยังไม่ได้ตั้งชื่อผู้ใช้'}</p><p className="csp-bio">{profile.bio || (isEditing ? 'ยังไม่ได้เพิ่มคำแนะนำตัว' : 'Creator คนนี้ยังไม่ได้เพิ่มคำแนะนำตัว')}</p>{socialLinks.length > 0 && <div className="csp-social-links" aria-label="ช่องทางหลักของโปรไฟล์">{socialLinks.map(link => { const Icon = getSocialIcon(link.platform); const href = getSafeHref(link.url); return href ? <a href={href} target="_blank" rel="noreferrer" key={link.id || `${link.platform}-${link.label}`}><Icon className="h-3.5 w-3.5" />{link.label}</a> : null; })}</div>}</div></div><div className="csp-mobile-stats"><span><strong>{visibleAssets.length}</strong> ผลงาน</span>{isEditing && <span><strong>{visibleFolderCount}</strong> โฟลเดอร์</span>}<span><strong>{publicAssets.length}</strong> สาธารณะ</span></div><div className="csp-profile-actions">{isOwner && <div className="csp-viewer-toolbar" aria-label="ดูแบบผู้เยี่ยมชม"><span>มุมมอง:</span><button type="button" className={previewViewer === 'owner' ? 'is-active' : ''} onClick={() => setPublicPreview(false)}>Owner</button><button type="button" className={previewViewer === 'public' ? 'is-active' : ''} onClick={() => setPublicPreview(true)}>ผู้เยี่ยมชม</button></div>}{isEditing ? <><span>เฉพาะคุณเท่านั้น</span><button type="button" className="csp-secondary-button" onClick={toggleCustomize}><Settings2 className="h-3.5 w-3.5" />{isCustomizeOpen ? 'ปิดการตกแต่ง' : 'ตกแต่งโปรไฟล์'}</button><button type="button" className="csp-primary-button" onClick={handleCreateAsset}><Plus className="h-4 w-4" />สร้างผลงาน</button></> : <><button type="button" className="csp-secondary-button" onClick={() => { void navigator.clipboard?.writeText(window.location.href); }}><Share2 className="h-3.5 w-3.5" />แชร์โปรไฟล์</button>{!isOwner && <button type="button" className="csp-secondary-button" onClick={() => onOpenAuth()}><Link2 className="h-3.5 w-3.5" />เข้าสู่ระบบ</button>}</>}</div>{isCustomizeOpen && isEditing && <span className="csp-core-lock">🔒 ส่วนหลัก</span>}</div>
             {isOwner && previewViewer === 'owner' && <nav className="csp-tabs" aria-label="เมนูจัดการโปรไฟล์">{([['profile', 'หน้าโปรไฟล์'], ['works', 'ผลงาน'], ['folders', 'โฟลเดอร์'], ['drafts', 'แบบร่าง'], ['recent', 'ล่าสุด'], ['trash', 'ถังขยะ']] as const).map(([value, label]) => <button type="button" key={value} className={activeTab === value ? 'is-active' : ''} onClick={() => selectTab(value)}>{label}</button>)}</nav>}
             {resolvedView.isPublicView && <nav className="csp-tabs" aria-label="เมนูโปรไฟล์สาธารณะ">{([['profile', 'หน้าโปรไฟล์'], ['works', 'ผลงานทั้งหมด']] as const).map(([value, label]) => <button type="button" key={value} className={activeTab === value ? 'is-active' : ''} onClick={() => selectTab(value)}>{label}</button>)}</nav>}

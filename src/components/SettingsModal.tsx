@@ -154,7 +154,7 @@ export const SettingsModal: React.FC = () => {
   };
 
   const handleImportLegacyGuestData = async () => {
-    if (isVercelOwnerAuth) { setBackupMsg({ type: 'error', text: 'นำเข้าข้อมูลเก่ายังไม่รองรับใน Owner-only mode' }); return; }
+    if (isVercelOwnerAuth) { setBackupMsg({ type: 'error', text: 'ตอนนี้ยังนำเข้าข้อมูลเก่าไม่ได้' }); return; }
     if (!currentUser) return;
     setIsImportingLegacy(true); setBackupMsg(null);
     try {
@@ -172,13 +172,13 @@ export const SettingsModal: React.FC = () => {
       <header className="cv-settings-chrome">
         <div className="cv-settings-heading"><div className="cv-settings-heading-copy"><div className="cv-settings-heading-icon"><Settings2 className="w-5 h-5" /></div><div><h2 id="settings-modal-title">ตั้งค่าบัญชี & การสำรองข้อมูล</h2><p>จัดการโปรไฟล์ ความปลอดภัย และการสำรองข้อมูล</p></div></div><button type="button" onClick={() => setIsSettingsOpen(false)} className="cv-settings-close" aria-label="ปิดหน้าตั้งค่า"><X className="w-4 h-4" /></button></div>
         {isVercelOwnerAuth
-          ? <p className="px-6 py-3 text-xs text-slate-500">โหมด Owner-only: การแก้ไขโปรไฟล์และรหัสผ่านถูกพักไว้ชั่วคราว</p>
+          ? <p className="px-6 py-3 text-xs text-slate-500">ตอนนี้ยังแก้ข้อมูลโปรไฟล์จากหน้านี้ไม่ได้ ส่วนการสำรองข้อมูลด้านล่างใช้ได้ตามปกติ</p>
           : <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />}
       </header>
       <div className="cv-settings-content">
         {isVercelOwnerAuth && <section className="mx-6 mb-5 rounded-xl border border-violet-200 bg-violet-50 p-4">
-          <h3 className="text-sm font-semibold text-slate-900">ข้อมูลผลงานสาธารณะ</h3>
-          <p className="mt-1 text-xs text-slate-600">สร้างหรือซ่อม snapshot ที่ใช้แสดงผลงานหน้าแรกและหน้า Creator</p>
+          <h3 className="text-sm font-semibold text-slate-900">หน้าสาธารณะไม่อัปเดต?</h3>
+          <p className="mt-1 text-xs text-slate-600">ถ้าแก้ผลงานแล้วหน้าแรกหรือหน้าโปรไฟล์ที่คนอื่นเห็นยังเป็นของเก่า กดปุ่มนี้เพื่อดึงข้อมูลล่าสุดขึ้นไปใหม่</p>
           <button type="button" onClick={() => void handleRebuildPublicSnapshot()} disabled={isRebuildingPublicSnapshot}
             className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
             {isRebuildingPublicSnapshot ? 'กำลังอัปเดต…' : 'อัปเดตข้อมูลสาธารณะ'}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { Asset } from '../../types';
-import { areCreatorWorkDraftsEquivalent, buildWorkDraftPreview, createBlankCreatorWorkDraft, createCreatorWorkDraftFromAsset, creatorWorkDraftFingerprint, limitWorkIconInput, normalizeCreatorContentTypes, type CreatorWorkDraft } from './CreatorWorkWorkspace';
+import { areCreatorWorkDraftsEquivalent, buildWorkDraftPreview, CREATOR_WORK_STATUS_OPTIONS, createBlankCreatorWorkDraft, createCreatorWorkDraftFromAsset, creatorWorkDraftFingerprint, limitWorkIconInput, normalizeCreatorContentTypes, type CreatorWorkDraft } from './CreatorWorkWorkspace';
 import { createBlankContentCanvasDraft } from './creatorContentModel';
 import { createBlankMediaDraft } from './creatorMediaModel';
 import { createBlankCollaborationDraft } from './creatorCollabModel';
@@ -180,17 +180,12 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(workspaceSource).not.toContain('Visibility<select');
   });
 
-  it('keeps publication, visibility, and work progress as separate Composer concepts', () => {
-    expect(workspaceSource).toContain('สถานะการเผยแพร่');
-    expect(workspaceSource).toContain('publicationStatus === value');
+  it('offers visibility and one progress status; the unsaved publication toggle is gone', () => {
+    expect(workspaceSource).not.toContain('สถานะการเผยแพร่');
     expect(workspaceSource).toContain('workStatus === option.value');
-    expect(workspaceSource).toContain('📝 แบบร่าง');
-    expect(workspaceSource).toContain('✅ เผยแพร่แล้ว');
-    expect(workspaceSource).toContain('🟠 รอข้อมูล');
-    expect(workspaceSource).toContain('🔵 รอตรวจ');
-    expect(workspaceSource).toContain('🟣 รอแก้ไข');
-    expect(workspaceSource).toContain('🔴 ติดปัญหา');
-    expect(workspaceSource).toContain('⏸️ พักไว้');
+    expect(CREATOR_WORK_STATUS_OPTIONS.map(option => option.label)).toEqual([
+      '⚪ ยังไม่เริ่ม', '🟡 กำลังทำ', '🟠 รอข้อมูล', '🟣 รอแก้ไข', '⏸️ พักไว้', '🚀 รอปล่อย', '✅ ปล่อยแล้ว'
+    ]);
     expect(workspaceSource).not.toContain('className={status === value');
     expect(workspaceSource).not.toContain('setStatus(value)');
   });

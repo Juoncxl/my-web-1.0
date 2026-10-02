@@ -30,9 +30,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LABELS: Record<AssetCollaborationDeadline['kind'], string> = {
   data: '📋 ส่งข้อมูล',
   image: '🖼️ ส่งรูป',
-  publish: '🚀 เผยแพร่',
+  publish: '🚀 ปล่อยบอท',
   custom: '📌 กำหนดการ'
 };
+
+/**
+ * Display label for a Collab deadline. "เผยแพร่" here always meant releasing the bot on its app,
+ * so older saved labels read "🚀 ปล่อยบอท" instead of clashing with publishing on CXL.
+ */
+export function displayDeadlineLabel(label: string | undefined, kind?: AssetCollaborationDeadline['kind']): string {
+  const clean = label?.trim() || '';
+  if (/^(🚀\s*)?เผยแพร่$/.test(clean)) return DEFAULT_LABELS.publish;
+  return clean || (kind && DEFAULT_LABELS[kind]) || 'กำหนดส่ง';
+}
 
 function startOfDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
@@ -63,7 +73,7 @@ export function buildCollabSchedule(assets: readonly Asset[], today = new Date()
       return [{
         // Public projections drop deadline ids, so key by Work + date + label instead.
         id: milestoneKey(asset.id, deadline.date, deadline.label),
-        label: deadline.label?.trim() || DEFAULT_LABELS[deadline.kind] || DEFAULT_LABELS.custom,
+        label: displayDeadlineLabel(deadline.label, deadline.kind || 'custom'),
         date,
         isoDate: deadline.date.slice(0, 10),
         daysLeft: Math.round((date.getTime() - base) / DAY_MS)

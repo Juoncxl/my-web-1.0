@@ -1,6 +1,7 @@
-import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
+import type { Asset, AssetCategory, Folder } from '../types';
 import type { VaultTabType } from '../components/PersonalVaultHeader';
 import { isOwnedActiveAsset, isPublicFeedAsset, isTrashAssetForUser } from './accessPolicy';
+import { getWorkStatus, type WorkStatusValue } from './workStatus';
 import {
   isPrivateVaultAsset,
   isPublicVaultAsset
@@ -22,7 +23,7 @@ export interface AssetFilterOptions extends AssetCollectionOptions {
   selectedPlatform?: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
-  selectedStatusFilter: AssetStatus | 'all';
+  selectedStatusFilter: WorkStatusValue | 'all';
   visibilityFilter: VisibilityFilter;
   searchQuery: string;
   searchAlreadyApplied?: boolean;
@@ -108,11 +109,28 @@ export function isAppPlatformAsset(asset: Asset): boolean {
   return asset.category === 'app_data' || getAssetPlatforms(asset).length > 0;
 }
 
+/**
+ * Collab text a viewer can already see: name, shared tag, apps, shared info and participant names.
+ * The Owner-only draft is only present for the Owner; contact details are never searched.
+ */
+function collaborationSearchText(asset: Asset): string[] {
+  return [asset.publicCollaboration, asset.collaboration].flatMap(collaboration => {
+    if (!collaboration) return [];
+    return [
+      collaboration.name, collaboration.sharedTag, ...(collaboration.platforms || []),
+      ...(collaboration.sharedInformation || []).flatMap(item => [item?.title, item?.content]),
+      ...(collaboration.participants || []).flatMap(participant => [participant?.creatorName, participant?.houseTag, participant?.externalWorkName])
+    ];
+  }).filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
 function matchesSearch(asset: Asset, searchQuery: string): boolean {
   const query = searchQuery.trim().toLowerCase();
   if (!query) return true;
 
   return Boolean(
+    getAssetPlatforms(asset).some(platform => platform.toLowerCase().includes(query)) ||
+      collaborationSearchText(asset).some(text => text.toLowerCase().includes(query)) ||
     asset.title.toLowerCase().includes(query) ||
       asset.shortDescription?.toLowerCase().includes(query) ||
       asset.content.toLowerCase().includes(query) ||
@@ -131,7 +149,7 @@ function matchesNonCategoryFilters(asset: Asset, options: AssetFilterOptions): b
       options.selectedFolderId !== 'unassigned' &&
       asset.folderId !== options.selectedFolderId
     ) return false;
-    if (options.selectedStatusFilter !== 'all' && asset.status !== options.selectedStatusFilter) return false;
+    if (options.selectedStatusFilter !== 'all' && getWorkStatus(asset) !== options.selectedStatusFilter) return false;
     if (options.visibilityFilter === 'public' && !isPublicVaultAsset(asset)) return false;
     if (options.visibilityFilter === 'private' && !isPrivateVaultAsset(asset)) return false;
   }

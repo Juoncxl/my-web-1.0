@@ -1,6 +1,7 @@
 import React from 'react';
 import { Asset } from '../../types';
 import { CATEGORIES, STATUS_PRESETS } from '../../lib/constants';
+import { getWorkStatusDisplay } from '../../lib/workStatus';
 import {
   Bookmark as BookmarkIcon,
   FileEdit,
@@ -36,7 +37,8 @@ export const AssetViewHeader: React.FC<AssetViewHeaderProps> = ({
   onClose
 }) => {
   const categoryMeta = CATEGORIES[asset.category] || CATEGORIES.character;
-  const statusMeta = STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished;
+  // Colours follow the legacy status; the label is the same progress status the composer and cards use.
+  const statusMeta = { ...(STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished), ...getWorkStatusDisplay(asset) };
 
   return (
     <div className="flex items-center justify-between p-4 sm:p-6 border-b border-purple-100/70 dark:border-slate-800 bg-gradient-to-r from-purple-50/50 via-white to-pink-50/50 dark:from-purple-950/40 dark:via-slate-900 dark:to-slate-900">

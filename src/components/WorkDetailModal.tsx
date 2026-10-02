@@ -25,7 +25,9 @@ import {
   X
 } from 'lucide-react';
 import type { Asset, AssetIcon, Folder as WorkFolder, User, WorkContentBlock } from '../types';
-import { AUDIENCE_RATING_LABELS, CATEGORIES, STATUS_PRESETS } from '../lib/constants';
+import { AUDIENCE_RATING_LABELS, CATEGORIES } from '../lib/constants';
+import { getWorkStatusDisplay } from '../lib/workStatus';
+import { displayDeadlineLabel } from '../lib/collabSchedule';
 import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatThaiDate } from '../lib/dateUtils';
@@ -260,7 +262,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
     ? linkedCollaborationAsset
     : undefined;
   const category = CATEGORIES[asset.category] || CATEGORIES.character;
-  const status = STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished;
+  const status = getWorkStatusDisplay(asset);
+  const showEmptyHints = isOwner || interactionMode === 'preview';
   const { contentBlocks, shortDescription, uiCode, legacyContent: resolvedLegacyContent } = resolveWorkPresentationContent(asset);
   const display = getWorkDisplayPresentation(asset);
   const publicCollaboration = display.collaboration;
@@ -366,6 +369,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             if (url.origin === window.location.origin && url.pathname === '/api/cxl/media'
               && ['owner', 'public'].includes(url.searchParams.get('scope') || '')) {
               url.searchParams.set('download', '1');
+              // The server's Content-Disposition wins over the anchor's download name, so send it along.
+              url.searchParams.set('name', input.filename);
               freshSource = `${url.pathname}${url.search}`;
             }
           } catch { /* fall back to fetching the displayed source below */ }
@@ -425,7 +430,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
       display.collaboration.sharedTag ? `แท็กกลาง: #${display.collaboration.sharedTag.replace(/^#/, '')}` : '',
       display.collaboration.platforms.length ? `แพลตฟอร์ม: ${display.collaboration.platforms.join(' · ')}` : '',
       ...display.collaboration.sharedInformation.map(item => `### ${item.title || 'ข้อมูลกลาง'}\n${item.content}`),
-      ...display.collaboration.deadlines.map(item => `- ${item.label || 'กำหนดส่ง'}: ${item.date || 'ยังไม่ระบุวันที่'}`),
+      ...display.collaboration.deadlines.map(item => `- ${displayDeadlineLabel(item.label, item.kind)}: ${item.date || 'ยังไม่ระบุวันที่'}`),
       ...display.collaboration.participants.map(participant => `### ${participant.creatorName || 'ผู้เข้าร่วม'}\n${participant.houseTag ? `#${participant.houseTag.replace(/^#/, '')}\n` : ''}${participant.externalWorkName || ''}`)
     ].filter(Boolean).join('\n\n')
     : '';
@@ -513,15 +518,16 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
               </div>
             </div>
 
-            <section className={`work-detail-summary ${display.summary || shortDescription ? '' : 'is-empty'}`} data-work-detail-section="short-description">
+            {/* Empty hints are for the Owner (and the composer preview); visitors just don't see the section. */}
+            {(display.summary || shortDescription || showEmptyHints) && <section className={`work-detail-summary ${display.summary || shortDescription ? '' : 'is-empty'}`} data-work-detail-section="short-description">
               <strong>คำอธิบายสั้น</strong>
               <p>{display.summary || shortDescription || 'ยังไม่มีคำอธิบายสั้นสำหรับผลงานชิ้นนี้'}</p>
-            </section>
+            </section>}
 
-            <div className={`work-detail-tags ${asset.tags?.length ? '' : 'is-empty'}`} data-work-detail-section="tags">
+            {(asset.tags?.length || showEmptyHints) ? <div className={`work-detail-tags ${asset.tags?.length ? '' : 'is-empty'}`} data-work-detail-section="tags">
               <Tag aria-hidden="true" />
               {asset.tags?.length ? asset.tags.map(tag => <span key={tag}>#{tag}</span>) : <p>ยังไม่มีแท็กสำหรับผลงานชิ้นนี้</p>}
-            </div>
+            </div> : null}
 
             <div className="work-detail-presentation-metadata" data-work-detail-section="draft-metadata">
               {detailMetadataItems.map(item => <div key={item.label}><strong>{item.label}</strong><span>{item.value}</span></div>)}
@@ -582,7 +588,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
         {display.isCollaborationFocused && publicCollaboration?.deadlines?.length ? <section className="work-detail-section work-detail-collaboration-deadlines" data-work-detail-section="collaboration-deadlines">
           <div className="work-detail-section-heading"><div><Clock3 aria-hidden="true" /><div><strong>กำหนดส่ง</strong><span>กำหนดการกลางของคอลแลป</span></div></div></div>
-          <div className="work-detail-collaboration-deadline-grid">{publicCollaboration.deadlines.map(deadline => <article key={deadline.id}><strong>{deadline.label || 'กำหนดส่ง'}</strong><time dateTime={deadline.date}>{deadline.date || 'ยังไม่ระบุวันที่'}</time></article>)}</div>
+          <div className="work-detail-collaboration-deadline-grid">{publicCollaboration.deadlines.map(deadline => <article key={deadline.id}><strong>{displayDeadlineLabel(deadline.label, deadline.kind)}</strong><time dateTime={deadline.date}>{deadline.date || 'ยังไม่ระบุวันที่'}</time></article>)}</div>
         </section> : null}
 
         {display.isCollaborationFocused && publicCollaboration?.participants?.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">

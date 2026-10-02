@@ -17,6 +17,25 @@ export class GoogleBackendRequestError extends Error {
   }
 }
 
+export const OWNER_SESSION_EXPIRED_MESSAGE = 'การล็อกอินหมดอายุแล้ว — เปิดแท็บใหม่แล้วล็อกอินอีกครั้ง จากนั้นกลับมาที่หน้านี้แล้วกดบันทึกใหม่ งานที่กรอกไว้ยังอยู่ครบ';
+
+function readCsrfCookie(): string {
+  const csrfPrefix = '__Host-cxl_csrf=';
+  const cookie = typeof document === 'undefined' ? '' : document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(csrfPrefix));
+  return cookie ? decodeURIComponent(cookie.slice(csrfPrefix.length)) : '';
+}
+
+/** The CSRF cookie; when it is gone, the session check re-issues it if the Owner is still signed in. */
+async function ownerCsrfToken(): Promise<string> {
+  let token = readCsrfCookie();
+  if (!token && typeof fetch === 'function') {
+    await fetch('/api/cxl/auth/session', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).catch(() => undefined);
+    token = readCsrfCookie();
+  }
+  if (!token) throw new Error(OWNER_SESSION_EXPIRED_MESSAGE);
+  return token;
+}
+
 export async function callGoogleBackend<T>(action: string, args: unknown[], useVercelOwnerAuth = isVercelOwnerAuth): Promise<T> {
   const endpoint = '/api/cxl/google';
   // The server derives Owner scope from its verified HttpOnly session. Keep the
@@ -25,10 +44,7 @@ export async function callGoogleBackend<T>(action: string, args: unknown[], useV
   if (typeof fetch !== 'function') throw new GoogleBackendUnavailableError();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
   if (useVercelOwnerAuth && ['works.create', 'works.update', 'works.softDelete', 'works.restore', 'works.permanentDelete', 'folders.create', 'folders.update', 'folders.delete', 'public.snapshot.rebuild', 'media.upload.begin', 'media.upload.chunk', 'media.upload.finalize'].includes(action)) {
-    const csrfPrefix = '__Host-cxl_csrf=';
-    const cookie = typeof document === 'undefined' ? '' : document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(csrfPrefix));
-    if (!cookie) throw new Error('Owner write request is missing its CSRF token');
-    headers['X-CXL-CSRF'] = decodeURIComponent(cookie.slice(csrfPrefix.length));
+    headers['X-CXL-CSRF'] = await ownerCsrfToken();
   }
   if (!useVercelOwnerAuth && ['works.fetch', 'works.create', 'works.update', 'folders.fetch', 'media.upload.begin', 'media.upload.chunk', 'media.upload.finalize'].includes(action)) {
     const { getSupabaseClient } = await import('../../../lib/supabaseClient');
@@ -44,6 +60,7 @@ export async function callGoogleBackend<T>(action: string, args: unknown[], useV
   });
   const result = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string; code?: string } | null;
   if (!response.ok || !result?.ok) {
+    if (response.status === 401 && useVercelOwnerAuth) throw new GoogleBackendRequestError(OWNER_SESSION_EXPIRED_MESSAGE, 401, result?.code);
     throw new GoogleBackendRequestError(result?.error || `Google backend request failed (${response.status})`, response.status, result?.code);
   }
   return result.data as T;

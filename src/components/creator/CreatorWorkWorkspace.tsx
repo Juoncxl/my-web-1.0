@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { normalizeAssetVisibility } from '../../lib/assetVisibility';
+import { isWorkOwnedBy } from '../../lib/publicCreatorIdentity';
+import { normalizeWorkStatus, WORK_STATUS_OPTIONS, workStatusFromLegacy, workStatusToLegacy, type WorkStatusValue } from '../../lib/workStatus';
 import { clearWorkMutationRequestId, composerDraftKey, deleteComposerDraft, getOrCreateWorkMutationRequestId, loadComposerDraft, saveComposerDraft } from '../../lib/composerDraftStore';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
 import { CreatorContentCanvas, CreatorFocusEditor, type CreatorUiCodeView } from './CreatorContentCanvas';
@@ -52,7 +54,7 @@ export type { CreatorContentType } from './creatorContentModel';
 export type CreatorWorkMode = 'standard' | 'collab';
 export type CreatorAudienceRating = 'general' | '13_plus' | '16_plus' | '18_plus';
 export type CreatorPublicationStatus = 'draft' | 'published';
-export type CreatorWorkStatus = 'not_started' | 'in_progress' | 'waiting_data' | 'in_review' | 'needs_fix' | 'blocked' | 'paused' | 'finished';
+export type CreatorWorkStatus = WorkStatusValue;
 
 export const CREATOR_CONTENT_TYPES = CREATOR_CONTENT_TYPE_META;
 
@@ -63,16 +65,7 @@ export const CREATOR_AUDIENCE_OPTIONS: Array<{ value: CreatorAudienceRating; lab
   { value: '16_plus', label: '🟠 16+' },
   { value: '18_plus', label: '🔞 18+' }
 ];
-export const CREATOR_WORK_STATUS_OPTIONS: Array<{ value: CreatorWorkStatus; label: string }> = [
-  { value: 'not_started', label: '⚪ ยังไม่เริ่ม' },
-  { value: 'in_progress', label: '🟡 กำลังทำ' },
-  { value: 'waiting_data', label: '🟠 รอข้อมูล' },
-  { value: 'in_review', label: '🔵 รอตรวจ' },
-  { value: 'needs_fix', label: '🟣 รอแก้ไข' },
-  { value: 'blocked', label: '🔴 ติดปัญหา' },
-  { value: 'paused', label: '⏸️ พักไว้' },
-  { value: 'finished', label: '🟢 เสร็จแล้ว' }
-];
+export const CREATOR_WORK_STATUS_OPTIONS: Array<{ value: CreatorWorkStatus; label: string }> = WORK_STATUS_OPTIONS.map(({ value, label }) => ({ value, label }));
 export const CREATOR_CONTENT_WARNING_OPTIONS = ['ความรุนแรง', 'เลือด', 'เนื้อหาทางเพศ', 'ภาษารุนแรง', 'สยองขวัญ', 'สารเสพติด', 'ความสัมพันธ์เป็นพิษ', 'การทำร้ายตนเอง', 'อื่น ๆ'];
 export const CREATOR_GENRE_OPTIONS = ['โรแมนซ์', 'รักใส ๆ / ฟีลกู๊ด', 'มหาวิทยาลัย', 'วัยเรียน', 'มาเฟีย / อาชญากรรม', 'ดราม่า', 'คอมเมดี้', 'แฟนตาซี', 'เหนือธรรมชาติ', 'โอเมก้าเวิร์ส', 'สยองขวัญ', 'สืบสวน / ระทึกขวัญ', 'แอ็กชัน', 'ไซไฟ', 'พีเรียด / ย้อนยุค', 'ชีวิตประจำวัน', 'โลกสมมติ / สร้างโลก'];
 export const CREATOR_EMOJI_OPTIONS = ['✨', '🌙', '💜', '🔥', '🎭', '📖', '🎨', '💻', '🐉', '🐺', '🌊', '✦'];
@@ -214,6 +207,15 @@ export function normalizeCreatorContentTypes(category: AssetCategory, values?: C
 function contentTypesToAssetCategory(values: CreatorContentType[]): AssetCategory { return contentTypeToAssetCategory(values[0] || 'bot_prompt'); }
 function fromAssetVisibility(value: AssetVisibility): AssetVisibility { return value === 'public' ? 'public' : 'private'; }
 function visibilityLabel(value: AssetVisibility): string { return value === 'public' ? '🌐 สาธารณะ' : '🔒 ส่วนตัว'; }
+function mergePlatforms(first: string[], second: string[]): string[] {
+  const seen = new Set<string>();
+  return [...first, ...second].filter(platform => {
+    const key = platform.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 function toggleSelection<T extends string>(values: T[], value: T): T[] { return values.includes(value) ? values.filter(item => item !== value) : [...values, value]; }
 
 function publicationStatusFromAsset(asset: Asset): CreatorPublicationStatus {
@@ -221,19 +223,11 @@ function publicationStatusFromAsset(asset: Asset): CreatorPublicationStatus {
 }
 
 function workStatusFromAsset(value: AssetStatus): CreatorWorkStatus {
-  if (value === 'finished') return 'finished';
-  if (value === 'archived') return 'paused';
-  if (value === 'in_progress') return 'in_progress';
-  return 'not_started';
+  return workStatusFromLegacy(value);
 }
 
 function workStatusToAssetStatus(value: CreatorWorkStatus): AssetStatus {
-  if (value === 'finished') return 'finished';
-  if (value === 'paused') return 'archived';
-  if (value === 'in_progress') return 'in_progress';
-  // Keep the legacy Asset contract valid while the richer Composer status
-  // remains in the in-memory draft model until its persistence contract is expanded.
-  return value === 'not_started' ? 'idea' : 'in_progress';
+  return workStatusToLegacy(value);
 }
 
 function serializeMainContentBlocks(blocks: WorkContentBlock[]): string {
@@ -295,7 +289,7 @@ export function createCreatorWorkDraftFromAsset(asset: Asset): CreatorWorkDraft 
     contentTypes: normalizeCreatorContentTypes(asset.category, asset.presentationMetadata?.contentTypes || asset.contentTypes),
     workMode: asset.category === 'collab' ? 'collab' : 'standard',
     publicationStatus: publicationStatusFromAsset(asset),
-    workStatus: asset.presentationMetadata?.workStatus || workStatusFromAsset(asset.status || 'finished'),
+    workStatus: normalizeWorkStatus(asset.presentationMetadata?.workStatus) || workStatusFromAsset(asset.status || 'finished'),
     // A legacy main body must never silently become a short description.
     description: asset.shortDescription ?? '',
     visibility: fromAssetVisibility(normalizeAssetVisibility({ visibility: asset.visibility, isPublic: asset.isPublic }).visibility),
@@ -309,12 +303,15 @@ export function createCreatorWorkDraftFromAsset(asset: Asset): CreatorWorkDraft 
     coverImage: asset.previewImage || '',
     mediaDraft: createMediaDraftFromLegacy({ previewImages: asset.previewImages, previewImage: asset.previewImage, media: asset.media }),
     tags: [...(asset.tags || [])],
-    appPlatforms: [...(asset.presentationMetadata?.appPlatforms || [])],
+    // A Collab's apps live in the Collab tab only; older Works may have them in both places.
+    appPlatforms: asset.category === 'collab' ? [] : [...(asset.presentationMetadata?.appPlatforms || [])],
     audienceRating: asset.presentationMetadata?.audienceRating || 'general',
     contentWarnings: [...(asset.presentationMetadata?.contentWarnings || [])],
     genres: [...(asset.presentationMetadata?.genres || [])],
     contentCanvas: restoredCanvas,
-    collaboration: asset.category === 'collab' ? restoredCollaboration : createBlankCollaborationDraft(),
+    collaboration: asset.category === 'collab'
+      ? { ...restoredCollaboration, platforms: mergePlatforms(restoredCollaboration.platforms, asset.presentationMetadata?.appPlatforms || []) }
+      : createBlankCollaborationDraft(),
     collaborationAssetId: asset.category === 'collab' ? null : asset.collaborationAssetId || null
   };
 }
@@ -514,7 +511,8 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     } satisfies Asset;
   }, [creatorProfile, draftPreview]);
   const reviewMissingNotices = getCreatorReviewMissingNotices({ title, coverImage, collaborationTitle: workMode === 'collab' ? collaboration.name : '' });
-  const availableCollaborations = useMemo(() => ownedWorks.filter(work => work.userId === creatorProfile?.id && work.category === 'collab' && work.id !== initialData?.id && !work.deletedAt), [creatorProfile?.id, initialData?.id, ownedWorks]);
+  // Public-feed rows carry the public creator id rather than userId, so match either.
+  const availableCollaborations = useMemo(() => ownedWorks.filter(work => isWorkOwnedBy(work, creatorProfile) && work.category === 'collab' && work.id !== initialData?.id && !work.deletedAt), [creatorProfile, initialData?.id, ownedWorks]);
   if (!isOpen) return null;
 
   const handleMediaUpload = (files: File[]) => {
@@ -637,11 +635,11 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
     <div className="csp-work-body"><main className="csp-work-main">
       {section === 'settings' && <section className="csp-work-section csp-composer-settings" aria-labelledby="csp-composer-settings-title">
         <div className="csp-section-heading"><div><h2 id="csp-composer-settings-title">การตั้งค่าผลงาน</h2><p>จัดการสถานะ การมองเห็น และข้อมูลช่วยจัดระเบียบผลงาน</p></div></div>
-        <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>สถานะการเผยแพร่</h3><p>ผลงานนี้เผยแพร่แล้วหรือยัง</p></div><div className="csp-choice-row">{([['draft', '📝 แบบร่าง'], ['published', '✅ เผยแพร่แล้ว']] as const).map(([value, label]) => <button type="button" key={value} className={publicationStatus === value ? 'csp-choice-button is-selected' : 'csp-choice-button'} aria-pressed={publicationStatus === value} onClick={() => setPublicationStatus(value)}>{label}</button>)}</div></div>
+        
         <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>การมองเห็น</h3><p>กำหนดว่าใครจะเห็นผลงานนี้</p></div><div className="csp-choice-row">{([['private', '🔒 ส่วนตัว'], ['public', '🌐 สาธารณะ']] as const).map(([value, label]) => <button type="button" key={value} className={visibility === value ? 'csp-choice-button is-selected' : 'csp-choice-button'} aria-pressed={visibility === value} onClick={() => setVisibility(value)}>{label}</button>)}</div></div>
         <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>สถานะผลงาน</h3><p>บอกความคืบหน้าของผลงานนี้</p></div><div className="csp-choice-row">{CREATOR_WORK_STATUS_OPTIONS.map(option => <button type="button" key={option.value} className={workStatus === option.value ? 'csp-choice-button is-selected' : 'csp-choice-button'} aria-pressed={workStatus === option.value} onClick={() => setWorkStatus(option.value)}>{option.label}</button>)}</div></div>
         <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>โฟลเดอร์</h3><p>เก็บผลงานไว้ในโฟลเดอร์ที่ต้องการ</p></div><select className="csp-taxonomy-select" value={folderId || ''} onChange={event => setFolderId(event.target.value || null)}><option value="">ไม่มีโฟลเดอร์</option>{folders.map(folder => <option value={folder.id} key={folder.id}>{folder.icon || '📁'} {folder.name}</option>)}</select></div>
-        <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>แอป / แพลตฟอร์ม</h3><p>เลือกได้มากกว่าหนึ่งรายการ และเพิ่มชื่อแพลตฟอร์มเองได้</p></div><div className="csp-selection-grid csp-taxonomy-options">{CREATOR_PLATFORM_OPTIONS.map(platform => <button type="button" key={platform} className={appPlatforms.includes(platform) ? 'csp-selection-chip is-selected' : 'csp-selection-chip'} aria-pressed={appPlatforms.includes(platform)} onClick={() => setAppPlatforms(previous => toggleSelection(previous, platform))}>{platform}</button>)}<div className="csp-selected-values">{appPlatforms.filter(platform => !CREATOR_PLATFORM_OPTIONS.includes(platform)).map(platform => <button type="button" key={platform} className="csp-selection-chip is-selected" onClick={() => setAppPlatforms(previous => previous.filter(item => item !== platform))}>{platform} ×</button>)}</div></div><div className="csp-inline-add"><input value={platformInput} onChange={event => setPlatformInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addPlatform(); } }} placeholder="ชื่อแอป / แพลตฟอร์มอื่น ๆ" aria-label="เพิ่มแอปหรือแพลตฟอร์ม" /><button type="button" className="csp-secondary-button" onClick={addPlatform}>+ เพิ่มเอง</button></div></div>
+        {workMode === 'collab' ? <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>แอป / แพลตฟอร์ม</h3><p>งานคอลแลปเลือกแอปในแท็บ “คอลแลป” ที่เดียว</p></div></div> : <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>แอป / แพลตฟอร์ม</h3><p>เลือกได้มากกว่าหนึ่งรายการ และเพิ่มชื่อแพลตฟอร์มเองได้</p></div><div className="csp-selection-grid csp-taxonomy-options">{CREATOR_PLATFORM_OPTIONS.map(platform => <button type="button" key={platform} className={appPlatforms.includes(platform) ? 'csp-selection-chip is-selected' : 'csp-selection-chip'} aria-pressed={appPlatforms.includes(platform)} onClick={() => setAppPlatforms(previous => toggleSelection(previous, platform))}>{platform}</button>)}<div className="csp-selected-values">{appPlatforms.filter(platform => !CREATOR_PLATFORM_OPTIONS.includes(platform)).map(platform => <button type="button" key={platform} className="csp-selection-chip is-selected" onClick={() => setAppPlatforms(previous => previous.filter(item => item !== platform))}>{platform} ×</button>)}</div></div><div className="csp-inline-add"><input value={platformInput} onChange={event => setPlatformInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addPlatform(); } }} placeholder="ชื่อแอป / แพลตฟอร์มอื่น ๆ" aria-label="เพิ่มแอปหรือแพลตฟอร์ม" /><button type="button" className="csp-secondary-button" onClick={addPlatform}>+ เพิ่มเอง</button></div></div>}
         <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>ระดับผู้ชม</h3><p>แยกจากคำเตือนเนื้อหา</p></div><div className="csp-choice-row csp-audience-options">{CREATOR_AUDIENCE_OPTIONS.map(option => <button type="button" key={option.value} className={audienceRating === option.value ? 'csp-choice-button is-selected' : 'csp-choice-button'} aria-pressed={audienceRating === option.value} onClick={() => setAudienceRating(option.value)}>{option.label}</button>)}</div></div>
         <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>คำเตือนเนื้อหา</h3><p>เลือกได้มากกว่าหนึ่งรายการเพื่อช่วยจัดระเบียบผลงาน</p></div><div className="csp-selection-grid csp-taxonomy-options">{CREATOR_CONTENT_WARNING_OPTIONS.map(warning => <button type="button" key={warning} className={contentWarnings.includes(warning) ? 'csp-selection-chip is-selected' : 'csp-selection-chip'} aria-pressed={contentWarnings.includes(warning)} onClick={() => setContentWarnings(previous => toggleSelection(previous, warning))}>{warning}</button>)}{contentWarnings.filter(warning => !CREATOR_CONTENT_WARNING_OPTIONS.includes(warning)).map(warning => <button type="button" key={warning} className="csp-selection-chip is-selected" onClick={() => setContentWarnings(previous => previous.filter(item => item !== warning))}>{warning} ×</button>)}</div><div className="csp-inline-add"><input value={warningInput} onChange={event => setWarningInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addWarning(); } }} placeholder="คำเตือนอื่น ๆ" aria-label="เพิ่มคำเตือนเนื้อหา" /><button type="button" className="csp-secondary-button" onClick={addWarning}>+ เพิ่มเอง</button></div></div>
         <div className="csp-taxonomy-group"><div className="csp-taxonomy-heading"><h3>แนว</h3><p>เลือกได้หลายแนวตามลักษณะของผลงาน</p></div><div className="csp-selection-grid csp-taxonomy-options">{CREATOR_GENRE_OPTIONS.map(genre => <button type="button" key={genre} className={genres.includes(genre) ? 'csp-selection-chip is-selected' : 'csp-selection-chip'} aria-pressed={genres.includes(genre)} onClick={() => setGenres(previous => toggleSelection(previous, genre))}>{genre}</button>)}</div></div>

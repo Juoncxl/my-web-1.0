@@ -1154,6 +1154,12 @@ function ownerSearchText_(asset) {
   var values=[asset.title,asset.shortDescription,asset.content,asset.authorName,asset.uiCodeSnippet];
   (asset.contentBlocks||[]).forEach(function(block){if(block){values.push(block.title,block.body);}});
   (asset.tags||[]).forEach(function(tag){values.push(tag);});
+  // Collab name, tag, apps, shared info and participant names (never contact details).
+  [asset.publicCollaboration,asset.collaboration].forEach(function(c){
+    if(!c)return;values.push(c.name,c.sharedTag);(c.platforms||[]).forEach(function(p){values.push(p);});
+    (c.sharedInformation||[]).forEach(function(i){if(i){values.push(i.title,i.content);}});
+    (c.participants||[]).forEach(function(p){if(p){values.push(p.creatorName,p.houseTag,p.externalWorkName);}});
+  });
   return values.filter(function(value){return typeof value==='string'&&value.length>0;}).join('\n').toLowerCase();
 }
 

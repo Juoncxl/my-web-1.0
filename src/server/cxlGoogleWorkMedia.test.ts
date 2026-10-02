@@ -2,7 +2,17 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOwnerSessionToken, OWNER_SESSION_COOKIE } from './cxlOwnerAuth';
-import { handleGoogleWorkMediaRead } from './cxlGoogleWorkMedia';
+import { attachmentDisposition, handleGoogleWorkMediaRead } from './cxlGoogleWorkMedia';
+
+describe('download filename', () => {
+  it('uses the readable Thai name with the real extension and a safe ASCII fallback', () => {
+    const header = attachmentDisposition('ทหารที่รัก-เอมิน-2.jpg', 'cxl-asset_x-id', 'png');
+    expect(header).toContain(`filename*=UTF-8''${encodeURIComponent('ทหารที่รัก-เอมิน-2.png')}`);
+    expect(header).toMatch(/filename="[A-Za-z0-9._-]+\.png"/);
+    expect(attachmentDisposition('../../"evil"\r\n', 'fallback', 'png')).not.toMatch(/[\r\n]|\.\.\/|"evil"/);
+    expect(attachmentDisposition(null, 'cxl-asset_x-id', 'webp')).toContain('filename="cxl-asset_x-id.webp"');
+  });
+});
 
 const WORK_ID = 'asset_1234567890abcdef1234567890abcdef';
 const MEDIA_ID = '123e4567-e89b-42d3-a456-426614174001';

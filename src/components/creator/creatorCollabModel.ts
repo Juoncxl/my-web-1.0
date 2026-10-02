@@ -71,7 +71,7 @@ export const CREATOR_COLLAB_STATUS_OPTIONS: Array<{ value: CreatorCollabSubmissi
 export const CREATOR_COLLAB_DEADLINE_PRESETS: Array<{ kind: Exclude<CreatorCollabDeadlineKind, 'custom'>; label: string }> = [
   { kind: 'data', label: '📋 ส่งข้อมูล' },
   { kind: 'image', label: '🖼️ ส่งรูป' },
-  { kind: 'publish', label: '🚀 เผยแพร่' }
+  { kind: 'publish', label: '🚀 ปล่อยบอท' }
 ];
 
 export function createBlankCollaborationDraft(): CreatorCollaborationDraft {

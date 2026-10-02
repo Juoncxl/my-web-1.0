@@ -110,6 +110,16 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
   const coverItem = draft.mediaDraft?.items.find(item => item.src === draft.coverImage);
   const workMediaDraft: StandardWorkMediaDraft[] = [];
   const canonicalCollaboration = isCollaboration ? cloneCreatorCollaborationDraft(draft.collaboration) : null;
+  // A Collab keeps its apps in one place: the Collab's own list.
+  if (canonicalCollaboration) {
+    const seen = new Set<string>();
+    canonicalCollaboration.platforms = [...canonicalCollaboration.platforms, ...draft.appPlatforms].filter(platform => {
+      const key = platform.trim().toLocaleLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
   if (draft.icon.type === 'image' && isLocalMediaSource(draft.icon.value) && draft.icon.mediaId) {
     workMediaDraft.push({ mediaId: draft.icon.mediaId, source: draft.icon.value, purpose: 'icon', sortOrder: 0, isCover: false, mimeType: draft.icon.mimeType });
   }
@@ -163,7 +173,7 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
     contentTypes,
     presentationMetadata: {
       contentTypes,
-      appPlatforms: [...draft.appPlatforms],
+      appPlatforms: isCollaboration ? [] : [...draft.appPlatforms],
       audienceRating: draft.audienceRating,
       contentWarnings: [...draft.contentWarnings],
       genres: [...draft.genres],

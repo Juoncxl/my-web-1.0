@@ -34,7 +34,7 @@ const CATEGORY_DEFINITIONS: Record<AssetCategory, CategoryMeta> = {
   },
   ui_code: {
     id: 'ui_code',
-    name: 'โค้ดหน้าตา UI',
+    name: 'โค้ดหน้า UI',
     nameEn: 'UI Code',
     emoji: '💻',
     color: 'text-indigo-600',
@@ -44,7 +44,7 @@ const CATEGORY_DEFINITIONS: Record<AssetCategory, CategoryMeta> = {
   },
   prompts: {
     id: 'prompts',
-    name: 'คำสั่งพรอมต์',
+    name: 'พรอมต์ / เทมเพลตบอท',
     nameEn: 'Prompts & System',
     emoji: '✨',
     color: 'text-amber-600',

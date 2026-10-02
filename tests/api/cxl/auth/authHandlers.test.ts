@@ -142,6 +142,23 @@ describe('Vercel Owner auth handlers', () => {
     expect(String(loggedOut.headers['Set-Cookie'])).toContain('Max-Age=0');
   });
 
+  it('renews an Owner session older than a day and restores a missing CSRF cookie', async () => {
+    const twoDaysAgo = Math.floor(Date.now() / 1000) - 2 * 24 * 60 * 60;
+    const old = createOwnerSessionToken(allowedSub, undefined, secret, twoDaysAgo).token;
+    const res = response();
+    await session({ method: 'GET', headers: { cookie: `__Host-cxl_owner=${old}` } } as any, res as any);
+    const cookies = ([] as string[]).concat(res.headers['Set-Cookie'] as string | string[]);
+    expect(JSON.parse(res.body)).toMatchObject({ authenticated: true });
+    expect(cookies.some(cookie => cookie.startsWith('__Host-cxl_owner=') && !cookie.includes(old) && cookie.includes('HttpOnly'))).toBe(true);
+    expect(cookies.some(cookie => cookie.startsWith('__Host-cxl_csrf=') && !cookie.includes('HttpOnly'))).toBe(true);
+
+    const fresh = createOwnerSessionToken(allowedSub, undefined, secret).token;
+    const kept = response();
+    await session({ method: 'GET', headers: { cookie: `__Host-cxl_owner=${fresh}; __Host-cxl_csrf=existing` } } as any, kept as any);
+    expect(kept.headers['Set-Cookie']).toBeUndefined();
+    expect(JSON.parse(kept.body).csrfToken).toBe('existing');
+  });
+
   it('keeps unauthenticated visitors anonymous without a profile lookup', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Copy, GripVertical, ImagePlus, Link2, Maximize2, Plus, Search, Trash2, X } from 'lucide-react';
 import type { Asset, AssetVisibility, User } from '../../types';
 import { ConfirmationDialog } from '../ConfirmationDialog';
+import { isWorkOwnedBy } from '../../lib/publicCreatorIdentity';
 import { CreatorFocusEditor } from './CreatorContentCanvas';
 import { formatContentCounter, type CreatorContentCounterMode } from './creatorContentModel';
 import { CREATOR_MEDIA_MAX_ITEMS, createMediaItem, isSupportedCreatorGlobalMediaFile } from './creatorMediaModel';
@@ -167,7 +168,7 @@ export const CreatorCollabPanel: React.FC<CreatorCollabPanelProps> = ({ draft, v
   const draggedSharedIdRef = useRef<string | null>(null);
   const sharedDropTargetRef = useRef<SharedInformationDropTarget | null>(null);
   const summary = getCollaborationSummary(draft);
-  const linkableWorks = useMemo(() => ownedWorks.filter(work => work.userId === creatorProfile?.id && work.id !== currentWorkId && !work.deletedAt && work.category !== 'collab'), [creatorProfile?.id, currentWorkId, ownedWorks]);
+  const linkableWorks = useMemo(() => ownedWorks.filter(work => isWorkOwnedBy(work, creatorProfile) && work.id !== currentWorkId && !work.deletedAt && work.category !== 'collab'), [creatorProfile, currentWorkId, ownedWorks]);
   const visibleParticipants = useMemo(() => { const query = search.trim().toLowerCase(); return query ? draft.participants.filter(participant => [participant.creatorName, participant.houseTag, participant.externalWorkName, participant.contact, ...participant.platforms].some(value => value.toLowerCase().includes(query))) : draft.participants; }, [draft.participants, search]);
   const changeDraft = (update: Partial<CreatorCollaborationDraft>) => onChange(updateCollabDraft(draft, update));
   const addParticipant = (isOwner = false) => { const participant = createBlankCollabParticipant({ isOwner, creatorName: isOwner ? creatorProfile?.displayName || 'ฉัน' : '', platforms: isOwner ? [...draft.platforms] : [] }); onChange(addCollabParticipant(draft, participant)); setExpandedParticipantId(participant.id); };
