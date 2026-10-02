@@ -115,10 +115,12 @@ async function findSessionFile(env: DirectMediaEnv, folderId: string, uploadId: 
   return { id, session: await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`)).json() };
 }
 
+// The declared mime type is not compared: browsers guess it from the file name (a WebP saved as .jpg is
+// declared image/jpeg) while Drive records the real one. Checksum + size already pin the bytes.
 function metadataMatches(stored: Json, input: Json, ownerUserId: string): boolean {
   return Boolean(stored) && String(stored.mediaId) === String(input.mediaId) && String(stored.workId) === String(input.workId)
     && String(stored.ownerUserId) === ownerUserId && Number(stored.totalFileSize) === Number(input.totalFileSize)
-    && String(stored.mimeType) === String(input.mimeType) && String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase()
+    && String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase()
     && String(stored.purpose) === String(input.purpose) && String(stored.contextId || '') === String(input.contextId || '')
     && Number(stored.sortOrder) === Number(input.sortOrder) && Boolean(stored.isCover) === Boolean(input.isCover);
 }
@@ -127,7 +129,7 @@ function metadataMatches(stored: Json, input: Json, ownerUserId: string): boolea
 function mismatchedFields(stored: Json, input: Json, ownerUserId: string): string[] {
   const checks: Array<[string, boolean]> = [
     ['workId', String(stored.workId) === String(input.workId)], ['owner', String(stored.ownerUserId) === ownerUserId],
-    ['size', Number(stored.totalFileSize) === Number(input.totalFileSize)], ['mimeType', String(stored.mimeType) === String(input.mimeType)],
+    ['size', Number(stored.totalFileSize) === Number(input.totalFileSize)],
     ['sha256', String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase()], ['purpose', String(stored.purpose) === String(input.purpose)],
     ['contextId', String(stored.contextId || '') === String(input.contextId || '')], ['sortOrder', Number(stored.sortOrder) === Number(input.sortOrder)],
     ['isCover', Boolean(stored.isCover) === Boolean(input.isCover)]
@@ -138,7 +140,7 @@ function mismatchedFields(stored: Json, input: Json, ownerUserId: string): strin
 function sameImageOfSameWork(stored: Json, input: Json, ownerUserId: string): boolean {
   return String(stored.mediaId) === String(input.mediaId) && String(stored.workId) === String(input.workId)
     && String(stored.ownerUserId) === ownerUserId && Number(stored.totalFileSize) === Number(input.totalFileSize)
-    && String(stored.mimeType) === String(input.mimeType) && String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase();
+    && String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase();
 }
 
 /** appProperties view of a media file's upload metadata (the Apps Script manifest fields). */
@@ -182,7 +184,7 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
     if (['finalized', 'attached'].includes(manifest.state) && existing.size === input.totalFileSize) return { uploadId: input.uploadId, mediaId: input.mediaId, finalized: true };
     // Bytes already landed but finalize never ran (e.g. the earlier save timed out): finalize that file instead of uploading a second copy.
     if (manifest.state === 'uploading' && existing.size === Number(input.totalFileSize)) {
-      await verifyAndFinalize(env, existing, String(input.sha256).toLowerCase(), String(input.mimeType));
+      await verifyAndFinalize(env, existing, String(input.sha256).toLowerCase());
       return { uploadId: input.uploadId, mediaId: input.mediaId, finalized: true };
     }
   }
@@ -286,8 +288,11 @@ function signatureMime(bytes: Buffer): string {
   return '';
 }
 
-/** Check the stored bytes (checksum + image signature), make the file private and mark it finalized. */
-async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expectedSha256: string, mimeType: string): Promise<void> {
+/**
+ * Check the stored bytes (checksum + a supported image signature), make the file private and mark it
+ * finalized. The signature may differ from the declared type (a WebP named .jpg); the bytes decide.
+ */
+async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expectedSha256: string): Promise<void> {
   let sha256 = file.sha256;
   let head: Buffer;
   if (!sha256) {
@@ -297,7 +302,7 @@ async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expec
     head = Buffer.from(await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(file.id)}?alt=media&supportsAllDrives=true`, { headers: { Range: 'bytes=0-15' } }, [206])).arrayBuffer());
   }
   if (sha256 !== expectedSha256) fail('MEDIA_UPLOAD_FINAL_CHECKSUM', 'Work media checksum did not match');
-  if (signatureMime(head) !== mimeType) fail('MEDIA_UPLOAD_MIME_MISMATCH', 'Work media type did not match its binary signature');
+  if (!EXTENSIONS[signatureMime(head)]) fail('MEDIA_UPLOAD_MIME_MISMATCH', 'Work media is not a supported image (JPEG, PNG, WebP or GIF)');
   await ensurePrivate(env, file.id);
   if (file.props.cxlState === 'uploading') await markWorkMediaState(env, file.id, { cxlState: 'finalized', cxlFinalizedAt: new Date().toISOString() });
 }
@@ -322,7 +327,7 @@ export async function directMediaFinalize(input: Json, ownerUserId: string, env:
     if (!file) fail('MEDIA_UPLOAD_MEDIA_INVALID', 'Uploaded Work media could not be found');
   }
   if (file!.size !== Number(session.totalFileSize)) fail('MEDIA_UPLOAD_CHUNK_CHECKSUM', 'Work media upload size did not match');
-  await verifyAndFinalize(env, file!, String(session.sha256), String(session.mimeType));
+  await verifyAndFinalize(env, file!, String(session.sha256));
   await drive(env, `${DRIVE_FILES}/${encodeURIComponent(known!.id)}?supportsAllDrives=true`, { method: 'DELETE' }, [404]);
   return { uploadId: input.uploadId, mediaId: session.mediaId, finalized: true };
 }
