@@ -10442,3 +10442,18 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .csp-works-controls > .csp-filter-row { width: 100%; }
 .csp-works-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; }
 .csp-works-filter-bar > .csp-filter-row { flex: 0 0 auto; }
+
+/* Profile works dropdowns: a visible pill box like the chips beside them, label as a quiet caption. */
+.csp-works-filter-bar .csp-works-sort { gap: .4rem; }
+.csp-works-filter-bar .csp-works-sort > span { color: var(--cv-muted); font-size: .7rem; font-weight: 800; }
+.csp-works-filter-bar .csp-works-sort select {
+  min-height: 1.95rem; min-width: 7.5rem; border: 1px solid var(--cv-line); border-radius: 999px;
+  padding: .3rem 1.9rem .3rem .75rem; background-color: var(--cv-control-surface); color: var(--cv-ink, #01162b);
+  font-size: .72rem; font-weight: 800; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a5cc8' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right .65rem center;
+}
+.csp-works-filter-bar .csp-works-sort select:hover,
+.csp-works-filter-bar .csp-works-sort select:focus-visible { border-color: var(--cv-iridescent-border); background-color: var(--cv-lilac); outline: none; }
+.dark .csp-works-filter-bar .csp-works-sort select { color: #e4ecfb; }
