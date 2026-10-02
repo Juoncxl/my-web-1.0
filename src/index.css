@@ -10431,3 +10431,14 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .dark .work-detail-participant-summary strong { color: #f1f5ff; }
 .dark .work-detail-participant-summary span,
 .dark .work-detail-participant-status-compact { color: #b7c7de; }
+
+/* Participant fold arrow: a clear round chevron that turns when open. */
+.work-detail-participant-toggle svg { flex: none; width: 1.35rem; height: 1.35rem; border-radius: 999px; padding: .15rem; background: rgba(177, 153, 219, .2); color: #5b3f8f; transition: transform .18s ease; }
+.work-detail-participant-toggle svg.is-open { transform: rotate(180deg); }
+.dark .work-detail-participant-toggle svg { background: rgba(177, 153, 219, .25); color: #e4dbf7; }
+
+/* Profile works toolbar: categories on top, the other filters on their own wrapping row. */
+.csp-works-controls { flex-direction: column; align-items: stretch; gap: .5rem; }
+.csp-works-controls > .csp-filter-row { width: 100%; }
+.csp-works-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; }
+.csp-works-filter-bar > .csp-filter-row { flex: 0 0 auto; }

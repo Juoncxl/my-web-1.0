@@ -3,6 +3,7 @@ import confetti from 'canvas-confetti';
 import {
   Bookmark,
   Check,
+  ChevronDown,
   Clock3,
   Code2,
   Copy,
@@ -607,7 +608,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             const isParticipantOpen = !participantsCollapsible || openParticipantIds.has(participant.id);
             const participantStatusText = [participant.dataStatus && `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล`, participant.imageStatus && `${getCollabStatusLabel(participant.imageStatus)} รูป`].filter(Boolean).join(' · ');
             return <article key={participant.id} className={isParticipantOpen ? '' : 'is-folded'}>
-            <header><div>{participantsCollapsible ? <button type="button" className="work-detail-participant-toggle" aria-expanded={isParticipantOpen} onClick={() => setOpenParticipantIds(current => { const next = new Set(current); if (next.has(participant.id)) next.delete(participant.id); else next.add(participant.id); return next; })}><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong><span aria-hidden="true">{isParticipantOpen ? '▴' : '▾'}</span></button> : <strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>}{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
+            <header><div>{participantsCollapsible ? <button type="button" className="work-detail-participant-toggle" aria-expanded={isParticipantOpen} onClick={() => setOpenParticipantIds(current => { const next = new Set(current); if (next.has(participant.id)) next.delete(participant.id); else next.add(participant.id); return next; })}><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong><ChevronDown aria-hidden="true" className={isParticipantOpen ? 'is-open' : ''} /></button> : <strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>}{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
             {!isParticipantOpen && participantStatusText && <p className="work-detail-participant-status-compact">{participantStatusText}</p>}
             {isParticipantOpen && <>
             <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms?.map(platform => <span key={platform}>{platform}</span>)}</div>
