@@ -211,9 +211,11 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
   }
 
   // Owner images are immutable per media ID (the URL also carries a version), so the
-  // Owner's own browser may keep them; shared caches never do.
+  // Owner's own browser may keep them; shared caches never do. Public images stay at the
+  // CDN a few minutes so repeat views skip the Sheets authorization (and its quota), while
+  // a Work turned private still stops being served soon after.
   res.setHeader('Cache-Control', scope === 'public' && download !== '1'
-    ? 'public, max-age=60, s-maxage=60, stale-while-revalidate=60'
+    ? 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
     : download === '1' ? 'private, no-store' : 'private, max-age=3600');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // Read straight from Drive when the Service Account is configured; the Apps Script

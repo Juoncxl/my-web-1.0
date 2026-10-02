@@ -149,6 +149,16 @@ describe('Google standard Work media proxy', () => {
     expect(res.body()).toEqual(IMAGE_BYTES);
   });
 
+  it('accepts a client retry attempt and lets the CDN keep public media for a few minutes', async () => {
+    setReadEnvironment();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, data: chunkResponse() }), { status: 200 })));
+    const res = new MockResponse();
+    await handleGoogleWorkMediaRead(request(`/api/cxl/media?scope=public&workId=${WORK_ID}&ref=media%3A${MEDIA_ID}&v=1700000000000&retry=2`), res as unknown as ServerResponse);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['Cache-Control']).toBe('public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+    expect(res.body()).toEqual(IMAGE_BYTES);
+  });
+
   it('assembles sequential Range chunks and verifies the full media checksum', async () => {
     setReadEnvironment();
     const fullBytes = Buffer.alloc(2 * 1024 * 1024 + 1);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Bookmark,
@@ -48,6 +48,7 @@ import { usePublicCreatorProfiles } from '../hooks/usePublicCreatorProfiles';
 import { resolvePublicCreatorKey } from '../lib/publicCreatorIdentity';
 import { SandboxedCodePreview } from './SandboxedCodePreview';
 import { ConfirmationDialog } from './ConfirmationDialog';
+import { isRetryableMediaSrc, MEDIA_IMAGE_MAX_RETRIES, mediaImageAttemptSrc, mediaImageRetryDelayMs } from '../lib/mediaImageRetry';
 
 type CodeView = 'split' | 'preview' | 'code';
 
@@ -105,9 +106,9 @@ function CodePresentation({ code, view, onViewChange }: { code: string; view: Co
   </>;
 }
 
-function ContentBlock({ block, copied, onCopy, failedImageSrcs, onImageError }: {
+function ContentBlock({ block, copied, onCopy, failedImageSrcs, onImageError, imageSrc = src => src }: {
   block: WorkContentBlock; copied: boolean; onCopy: () => void;
-  failedImageSrcs?: ReadonlySet<string>; onImageError?: (src: string) => void;
+  failedImageSrcs?: ReadonlySet<string>; onImageError?: (src: string) => void; imageSrc?: (src: string) => string;
 }) {
   if (block.type === 'Divider') {
     return <div className="work-detail-divider" aria-label={block.title || 'เส้นแบ่ง'}><span>✦</span></div>;
@@ -128,7 +129,7 @@ function ContentBlock({ block, copied, onCopy, failedImageSrcs, onImageError }: 
       {isCopyable && <CopyButton copied={copied} label="คัดลอก" onClick={onCopy} />}
     </header>
     {block.type === 'Heading' ? <h4>{body || block.title}</h4>
-      : isImageSource ? <figure><img src={body} alt={block.title || 'ภาพประกอบผลงาน'} referrerPolicy="no-referrer" onError={() => onImageError?.(body)} /><figcaption>{block.title}</figcaption></figure>
+      : isImageSource ? <figure><img src={imageSrc(body)} alt={block.title || 'ภาพประกอบผลงาน'} referrerPolicy="no-referrer" onError={() => onImageError?.(body)} /><figcaption>{block.title}</figcaption></figure>
         : block.type === 'Image' ? <div className="work-detail-image-placeholder"><ImageIcon aria-hidden="true" /><p>{body || 'ยังไม่มีภาพประกอบ'}</p></div>
           : block.type === 'Prompt' ? <pre>{body}</pre>
             : block.type === 'Note' ? <aside>{body}</aside>
@@ -216,7 +217,27 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [isPermanentDeleteConfirmationOpen, setIsPermanentDeleteConfirmationOpen] = useState(false);
   // Image sources that failed to load (e.g. still only in Supabase) are hidden, not shown broken.
   const [failedImageSrcs, setFailedImageSrcs] = useState<ReadonlySet<string>>(() => new Set());
-  const markImageFailed = (src: string) => setFailedImageSrcs(previous => previous.has(src) ? previous : new Set([...previous, src]));
+  // Retry attempt per source; a scoped media read that failed is retried before it is given up on.
+  const [imageAttempts, setImageAttempts] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const imageRetryTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => () => { imageRetryTimers.current.forEach(clearTimeout); imageRetryTimers.current.clear(); }, []);
+  const imageSrc = (src: string) => mediaImageAttemptSrc(src, imageAttempts.get(src) || 0);
+  const markImageFailed = (src: string) => {
+    const attempt = imageAttempts.get(src) || 0;
+    if (isRetryableMediaSrc(src) && attempt < MEDIA_IMAGE_MAX_RETRIES) {
+      if (imageRetryTimers.current.has(src)) return;
+      imageRetryTimers.current.set(src, setTimeout(() => {
+        imageRetryTimers.current.delete(src);
+        setImageAttempts(previous => new Map(previous).set(src, attempt + 1));
+      }, mediaImageRetryDelayMs(attempt + 1)));
+      return;
+    }
+    setFailedImageSrcs(previous => previous.has(src) ? previous : new Set([...previous, src]));
+  };
+  const retryImage = (src: string) => {
+    setFailedImageSrcs(previous => { const next = new Set(previous); next.delete(src); return next; });
+    setImageAttempts(previous => new Map(previous).set(src, (previous.get(src) || 0) + 1));
+  };
   const creatorProfileAssets = useMemo(() => asset ? [asset] : [], [asset]);
   const publicCreatorProfiles = usePublicCreatorProfiles(creatorProfileAssets, creatorProfile);
   // Composer Review uses a temporary private asset that is not yet published.
@@ -487,7 +508,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         <div className="work-detail-grid">
           <div className="work-detail-media-column" data-work-detail-section="media">
             <div className={`work-detail-cover ${activeGalleryImage ? 'has-image' : 'has-fallback'}`}>
-              {activeGalleryImage && <img src={activeGalleryImage.src} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(activeGalleryImage.src)} />}
+              {activeGalleryImage && <img src={imageSrc(activeGalleryImage.src)} alt={`ภาพประกอบ ${display.title} รูปที่ ${activeImageIndex + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(activeGalleryImage.src)} />}
               {!activeGalleryImage && <div className={`work-detail-mark ${asset.icon.type === 'image' ? 'is-media' : ''}`}><WorkMark icon={asset.icon} /></div>}
               {display.isCollaborationFocused && activeGalleryImage && <button
                 type="button"
@@ -505,7 +526,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
                 onClick={() => { setActiveImageIndex(index); setGalleryImageError(null); }}
                 aria-label={`ดูรูปที่ ${index + 1}`}
                 aria-pressed={activeImageIndex === index}
-              ><img src={image.src} alt="" referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /></button>)}
+              ><img src={imageSrc(image.src)} alt="" referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /></button>)}
             </div>}
             {galleryImageError && <p className="work-detail-reference-error work-detail-gallery-error" role="status">{galleryImageError}</p>}
           </div>
@@ -560,7 +581,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           </div>
           <div className="work-detail-blocks">
             {mainBlocks.length > 0
-              ? mainBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `block-${block.id}`} onCopy={() => copyToClipboard(block.body, `block-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} />)
+              ? mainBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `block-${block.id}`} onCopy={() => copyToClipboard(block.body, `block-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} imageSrc={imageSrc} />)
               : <article className="work-detail-block is-text"><header><div><span>ข้อความ</span><strong>เนื้อหา</strong></div>{isMeaningfulCopyText(legacyContent, 'เนื้อหา') && <CopyButton copied={copiedKey === 'content'} label="คัดลอก" onClick={() => copyToClipboard(legacyContent, 'content')} />}</header><p>{legacyContent}</p></article>}
           </div>
         </section>}
@@ -618,7 +639,10 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
             {participant.notes && <p><strong>โน้ต:</strong> {participant.notes}</p>}
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
-            {Boolean(participant.referenceImages?.some(image => !failedImageSrcs.has(image.src))) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => failedImageSrcs.has(image.src) ? null : <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
+            {Boolean(participant.referenceImages?.some(image => !failedImageSrcs.has(image.src) || isRetryableMediaSrc(image.src))) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => failedImageSrcs.has(image.src)
+              // Work media that kept failing (e.g. a quota burst) offers a manual retry; a legacy miss stays hidden.
+              ? isRetryableMediaSrc(image.src) ? <figure key={image.id}><button type="button" className="work-detail-reference-retry" onClick={() => retryImage(image.src)} aria-label={`โหลดรูปอ้างอิงที่ ${index + 1} อีกครั้ง`}><RotateCcw aria-hidden="true" /><span>โหลดรูปไม่สำเร็จ</span><small>แตะเพื่อลองใหม่</small></button></figure> : null
+              : <figure key={image.id}><img src={imageSrc(image.src)} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
             {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
             </>}
           </article>;
@@ -626,7 +650,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         </section> : null}
 
         {display.isCollaborationFocused && !publicCollaboration && publicCollaborationBlocks.length > 0 && <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content-legacy">
-          <div className="work-detail-blocks">{publicCollaborationBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `collaboration-${block.id}`} onCopy={() => copyToClipboard(block.body, `collaboration-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} />)}</div>
+          <div className="work-detail-blocks">{publicCollaborationBlocks.map(block => <ContentBlock key={block.id} block={block} copied={copiedKey === `collaboration-${block.id}`} onCopy={() => copyToClipboard(block.body, `collaboration-${block.id}`)} failedImageSrcs={failedImageSrcs} onImageError={markImageFailed} imageSrc={imageSrc} />)}</div>
         </section>}
 
         {!display.isCollaborationFocused && visibleLinkedCollaboration && <section className="work-detail-section work-detail-linked-collaboration" data-work-detail-section="linked-collaboration">

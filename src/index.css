@@ -10235,6 +10235,12 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
 .work-detail-reference-download { position: absolute; right: .3rem; bottom: .3rem; display: grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid rgba(255, 255, 255, .76); border-radius: .45rem; background: rgba(1, 22, 43, .76); color: #fff; cursor: pointer; }
 .work-detail-reference-download:hover { background: #00385a; }
 .work-detail-reference-download svg { width: .85rem; height: .85rem; }
+.work-detail-reference-retry { display: grid; place-content: center; justify-items: center; gap: .15rem; width: 100%; aspect-ratio: 1; border: 0; padding: .35rem; background: transparent; color: #6a90b4; font: inherit; text-align: center; cursor: pointer; }
+.work-detail-reference-retry:hover,
+.work-detail-reference-retry:focus-visible { background: rgba(177, 153, 219, .14); outline: none; }
+.work-detail-reference-retry svg { width: 1rem; height: 1rem; }
+.work-detail-reference-retry span { font-size: .72rem; font-weight: 600; line-height: 1.3; }
+.work-detail-reference-retry small { font-size: .66rem; line-height: 1.3; opacity: .85; }
 .work-detail-reference-error { margin: .15rem 0 0; color: #a43355; font-size: .74rem; line-height: 1.45; }
 
 /* Public Collab shared information is intentionally carded independently from
