@@ -25,6 +25,8 @@ import { useRecentlyViewed } from './hooks/useRecentlyViewed';
 import { useAssetFilters } from './hooks/useAssetFilters';
 import { useAssetModalState } from './hooks/useAssetModalState';
 import { useAssetActions } from './hooks/useAssetActions';
+import { isKnownAppPath } from './lib/appRoutes';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { getLegacyProfileRedirect, parseCanonicalProfileLocation, resolveProfileWorksReadScope } from './lib/profileRouting';
 import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
@@ -92,6 +94,7 @@ function MainApp() {
   const legacyProfileRedirect = getLegacyProfileRedirect(window.location.pathname, window.location.search, currentUser);
   const workRoute = window.location.pathname.match(/^\/work\/([^/]+)(?:\/(edit))?\/?$/i);
   const isScheduleRoute = /^\/schedule\/?$/i.test(window.location.pathname);
+  const isNotFoundRoute = !isKnownAppPath(window.location.pathname);
 
   // Navigation State
   const [activeView, setActiveView] = useState<'feed' | 'vault'>('feed');
@@ -621,7 +624,9 @@ function MainApp() {
                 </button>
               </div>
             )}
-            {isScheduleRoute
+            {isNotFoundRoute
+              ? <NotFoundPage onGoHome={() => { navigate('/'); window.scrollTo({ top: 0 }); }} />
+              : isScheduleRoute
               ? <CollabSchedulePage assets={assets} isLoading={isLoadingAssets} isOwner={Boolean(currentUser)} onBack={() => navigate('/')} onOpenAsset={handleOpenAssetView} />
               : <DiscoverPage collectionProps={collectionProps} onOpenSchedule={() => { navigate('/schedule'); window.scrollTo({ top: 0 }); }} />}
           </main>
