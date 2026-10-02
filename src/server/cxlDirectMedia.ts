@@ -123,6 +123,18 @@ function metadataMatches(stored: Json, input: Json, ownerUserId: string): boolea
     && Number(stored.sortOrder) === Number(input.sortOrder) && Boolean(stored.isCover) === Boolean(input.isCover);
 }
 
+/** Names of the upload fields that differ, for diagnosing identity conflicts (no values). */
+function mismatchedFields(stored: Json, input: Json, ownerUserId: string): string[] {
+  const checks: Array<[string, boolean]> = [
+    ['workId', String(stored.workId) === String(input.workId)], ['owner', String(stored.ownerUserId) === ownerUserId],
+    ['size', Number(stored.totalFileSize) === Number(input.totalFileSize)], ['mimeType', String(stored.mimeType) === String(input.mimeType)],
+    ['sha256', String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase()], ['purpose', String(stored.purpose) === String(input.purpose)],
+    ['contextId', String(stored.contextId || '') === String(input.contextId || '')], ['sortOrder', Number(stored.sortOrder) === Number(input.sortOrder)],
+    ['isCover', Boolean(stored.isCover) === Boolean(input.isCover)]
+  ];
+  return checks.filter(([, same]) => !same).map(([name]) => name);
+}
+
 function sameImageOfSameWork(stored: Json, input: Json, ownerUserId: string): boolean {
   return String(stored.mediaId) === String(input.mediaId) && String(stored.workId) === String(input.workId)
     && String(stored.ownerUserId) === ownerUserId && Number(stored.totalFileSize) === Number(input.totalFileSize)
@@ -162,7 +174,11 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
       existing.props = { ...existing.props, ...placement };
       manifest = mediaFileManifest(existing);
     }
-    if (!metadataMatches(manifest, input, ownerUserId)) fail('MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT', 'Media identity is already bound to different Work data');
+    if (!metadataMatches(manifest, input, ownerUserId)) {
+      const differs = mismatchedFields(manifest, input, ownerUserId);
+      console.warn(JSON.stringify({ event: 'cxl_media_identity_conflict', mediaId: String(input.mediaId), state: manifest.state, differs }));
+      fail('MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT', `Media identity is already bound to different Work data (${differs.join(', ')}; ${manifest.state})`);
+    }
     if (['finalized', 'attached'].includes(manifest.state) && existing.size === input.totalFileSize) return { uploadId: input.uploadId, mediaId: input.mediaId, finalized: true };
     // Bytes already landed but finalize never ran (e.g. the earlier save timed out): finalize that file instead of uploading a second copy.
     if (manifest.state === 'uploading' && existing.size === Number(input.totalFileSize)) {
