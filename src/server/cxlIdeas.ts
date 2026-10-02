@@ -96,6 +96,15 @@ export function parseIdeaOp(value: unknown): IdeaOp | null {
   }
 }
 
+/** After writing, did this operation's result really land? (Another tab may have written over it.) */
+export function ideaOpLanded(stored: IdeaFile, op: IdeaOp, expected: IdeaFile, addedId?: string): boolean {
+  if (op.op === 'add') return stored.ideas.some(idea => idea.id === addedId);
+  if (op.op === 'delete') return !stored.ideas.some(idea => idea.id === op.id);
+  const want = expected.ideas.find(idea => idea.id === op.id);
+  const got = stored.ideas.find(idea => idea.id === op.id);
+  return Boolean(want && got && want.text === got.text && want.status === got.status && want.workId === got.workId);
+}
+
 export function applyIdeaOp(file: IdeaFile, op: IdeaOp, now: Date, newId: () => string): IdeaFile {
   const at = now.toISOString();
   if (op.op === 'add') {

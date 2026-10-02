@@ -98,6 +98,38 @@ describe('owner files on the collab-progress function', () => {
     expect(bad.statusCode).toBe(400);
   });
 
+  it('retries when another tab overwrote the file right after our write, so both ideas survive', async () => {
+    const drive = fakeDrive({ 'cxl-owner-ideas.json': { version: 1, ideas: [] } });
+    let raced = false;
+    const racing = vi.fn(async (input: string, init: RequestInit = {}) => {
+      const result = await drive.fetchMock(input, init);
+      if (!raced && String(input).includes('/upload/drive/v3/files')) {
+        raced = true; // another instance writes its own idea over ours
+        drive.files['cxl-owner-ideas.json'].content = { version: 1, ideas: [{ id: 'other-tab', text: 'จากอีกแท็บ', status: 'waiting', workId: null, createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z', history: [] }] };
+      }
+      return result;
+    });
+    vi.stubGlobal('fetch', racing);
+    const res = response();
+    await handler(post('/api/cxl/collab-progress?store=ideas', { op: 'add', text: 'ของแท็บนี้' }) as never, res as never);
+    const stored = (drive.files['cxl-owner-ideas.json'].content as { ideas: Array<{ text: string }> }).ideas.map(idea => idea.text);
+    expect(stored).toEqual(expect.arrayContaining(['ของแท็บนี้', 'จากอีกแท็บ']));
+  });
+
+  it('refuses to write when the stored file cannot be read, instead of treating it as empty', async () => {
+    const drive = fakeDrive({ 'cxl-owner-ideas.json': { version: 1, ideas: [] } });
+    const broken = vi.fn(async (input: string, init: RequestInit = {}) => {
+      const url = new URL(input);
+      if (url.pathname.startsWith('/drive/v3/files/') && url.searchParams.get('alt') === 'media') return new Response('{"version":1,"ideas":[{"id"', { status: 200 });
+      return drive.fetchMock(input, init);
+    });
+    vi.stubGlobal('fetch', broken);
+    const res = response();
+    await handler(post('/api/cxl/collab-progress?store=ideas', { op: 'add', text: 'x' }) as never, res as never);
+    expect(res.statusCode).toBe(502);
+    expect(broken.mock.calls.some(call => String(call[0]).includes('/upload/drive/v3/files'))).toBe(false);
+  });
+
   it('keeps Collab progress behaviour unchanged without a store', async () => {
     const drive = fakeDrive({ 'cxl-collab-progress.json': { 'asset_a|2026-10-01|x': '2026-10-01T00:00:00.000Z' } });
     vi.stubGlobal('fetch', drive.fetchMock);

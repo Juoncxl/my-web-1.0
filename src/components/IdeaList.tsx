@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchIdeas, filterIdeas, formatIdeaTime, IDEA_STATUS_LABELS, sendIdeaOp, type Idea, type IdeaFilter, type IdeaOp, type IdeaStatus } from '../lib/ideaInbox';
+import { draftAfterSave, fetchIdeas, filterIdeas, formatIdeaTime, IDEA_STATUS_LABELS, sendIdeaOp, type Idea, type IdeaFilter, type IdeaOp, type IdeaStatus } from '../lib/ideaInbox';
 
 interface IdeaListProps {
   /** Show only this Work's ideas; new ideas are tied to it. */
@@ -42,7 +42,8 @@ export const IdeaList: React.FC<IdeaListProps> = ({ workId, works }) => {
   const add = async () => {
     if (!draft.trim() || busy) return;
     // The typed text stays in the box until the server has saved it.
-    if (await run({ op: 'add', text: draft, workId: workId ?? null })) { setDraft(''); setFilter('waiting'); }
+    const submitted = draft;
+    if (await run({ op: 'add', text: submitted, workId: workId ?? null })) { setDraft(current => draftAfterSave(current, submitted)); setFilter('waiting'); }
   };
   const saveEdit = async (id: string) => { if (await run({ op: 'edit', id, text: editText })) setEditingId(null); };
   const remove = (id: string) => { if (window.confirm('ลบไอเดียนี้ถาวรหรือไม่? (ถ้าแค่ไม่ใช้แล้ว ให้กด “ทิ้ง” แทน วันที่จดจะยังอยู่)')) void run({ op: 'delete', id }); };

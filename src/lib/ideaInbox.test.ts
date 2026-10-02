@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { filterIdeas, formatIdeaTime, sendIdeaOp, type Idea } from './ideaInbox';
+import { draftAfterSave, fetchIdeas, filterIdeas, formatIdeaTime, sendIdeaOp, type Idea } from './ideaInbox';
 import { OWNER_SESSION_EXPIRED_MESSAGE } from '../data/adapters/google/googleTransport';
 
 const idea = (id: string, status: Idea['status'], workId: string | null): Idea => ({
@@ -26,6 +26,18 @@ describe('idea inbox client', () => {
     await expect(sendIdeaOp({ op: 'add', text: 'x' })).resolves.toHaveLength(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/cxl/collab-progress?store=ideas');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', headers: { 'X-CXL-CSRF': 'tok' } });
+  });
+
+  it('explains being offline in Thai instead of "Failed to fetch"', async () => {
+    vi.stubGlobal('document', { cookie: '__Host-cxl_csrf=tok' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(sendIdeaOp({ op: 'add', text: 'x' })).rejects.toThrow('เชื่อมต่ออินเทอร์เน็ตไม่ได้ — ไอเดียยังไม่ถูกบันทึก ข้อความยังอยู่ในช่อง ลองอีกครั้ง');
+    await expect(fetchIdeas()).rejects.toThrow('เชื่อมต่ออินเทอร์เน็ตไม่ได้');
+  });
+
+  it('keeps text typed while the previous idea was saving', () => {
+    expect(draftAfterSave('ไอเดีย A', 'ไอเดีย A')).toBe('');
+    expect(draftAfterSave('ไอเดีย A\nไอเดีย B ที่พิมพ์ต่อ', 'ไอเดีย A')).toBe('ไอเดีย A\nไอเดีย B ที่พิมพ์ต่อ');
   });
 
   it('explains an expired login in Thai', async () => {

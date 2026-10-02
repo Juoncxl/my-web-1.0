@@ -4,7 +4,7 @@ import { directDriveGet } from './googleDirect.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 import { findOwnerFile, readOwnerJson, writeOwnerJson } from '../../src/server/cxlOwnerFiles.js';
-import { applyIdeaOp, IdeaError, parseIdeaOp, sanitizeIdeaFile } from '../../src/server/cxlIdeas.js';
+import { applyIdeaOp, IdeaError, ideaOpLanded, parseIdeaOp, sanitizeIdeaFile } from '../../src/server/cxlIdeas.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse;
@@ -91,20 +91,35 @@ export default async function handler(req: Request, res: Response) {
   }
 }
 
-/** Idea inbox: every write re-reads the file first, so ideas jotted from two tabs both survive. */
+const IDEA_WRITE_ATTEMPTS = 3;
+
+/**
+ * Idea inbox. Drive has no conditional write, so each change is: read → apply → write → read back,
+ * retrying when another tab's write replaced ours. The new idea's id and time are fixed once, so a
+ * retry re-applies the very same idea.
+ */
 async function handleIdeas(req: Request, res: Response) {
   const op = req.method === 'POST' ? parseIdeaOp(parseBody(req)) : null;
   if (req.method === 'POST' && !op) return send(res, 400, { ok: false, error: 'Invalid idea change' });
   try {
     const owner = await ownerToken();
     if (!owner) return send(res, 503, { ok: false, error: 'Connect Google Drive first' });
-    const fileId = await findOwnerFile(owner.token, owner.folderId, IDEAS_FILE);
-    let ideas = sanitizeIdeaFile(await readOwnerJson(owner.token, fileId));
-    if (op) {
-      ideas = applyIdeaOp(ideas, op, new Date(), randomUUID);
-      await writeOwnerJson(owner.token, owner.folderId, fileId, IDEAS_FILE, ideas);
+    const load = async () => {
+      const fileId = await findOwnerFile(owner.token, owner.folderId, IDEAS_FILE);
+      return { fileId, ideas: sanitizeIdeaFile(await readOwnerJson(owner.token, fileId)) };
+    };
+    if (!op) return send(res, 200, { ok: true, data: (await load()).ideas });
+    const now = new Date();
+    const newId = randomUUID();
+    for (let attempt = 0; attempt < IDEA_WRITE_ATTEMPTS; attempt += 1) {
+      const { fileId, ideas } = await load();
+      const next = applyIdeaOp(ideas, op, now, () => newId);
+      if (next === ideas) return send(res, 200, { ok: true, data: ideas }); // nothing changed, nothing to write
+      await writeOwnerJson(owner.token, owner.folderId, fileId, IDEAS_FILE, next);
+      const stored = (await load()).ideas;
+      if (ideaOpLanded(stored, op, next, newId)) return send(res, 200, { ok: true, data: stored });
     }
-    return send(res, 200, { ok: true, data: ideas });
+    return send(res, 409, { ok: false, error: 'Idea inbox is busy, try again' });
   } catch (error) {
     if (error instanceof IdeaError) return send(res, error.status, { ok: false, error: error.message });
     return send(res, 502, { ok: false, error: (error instanceof Error ? error.message : 'Idea request failed').slice(0, 200) });

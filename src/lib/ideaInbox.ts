@@ -35,18 +35,28 @@ async function read(response: Response): Promise<Idea[]> {
   return body.data?.ideas || [];
 }
 
+/** fetch rejects (offline, dropped connection) with an English TypeError; say it in Thai instead. */
+async function request(init: RequestInit): Promise<Response> {
+  try { return await fetch(ENDPOINT, { credentials: 'same-origin', ...init }); }
+  catch { throw new Error('เชื่อมต่ออินเทอร์เน็ตไม่ได้ — ไอเดียยังไม่ถูกบันทึก ข้อความยังอยู่ในช่อง ลองอีกครั้ง'); }
+}
+
 export async function fetchIdeas(): Promise<Idea[]> {
-  return read(await fetch(ENDPOINT, { credentials: 'same-origin', headers: { Accept: 'application/json' } }));
+  return read(await request({ headers: { Accept: 'application/json' } }));
 }
 
 export async function sendIdeaOp(op: IdeaOp): Promise<Idea[]> {
   const csrf = await ownerCsrfToken();
-  return read(await fetch(ENDPOINT, {
+  return read(await request({
     method: 'POST',
-    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CXL-CSRF': csrf },
     body: JSON.stringify(op)
   }));
+}
+
+/** After a successful save, clear the box only if nothing new was typed meanwhile. */
+export function draftAfterSave(current: string, submitted: string): string {
+  return current === submitted ? '' : current;
 }
 
 /** "2 ต.ค. 2569 · 21:14 น." in Bangkok time, whatever the viewer's clock is set to. */
