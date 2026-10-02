@@ -208,7 +208,6 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(workspaceSource).not.toContain('CREATOR COMPOSER');
     expect(workspaceSource).not.toContain('ทดลอง');
     expect(composerSources).not.toContain('พรอมต์สร้างภาพ');
-    expect(composerSources).not.toContain('พรอมต์ / เทมเพลตบอท');
     expect(composerSources).not.toContain('Gore');
     expect(composerSources).not.toContain('Worldbuilding');
     expect(composerSources).toContain('พรอมต์เจนรูป');

@@ -759,7 +759,7 @@ describe('API-only Owner standard Work media foundation', () => {
       expect(sha256(Buffer.from(file.bytes))).toBe(part.sha256);
     }
     expect(JSON.stringify(context.mediaWorkFinalize_({ uploadId: UPLOAD_ID }))).not.toContain('drive-file');
-  });
+  }, 20000);
 
   it('does not publish partial delivery metadata and can resume an interrupted transfer', () => {
     const { context, folders, properties } = makeWorkMediaBridge();

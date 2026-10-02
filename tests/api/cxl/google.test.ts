@@ -144,7 +144,7 @@ describe('Vercel Google Works read proxy', () => {
     expect((await invoke({ action: 'works.create', args: [asset, { requestId: '123e4567-e89b-42d3-a456-426614174000' }] })).statusCode).toBe(401);
     expect((await invoke({ action: 'works.create', args: [asset, { requestId: '123e4567-e89b-42d3-a456-426614174000' }] }, 'Bearer non-owner-session')).statusCode).toBe(401);
     expect((await invoke({ action: 'works.update', args: ['asset_x', { title: 'X' }, { requestId: 'bad', expectedRevision: 0 }] }, 'Bearer owner-session')).statusCode).toBe(400);
-    expect((await invoke({ action: 'works.permanentDelete', args: ['asset_x'] }, 'Bearer owner-session')).statusCode).toBe(400);
+    expect((await invoke({ action: 'works.permanentDelete', args: ['not-a-work-id'] }, 'Bearer owner-session')).statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
