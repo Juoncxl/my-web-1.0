@@ -1,6 +1,7 @@
-import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
+import type { Asset, AssetCategory, Folder } from '../types';
 import type { VaultTabType } from '../components/PersonalVaultHeader';
 import { isOwnedActiveAsset, isPublicFeedAsset, isTrashAssetForUser } from './accessPolicy';
+import { getWorkStatus, type WorkStatusValue } from './workStatus';
 import {
   isPrivateVaultAsset,
   isPublicVaultAsset
@@ -22,7 +23,7 @@ export interface AssetFilterOptions extends AssetCollectionOptions {
   selectedPlatform?: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
-  selectedStatusFilter: AssetStatus | 'all';
+  selectedStatusFilter: WorkStatusValue | 'all';
   visibilityFilter: VisibilityFilter;
   searchQuery: string;
   searchAlreadyApplied?: boolean;
@@ -148,7 +149,7 @@ function matchesNonCategoryFilters(asset: Asset, options: AssetFilterOptions): b
       options.selectedFolderId !== 'unassigned' &&
       asset.folderId !== options.selectedFolderId
     ) return false;
-    if (options.selectedStatusFilter !== 'all' && asset.status !== options.selectedStatusFilter) return false;
+    if (options.selectedStatusFilter !== 'all' && getWorkStatus(asset) !== options.selectedStatusFilter) return false;
     if (options.visibilityFilter === 'public' && !isPublicVaultAsset(asset)) return false;
     if (options.visibilityFilter === 'private' && !isPrivateVaultAsset(asset)) return false;
   }

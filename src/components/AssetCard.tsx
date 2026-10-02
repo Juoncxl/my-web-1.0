@@ -1,7 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Asset, AssetCategory, PublicAssetCollaboration, User } from '../types';
 import { isPublicFeedVisibility, isValidWorkIcon } from '../lib/assetVisibility';
-import { CATEGORIES, STATUS_PRESETS } from '../lib/constants';
+import { CATEGORIES } from '../lib/constants';
+import { getWorkStatusDisplay } from '../lib/workStatus';
+import { displayDeadlineLabel } from '../lib/collabSchedule';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import {
   Bookmark as BookmarkIcon,
@@ -90,9 +92,12 @@ const CollabCardSummary: React.FC<{ collaboration: PublicAssetCollaboration }> =
   const hasCreatedData = hasIdentity || collaboration.sharedInformation.length > 0 || collaboration.deadlines.length > 0 || collaboration.participants.length > 0;
   if (!hasCreatedData) return null;
 
-  const nextDeadline = collaboration.deadlines
-    .filter(deadline => Boolean(deadline.date))
-    .sort((left, right) => left.date.localeCompare(right.date))[0];
+  // The next deadline still ahead; once all have passed, the latest one.
+  const today = new Date().toLocaleDateString('en-CA');
+  const dated = collaboration.deadlines.filter(deadline => Boolean(deadline.date)).sort((left, right) => left.date.localeCompare(right.date));
+  const nextDeadline = dated.find(deadline => deadline.date.slice(0, 10) >= today) || dated[dated.length - 1];
+  const participants = collaboration.participants.length;
+  const shared = collaboration.sharedInformation.length;
 
   return <div className="cv-collab-card-summary" aria-label="สรุปข้อมูลคอลแลป">
     <div className="cv-collab-card-chips">
@@ -101,10 +106,10 @@ const CollabCardSummary: React.FC<{ collaboration: PublicAssetCollaboration }> =
       {collaboration.platforms.length > 2 && <span>+{collaboration.platforms.length - 2}</span>}
     </div>
     <div className="cv-collab-card-stats">
-      <span className="cv-collab-card-stats-desktop">ผู้เข้าร่วม {collaboration.participants.length} คน</span>
-      <span className="cv-collab-card-stats-desktop">ข้อมูลกลาง {collaboration.sharedInformation.length} รายการ</span>
-      <span className="cv-collab-card-stats-mobile">ผู้ร่วม {collaboration.participants.length} · กลาง {collaboration.sharedInformation.length}</span>
-      {nextDeadline && <time dateTime={nextDeadline.date}>{nextDeadline.label.trim() || 'กำหนดส่ง'} · {nextDeadline.date}</time>}
+      {participants > 0 && <span className="cv-collab-card-stats-desktop">ผู้เข้าร่วม {participants} คน</span>}
+      {shared > 0 && <span className="cv-collab-card-stats-desktop">ข้อมูลกลาง {shared} รายการ</span>}
+      {(participants > 0 || shared > 0) && <span className="cv-collab-card-stats-mobile">{[participants > 0 && `ผู้ร่วม ${participants}`, shared > 0 && `กลาง ${shared}`].filter(Boolean).join(' · ')}</span>}
+      {nextDeadline && <time dateTime={nextDeadline.date}>{displayDeadlineLabel(nextDeadline.label, nextDeadline.kind)} · {nextDeadline.date}</time>}
     </div>
   </div>;
 };
@@ -178,7 +183,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const categoryLabel = display.isCollaborationFocused
     ? 'คอลแลป'
     : categoryLabelOverride || getStandardCardCategoryLabel(asset, categoryMeta.name);
-  const statusMeta = STATUS_PRESETS[asset.status || 'finished'] || STATUS_PRESETS.finished;
+  const statusMeta = getWorkStatusDisplay(asset);
   const galleryCount = asset.previewImages?.length || (asset.previewImage ? 1 : 0);
   const mainImage = asset.previewImage || asset.previewImages?.[0];
   const snippetSource = display.isCollaborationFocused ? asset.shortDescription || '' : display.summary || asset.content;

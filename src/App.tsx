@@ -30,7 +30,8 @@ import { getCanonicalProfilePath } from './lib/profileIdentity';
 import type { CreatorWorkDraft } from './components/creator/CreatorWorkWorkspace';
 import { serializeCreatorWorkDraft } from './components/creator/creatorWorkSerializer';
 import { isGoogleWorksReadBackend } from './data/cxlDataService';
-import { CATEGORIES, STATUS_PRESETS } from './lib/constants';
+import { CATEGORIES } from './lib/constants';
+import { getWorkStatusDisplay, type WorkStatusValue } from './lib/workStatus';
 
 const DiscoverPage = React.lazy(() => import('./pages/DiscoverPage').then(module => ({ default: module.DiscoverPage })));
 const CollabSchedulePage = React.lazy(() => import('./pages/CollabSchedulePage').then(module => ({ default: module.CollabSchedulePage })));
@@ -45,7 +46,7 @@ const CreatorWorkWorkspace = React.lazy(() => import('./components/creator/Creat
 function WorkDetailSummaryFallback({ asset, onClose }: { asset: Asset; onClose: () => void }) {
   const cover = asset.previewImage || asset.previewImages?.[0] || '';
   const categoryLabel = CATEGORIES[asset.category]?.name || asset.category;
-  const statusLabel = STATUS_PRESETS[asset.status || 'finished']?.name || asset.status || 'finished';
+  const statusLabel = getWorkStatusDisplay(asset).name;
   return <div className="work-detail-backdrop" data-work-detail-loading-shell>
     <section className="work-detail-modal" role="dialog" aria-modal="true" aria-labelledby="work-detail-loading-title" aria-busy="true">
       <header className="work-detail-header work-detail-header-actions-only">
@@ -101,7 +102,7 @@ function MainApp() {
   const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'public' | 'private'>('all');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<AssetStatus | 'all'>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<WorkStatusValue | 'all'>('all');
   const [selectedFolderId, setSelectedFolderId] = useState<string | 'all' | 'unassigned'>('all');
   const [, setRouteVersion] = useState(0);
 

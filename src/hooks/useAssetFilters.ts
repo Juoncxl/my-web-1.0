@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import type { Asset, AssetCategory, AssetStatus, Folder } from '../types';
+import type { Asset, AssetCategory, Folder } from '../types';
 import type { VaultTabType } from '../components/PersonalVaultHeader';
+import type { WorkStatusValue } from '../lib/workStatus';
 import {
   selectCategoryCounts,
   selectFilteredAssets,
@@ -18,7 +19,7 @@ interface UseAssetFiltersOptions {
   selectedPlatform?: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
-  selectedStatusFilter: AssetStatus | 'all';
+  selectedStatusFilter: WorkStatusValue | 'all';
   visibilityFilter: 'all' | 'public' | 'private';
   searchQuery: string;
   searchAlreadyApplied?: boolean;

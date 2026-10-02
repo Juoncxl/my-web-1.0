@@ -12,7 +12,8 @@ export type AssetStatus = 'idea' | 'draft' | 'in_progress' | 'finished' | 'archi
 
 export type AssetContentType = 'character' | 'lore' | 'image_prompt' | 'ui_code' | 'bot_prompt';
 export type AssetAudienceRating = 'general' | '13_plus' | '16_plus' | '18_plus';
-export type AssetCreatorWorkStatus = 'not_started' | 'in_progress' | 'waiting_data' | 'in_review' | 'needs_fix' | 'blocked' | 'paused' | 'finished';
+/** in_review, blocked and finished are retired; older Works may still carry them (see lib/workStatus). */
+export type AssetCreatorWorkStatus = 'not_started' | 'in_progress' | 'waiting_data' | 'in_review' | 'needs_fix' | 'blocked' | 'paused' | 'finished' | 'ready_to_release' | 'released';
 
 export interface AssetPresentationMetadata {
   contentTypes: AssetContentType[];

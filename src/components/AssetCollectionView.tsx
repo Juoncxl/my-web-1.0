@@ -1,9 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ArrowLeft, Clock3, Folder as FolderIcon, LockKeyhole, MoreHorizontal, Plus, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Asset, AssetCategory, AssetStatus, Folder, User } from '../types';
-import { CATEGORIES, FOLDER_COLOR_PRESETS, STATUS_PRESETS } from '../lib/constants';
+import type { Asset, AssetCategory, Folder, User } from '../types';
+import { CATEGORIES, FOLDER_COLOR_PRESETS } from '../lib/constants';
 import type { PlatformCount } from '../lib/assetSelectors';
+import { WORK_STATUS_OPTIONS, type WorkStatusValue } from '../lib/workStatus';
 import { CategoryNav } from './CategoryNav';
 import { AssetCard } from './AssetCard';
 import { CreatorProfilePreview, type CreatorProfilePreviewAnchor } from './CreatorProfilePreview';
@@ -23,7 +24,7 @@ interface AssetCollectionViewProps {
   selectedPlatform: string | null;
   selectedTag: string | null;
   selectedFolderId: string | 'all' | 'unassigned';
-  selectedStatusFilter: AssetStatus | 'all';
+  selectedStatusFilter: WorkStatusValue | 'all';
   visibilityFilter: 'all' | 'public' | 'private';
   categoryCounts: Record<string, number>;
   platformCounts: PlatformCount[];
@@ -38,7 +39,7 @@ interface AssetCollectionViewProps {
   onOpenAsset: (asset: Asset) => void;
   onEditAsset: (asset: Asset) => void;
   onDeleteAsset: (asset: Asset) => void;
-  onSelectStatusFilter: (status: AssetStatus | 'all') => void;
+  onSelectStatusFilter: (status: WorkStatusValue | 'all') => void;
   onLike?: (assetId: string) => void;
   onBookmark?: (assetId: string) => void;
   onFork?: (asset: Asset) => void;
@@ -163,9 +164,9 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
           {showOrganizationFilters && (
             <label className="cv-vault-filter-select">
               <span>สถานะ</span>
-              <select value={selectedStatusFilter} onChange={event => onSelectStatusFilter(event.target.value as AssetStatus | 'all')} aria-label="กรองตามสถานะ">
+              <select value={selectedStatusFilter} onChange={event => onSelectStatusFilter(event.target.value as WorkStatusValue | 'all')} aria-label="กรองตามสถานะ">
                 <option value="all">ทั้งหมด</option>
-                {(Object.keys(STATUS_PRESETS) as AssetStatus[]).map(status => <option key={status} value={status}>{STATUS_PRESETS[status].name}</option>)}
+                {WORK_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
           )}
@@ -198,7 +199,7 @@ export const AssetCollectionView: React.FC<AssetCollectionViewProps> = ({
           {activeFilterCount > 0 && <span className="cv-vault-filter-summary">กรองอยู่ {activeFilterCount}</span>}
           {selectedFolderId !== 'all' && selectedFolderId !== 'unassigned' && selectedFolder && <button type="button" onClick={() => onSelectFolder('all')}>โฟลเดอร์: {selectedFolder.name} ×</button>}
           {selectedFolderId === 'unassigned' && <button type="button" onClick={() => onSelectFolder('all')}>นอกโฟลเดอร์ ×</button>}
-          {selectedStatusFilter !== 'all' && <button type="button" onClick={() => onSelectStatusFilter('all')}>สถานะ: {STATUS_PRESETS[selectedStatusFilter].name} ×</button>}
+          {selectedStatusFilter !== 'all' && <button type="button" onClick={() => onSelectStatusFilter('all')}>สถานะ: {WORK_STATUS_OPTIONS.find(option => option.value === selectedStatusFilter)?.name} ×</button>}
           {selectedCategory !== 'all' && <button type="button" onClick={() => onSelectCategory('all')}>หมวดหมู่: {CATEGORIES[selectedCategory].name} ×</button>}
           {selectedPlatform && <button type="button" onClick={() => onSelectPlatform(null)}>แพลตฟอร์ม: {selectedPlatform} ×</button>}
           {showOrganizationFilters && visibilityFilter !== 'all' && <button type="button" onClick={() => onVisibilityFilterChange('all')}>การมองเห็น: {visibilityFilter === 'public' ? 'สาธารณะ' : 'ส่วนตัว'} ×</button>}

@@ -150,7 +150,7 @@ describe('asset selectors', () => {
       selectedCategory: 'character',
       selectedTag: 'prompt',
       selectedFolderId: 'folder-1',
-      selectedStatusFilter: 'finished',
+      selectedStatusFilter: 'released',
       visibilityFilter: 'public',
       searchQuery: 'system'
     }).map(asset => asset.id)).toEqual(['matching']);
