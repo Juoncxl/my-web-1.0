@@ -163,15 +163,17 @@ describe('Google standard Work media upload foundation', () => {
     expect(hydrated.contentBlocks?.[0].body).toContain(`ref=media%3A${shared}`);
   });
 
-  it('does not prepare Collaboration media for the standard Work upload route', async () => {
-    const fetchMock = vi.fn();
+  it('prepares Collaboration images for upload like any other Work image', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, blob: async () => new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' })
+    });
     vi.stubGlobal('fetch', fetchMock);
     const prepared = await prepareGoogleWorkMedia({
       category: 'collab', icon: { type: 'image', value: 'blob:collab', mediaId: IDS.icon },
       workMediaDraft: [{ mediaId: IDS.icon, source: 'blob:collab', purpose: 'icon', sortOrder: 0, isCover: false }]
     });
-    expect(prepared.pending).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith('blob:collab');
+    expect(prepared.pending.map(item => [item.mediaId, item.purpose, item.mimeType])).toEqual([[IDS.icon, 'icon', 'image/png']]);
   });
 
   it('uploads chunks and files sequentially at the proven 2 MiB size', async () => {

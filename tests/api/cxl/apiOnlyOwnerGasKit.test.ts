@@ -141,14 +141,14 @@ describe('API-only Owner GAS package isolation', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps GO 7 media and GO 8 private collaboration mutation guards in the Owner write contract', () => {
+  it('keeps the media and collaboration mutation guards in the Owner write contract', () => {
     const context = makeBridge();
     expect(() => context.validateCxlWritePayload_({ collaboration: { name: 'Private draft' } }, 'update'))
-      .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_COLLAB_DRAFT' }));
+      .toThrow(expect.objectContaining({ apiCode: 'INVALID_COLLAB_DRAFT' }));
     expect(() => context.rejectUnsupportedWorkMedia_({ previewImage: 'data:image/png;base64,AA==' }, null))
       .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
     expect(() => context.rejectUnsupportedWorkMedia_({ category: 'collab' }, null, ['123e4567-e89b-42d3-a456-426614174000']))
-      .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_COLLAB_DRAFT' }));
+      .toThrow(expect.objectContaining({ apiCode: 'UNSUPPORTED_MEDIA_MUTATION' }));
   });
 
   it('reuses the canonical post-write record instead of rereading it for the response', () => {

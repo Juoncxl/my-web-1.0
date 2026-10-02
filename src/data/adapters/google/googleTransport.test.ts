@@ -34,8 +34,9 @@ describe('Google server transport boundary', () => {
     const iconId = '123e4567-e89b-42d3-a456-426614174031';
     const galleryId = '123e4567-e89b-42d3-a456-426614174032';
     const workId = 'asset_1234567890abcdef1234567890abcdef';
-    const iconUrl = `/api/cxl/media?scope=public&workId=${workId}&ref=media%3A${iconId}`;
-    const galleryUrl = `/api/cxl/media?scope=public&workId=${workId}&ref=media%3A${galleryId}`;
+    const version = String(Date.parse('2026-01-02T00:00:00Z'));
+    const iconUrl = `/api/cxl/media?scope=public&workId=${workId}&ref=media%3A${iconId}&v=${version}`;
+    const galleryUrl = `/api/cxl/media?scope=public&workId=${workId}&ref=media%3A${galleryId}&v=${version}`;
     const work = { id: workId, userId: 'public-owner', authorName: 'Creator', title: 'Public Work',
       icon: { type: 'image', value: `media:${iconId}`, mediaId: iconId }, category: 'character', content: '', contentBlocks: [],
       previewImage: `media:${galleryId}`, previewImages: [`media:${galleryId}`], media: [
