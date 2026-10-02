@@ -3,7 +3,7 @@ import { CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleDot
 import type { Asset, Folder } from '../../types';
 import { isPublicFeedVisibility } from '../../lib/assetVisibility';
 import { CREATOR_WIDGET_ICONS, CREATOR_WIDGET_LABELS, type CreatorWidgetType } from './CreatorCustomizePanel';
-import { getCalendarPresentation, getClockPresentation, getDecorationPresentation, getFolderPresentation, getGalleryPresentation, getGoalPresentation, getMusicPresentation, getNotePresentation, getPublicFolderPresentation, getTodoPresentation, getWeatherPresentation, getWidgetRenderSize, isSafeGallerySource, isSafeMusicUrl, NOTE_FALLBACK_TITLE, type CalendarEvent, type ClockDialMarker, type CreatorWidgetConfig, type DecorationStickerIcon, type FolderCardPreview, type GalleryItem, type WeatherCondition, type WidgetRenderSize } from './creatorWidgetModel';
+import { getCalendarPresentation, getClockPresentation, getDecorationPresentation, getFolderPresentation, getGalleryPresentation, getGoalPresentation, getMusicPresentation, getNotePresentation, getPublicFolderPresentation, getTodoPresentation, getWeatherPresentation, getWidgetRenderSize, isSafeGallerySource, isSafeMusicUrl, NOTE_FALLBACK_TITLE, safeWidgetLinkHref, type CalendarEvent, type ClockDialMarker, type CreatorWidgetConfig, type DecorationStickerIcon, type FolderCardPreview, type GalleryItem, type WeatherCondition, type WidgetRenderSize } from './creatorWidgetModel';
 
 export interface CreatorWidgetRendererProps {
   type: CreatorWidgetType;
@@ -369,7 +369,7 @@ export const CreatorWidgetRenderer: React.FC<CreatorWidgetRendererProps> = props
     folder: <FolderWidget {...props} onEditFolder={props.onEditFolder} onOpenFolder={props.onOpenFolder} onOpenAsset={props.onOpenAsset} />,
     status: <div className="csp-status-widget"><strong>{props.config.status || 'กำลังสร้างสิ่งใหม่'}</strong><span>{props.config.description || 'สถานะของ Creator ในตอนนี้'}</span></div>,
     note: <NoteWidget {...props} />,
-    links: <div className="csp-links-widget"><span>{props.config.description || `ช่องทางของ ${props.displayName}`}</span>{props.config.links?.[0]?.url ? <a className="widget-link" href={props.config.links[0].url} target="_blank" rel="noreferrer">{props.config.links[0].label || 'เปิดลิงก์'} →</a> : <small>{props.isOwner ? 'จัดการลิงก์จาก Edit Profile หรือ Widget editor' : 'ลิงก์สาธารณะที่ Creator เลือกแสดง'}</small>}</div>,
+    links: <div className="csp-links-widget"><span>{props.config.description || `ช่องทางของ ${props.displayName}`}</span>{safeWidgetLinkHref(props.config.links?.[0]?.url) ? <a className="widget-link" href={safeWidgetLinkHref(props.config.links?.[0]?.url) || undefined} target="_blank" rel="noopener noreferrer">{props.config.links[0].label || 'เปิดลิงก์'} →</a> : <small>{props.isOwner ? 'จัดการลิงก์จาก Edit Profile หรือ Widget editor' : 'ลิงก์สาธารณะที่ Creator เลือกแสดง'}</small>}</div>,
     playlist: <MusicWidget {...props} onEditMusic={props.onEditMusic} />,
     todo: <TodoWidget {...props} onEditTodo={props.onEditTodo} />,
     goal: <GoalWidget {...props} />,

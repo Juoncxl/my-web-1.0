@@ -9,6 +9,7 @@ import {
   getGoalPresentation,
   getMusicPresentation,
   isSafeMusicUrl,
+  safeWidgetLinkHref,
   validateMusicConfig,
   getGalleryPresentation,
   isSafeGallerySource,
@@ -434,5 +435,18 @@ describe('Cherry Blossom Calendar presentation model', () => {
     for (const style of CALENDAR_TODAY_STYLES) expect(getCalendarPresentation({ calendarTodayStyle: style }).todayStyle).toBe(style);
     expect(getCalendarPresentation({ calendarView: 'week' }).view).toBe('week');
     expect(getCalendarPresentation({ calendarView: 'upcoming' }).view).toBe('upcoming');
+  });
+});
+
+describe('safeWidgetLinkHref', () => {
+  it('allows https and mailto links only', () => {
+    expect(safeWidgetLinkHref('https://example.com/me')).toBe('https://example.com/me');
+    expect(safeWidgetLinkHref('mailto:me@example.com')).toBe('mailto:me@example.com');
+    expect(safeWidgetLinkHref('javascript:alert(1)')).toBeNull();
+    expect(safeWidgetLinkHref(' JavaScript:alert(1)')).toBeNull();
+    expect(safeWidgetLinkHref('data:text/html,<script>alert(1)</script>')).toBeNull();
+    expect(safeWidgetLinkHref('http://example.com')).toBeNull();
+    expect(safeWidgetLinkHref('')).toBeNull();
+    expect(safeWidgetLinkHref(undefined)).toBeNull();
   });
 });

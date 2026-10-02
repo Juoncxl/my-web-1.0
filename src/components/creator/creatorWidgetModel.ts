@@ -778,6 +778,15 @@ export function isSafeMusicUrl(value: string): boolean {
   try { return new URL(value).protocol === 'https:'; } catch { return false; }
 }
 
+/** A Links widget URL as a safe href: only https and mailto, never javascript: or data:. */
+export function safeWidgetLinkHref(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'mailto:' ? parsed.href : null;
+  } catch { return null; }
+}
+
 export function normalizeMusicTrack(track: unknown, index: number): MusicTrack {
   const value = track && typeof track === 'object' ? track as Record<string, unknown> : {};
   return {
