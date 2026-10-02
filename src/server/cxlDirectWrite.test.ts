@@ -333,6 +333,29 @@ describe('direct Work update', () => {
     expect(google.files[keepId].props?.cxlState).toBe('attached');
   });
 
+  it('follows an image moved to another slot after a failed save, but refuses a different image under the same id', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    google.files.seed = { name: 'cxl-work-media-00000000-0000-4000-8000-000000000000.png', parent: 'mediaFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {} };
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 5)]);
+    const mediaId = '33333333-3333-4333-8333-333333333333';
+    const sha256 = createHash('sha256').update(png).digest('hex');
+    const begin = (uploadId: string, sortOrder: number, extra: Record<string, unknown> = {}) => ({ uploadId, mediaId, workId: WORK, totalFileSize: png.length, rawChunkSize: 2 * 1024 * 1024, totalChunks: 1, mimeType: 'image/png', sha256, purpose: 'gallery', contextId: null, sortOrder, isCover: false, ...extra });
+    const first = '44444444-4444-4444-8444-444444444444';
+    await directMediaBegin(begin(first, 2), OWNER, google.env);
+    await directMediaChunk({ uploadId: first, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, google.env);
+    await directMediaFinalize({ uploadId: first, mediaId }, OWNER, google.env);
+    // The image moved from slot 2 to slot 1 before the retried save.
+    await expect(directMediaBegin(begin('55555555-5555-4555-8555-555555555555', 1), OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+    const file = Object.values(google.files).find(item => item.props?.cxlMediaId === mediaId && !item.name.includes('session'))!;
+    expect(file.props).toMatchObject({ cxlSortOrder: '1', cxlState: 'finalized' });
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1', `media:${mediaId}`] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: [mediaId] }], OWNER, google.env))
+      .resolves.toMatchObject({ fallback: false });
+    // A different image claiming the same id is still refused.
+    await expect(directMediaBegin(begin('66666666-6666-4666-8666-666666666666', 1, { sha256: 'f'.repeat(64) }), OWNER, google.env))
+      .rejects.toMatchObject({ code: 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' });
+  });
+
   it('still refuses two different files claiming the same media id', async () => {
     const google = fakeGoogle();
     vi.stubGlobal('fetch', google.fetchMock);

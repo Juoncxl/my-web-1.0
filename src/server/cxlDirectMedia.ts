@@ -59,7 +59,8 @@ function toMediaFile(file: Json): WorkMediaFile {
 }
 
 const STATE_RANK: Record<string, number> = { attached: 0, finalized: 1, uploading: 2 };
-const SAME_UPLOAD_PROPS = ['cxlWorkId', 'cxlOwner', 'cxlSha256', 'cxlPurpose', 'cxlContextId', 'cxlSortOrder', 'cxlIsCover'];
+// Placement (purpose, participant, order, cover) may differ between copies; begin re-applies the current one.
+const SAME_UPLOAD_PROPS = ['cxlWorkId', 'cxlOwner', 'cxlSha256'];
 
 /** The canonical media file carrying this mediaId in its appProperties (or legacy name), if any. */
 export async function findWorkMediaFile(env: DirectMediaEnv, mediaId: string): Promise<WorkMediaFile | null> {
@@ -122,6 +123,12 @@ function metadataMatches(stored: Json, input: Json, ownerUserId: string): boolea
     && Number(stored.sortOrder) === Number(input.sortOrder) && Boolean(stored.isCover) === Boolean(input.isCover);
 }
 
+function sameImageOfSameWork(stored: Json, input: Json, ownerUserId: string): boolean {
+  return String(stored.mediaId) === String(input.mediaId) && String(stored.workId) === String(input.workId)
+    && String(stored.ownerUserId) === ownerUserId && Number(stored.totalFileSize) === Number(input.totalFileSize)
+    && String(stored.mimeType) === String(input.mimeType) && String(stored.sha256).toLowerCase() === String(input.sha256).toLowerCase();
+}
+
 /** appProperties view of a media file's upload metadata (the Apps Script manifest fields). */
 export function mediaFileManifest(file: WorkMediaFile): Json {
   const p = file.props;
@@ -146,7 +153,15 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
   if (input.contextId && String(input.contextId).length > 100) fail('INVALID_MEDIA_UPLOAD_REQUEST', 'Work media context is too long');
   const existing = await findWorkMediaFile(env, input.mediaId);
   if (existing) {
-    const manifest = mediaFileManifest(existing);
+    let manifest = mediaFileManifest(existing);
+    // The same image of the same Work, only moved (reordered, other participant, cover changed) after an
+    // earlier save failed: follow the new placement instead of refusing. A different image still conflicts.
+    if (!metadataMatches(manifest, input, ownerUserId) && sameImageOfSameWork(manifest, input, ownerUserId)) {
+      const placement = { cxlPurpose: String(input.purpose), cxlContextId: input.contextId || '', cxlSortOrder: String(input.sortOrder), cxlIsCover: String(Boolean(input.isCover)) };
+      await markWorkMediaState(env, existing.id, placement);
+      existing.props = { ...existing.props, ...placement };
+      manifest = mediaFileManifest(existing);
+    }
     if (!metadataMatches(manifest, input, ownerUserId)) fail('MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT', 'Media identity is already bound to different Work data');
     if (['finalized', 'attached'].includes(manifest.state) && existing.size === input.totalFileSize) return { uploadId: input.uploadId, mediaId: input.mediaId, finalized: true };
     // Bytes already landed but finalize never ran (e.g. the earlier save timed out): finalize that file instead of uploading a second copy.
