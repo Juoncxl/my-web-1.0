@@ -12,7 +12,8 @@ import {
   Sun,
   Moon,
   HardDrive,
-  Check
+  Check,
+  Download
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -260,6 +261,17 @@ export const Header: React.FC<HeaderProps> = ({
                         >
                           <Settings className="w-4 h-4 text-purple-500" />
                           <span>ตั้งค่าบัญชี</span>
+                        </button>
+                        {/* Backup lives in the settings dialog; a direct entry keeps it easy to find. */}
+                        <button
+                          onClick={() => {
+                            if (onOpenSettingsModal) onOpenSettingsModal();
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
+                        >
+                          <Download className="w-4 h-4 text-sky-500" />
+                          <span>สำรองข้อมูล (ดาวน์โหลด)</span>
                         </button>
                         <a
                           href="/api/cxl/auth/login?drive=1"

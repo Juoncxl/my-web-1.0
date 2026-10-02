@@ -10416,3 +10416,18 @@ button.csp-gallery-menu:hover, button.csp-gallery-menu:focus-visible { outline: 
   .work-detail-footer[data-work-detail-actions="visitor"] .work-detail-secondary-actions { display: contents; }
   .work-detail-footer[data-work-detail-actions="visitor"] .work-detail-download-menu > button { width: 100%; min-height: 2.35rem; font-size: .68rem; }
 }
+/* Collab detail: participant summary on top; participants fold when there are more than three. */
+.work-detail-collaboration-participants .work-detail-section-heading { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.work-detail-participant-toggle-all { flex: none; border: 1px solid rgba(177, 153, 219, .45); border-radius: 999px; padding: .3rem .75rem; background: #fff; color: #5b3f8f; font-size: .72rem; font-weight: 800; cursor: pointer; }
+.work-detail-participant-summary { display: grid; gap: .2rem; margin: 0 0 .7rem; border: 1px solid rgba(177, 153, 219, .4); border-radius: .75rem; padding: .6rem .75rem; background: rgba(177, 153, 219, .12); }
+.work-detail-participant-summary strong { color: #01162b; font-size: .82rem; }
+.work-detail-participant-summary span { color: #5a6f89; font-size: .74rem; line-height: 1.5; }
+.work-detail-participant-toggle { display: inline-flex; align-items: center; gap: .35rem; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.work-detail-participant-toggle span { color: #6a90b4; font-size: .75rem; }
+.work-detail-participant-grid > article.is-folded { gap: .25rem; }
+.work-detail-participant-status-compact { margin: 0; color: #5a6f89; font-size: .74rem; }
+.dark .work-detail-participant-toggle-all { border-color: rgba(177, 153, 219, .45); background: rgba(12, 30, 61, .9); color: #e4dbf7; }
+.dark .work-detail-participant-summary { border-color: rgba(177, 153, 219, .35); background: rgba(177, 153, 219, .14); }
+.dark .work-detail-participant-summary strong { color: #f1f5ff; }
+.dark .work-detail-participant-summary span,
+.dark .work-detail-participant-status-compact { color: #b7c7de; }

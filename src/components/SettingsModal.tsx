@@ -140,15 +140,32 @@ export const SettingsModal: React.FC = () => {
     try {
       const [assetsRes, foldersRes] = await Promise.all([cxlDataService.works.fetch({ userId: currentUser.id, includeDeleted: true }), cxlDataService.folders.fetch(currentUser.id)]);
       if (assetsRes.error || foldersRes.error) throw new Error(assetsRes.error || foldersRes.error || 'โหลดข้อมูลสำหรับสำรองไม่สำเร็จ');
-      const userAssets = (assetsRes.data || []).filter((asset) => asset.userId === currentUser.id);
+      const summaries = (assetsRes.data || []).filter((asset) => asset.userId === currentUser.id);
       const userFolders = (foldersRes.data || []).filter((folder) => folder.userId === currentUser.id);
+      // The list holds compact summaries; read each Work in full (four at a time) so the backup has the real content.
+      const userAssets: typeof summaries = [];
+      let summaryOnly = 0;
+      for (let start = 0; start < summaries.length; start += 4) {
+        setBackupMsg({ type: 'success', text: `กำลังรวบรวมผลงาน ${Math.min(start + 4, summaries.length)}/${summaries.length}…` });
+        const batch = await Promise.all(summaries.slice(start, start + 4).map(async summary => {
+          try {
+            const full = await cxlDataService.works.fetch({ assetId: summary.id, currentUserId: currentUser.id, detail: 'full', limit: 1 });
+            if (full.data?.[0]) return full.data[0];
+          } catch { /* keep the summary below */ }
+          summaryOnly += 1;
+          return summary;
+        }));
+        userAssets.push(...batch);
+      }
       const backupData = { app: 'CXL Studio', version: '2.0.0', exportedAt: new Date().toISOString(), creator: { id: currentUser.id, name: currentUser.displayName, email: currentUser.email }, folders: userFolders, assets: userAssets };
       const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute('href', dataStr); downloadAnchor.setAttribute('download', `creator_vault_backup_${currentUser.id.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.json`);
       document.body.appendChild(downloadAnchor); downloadAnchor.click(); downloadAnchor.remove();
       confetti({ particleCount: 30, spread: 60, origin: { y: 0.6 } });
-      setBackupMsg({ type: 'success', text: `สำรองข้อมูลสำเร็จ! ดาวน์โหลด ${userAssets.length} ผลงาน และ ${userFolders.length} โฟลเดอร์ของ ${currentUser.displayName || 'คุณ'} เรียบร้อยแล้ว` });
+      setBackupMsg(summaryOnly
+        ? { type: 'error', text: `ดาวน์โหลดแล้ว ${userAssets.length} ผลงาน แต่มี ${summaryOnly} ผลงานที่โหลดเนื้อหาเต็มไม่สำเร็จ (เก็บได้แค่ข้อมูลย่อ) ลองกดสำรองอีกครั้ง` }
+        : { type: 'success', text: `สำรองข้อมูลสำเร็จ! ดาวน์โหลด ${userAssets.length} ผลงาน และ ${userFolders.length} โฟลเดอร์ของ ${currentUser.displayName || 'คุณ'} เรียบร้อยแล้ว` });
     } catch (error: unknown) { setBackupMsg({ type: 'error', text: errorMessage(error, 'เกิดข้อผิดพลาดในการสำรองข้อมูล') }); }
     finally { setIsExporting(false); }
   };

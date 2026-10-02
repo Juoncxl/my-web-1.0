@@ -35,14 +35,28 @@ interface ContentLongEditorProps {
   onChange: (value: string) => void;
   onExpand: (editorId: CreatorContentEditorId, title: string) => void;
   code?: boolean;
+  /** An extra button next to the counter, e.g. inserting a template. */
+  extraTool?: React.ReactNode;
 }
 
-const ContentLongEditor: React.FC<ContentLongEditorProps> = ({ editorId, label, placeholder, value, counterMode, onChange, onExpand, code = false }) => {
+/** Headings for a character profile, in the order creators already send them. */
+export const CHARACTER_PROFILE_TEMPLATE = [
+  'ชื่อ:', 'ชื่อเล่น:', 'เพศ:', 'อายุ:', 'สัญชาติ:', 'ส่วนสูง / น้ำหนัก:', 'วันเกิด / ราศี:', 'MBTI:', 'อาชีพ:',
+  'รูปลักษณ์:', 'นิสัย:', 'สรรพนาม / คำเรียก:', 'ความสัมพันธ์กับ {{user}}:', 'เนื้อเรื่อง:'
+].join('\n');
+
+/** Fills an empty profile with the template, or appends it after existing text; never overwrites. */
+export function withCharacterTemplate(current: string): string {
+  return current.trim() ? `${current.replace(/\s+$/, '')}\n\n${CHARACTER_PROFILE_TEMPLATE}` : CHARACTER_PROFILE_TEMPLATE;
+}
+
+const ContentLongEditor: React.FC<ContentLongEditorProps> = ({ editorId, label, placeholder, value, counterMode, onChange, onExpand, code = false, extraTool }) => {
   const inputId = `csp-content-editor-${editorId.replace(/[^a-z0-9-]/gi, '-')}`;
   return <div className={`csp-content-long-editor ${code ? 'is-code-editor' : ''}`}>
     <div className="csp-content-editor-heading">
       <label htmlFor={inputId}>{label}</label>
       <div className="csp-content-editor-tools">
+        {extraTool}
         <span>{formatContentCounter(value, counterMode)}</span>
         <button type="button" className="csp-content-expand-button" onClick={() => onExpand(editorId, label)} aria-label={`ขยายตัวแก้ไข ${label}`}>⛶ ขยาย</button>
       </div>
@@ -112,7 +126,8 @@ const ContentSection: React.FC<ContentSectionProps> = ({
     const editorId: CreatorContentEditorId = type === 'character' ? 'character' : 'story';
     return <article className="csp-content-canvas-section" data-content-section={type}>
       <div className="csp-content-section-heading"><div><h3>{meta.label}</h3><p>{CONTENT_DESCRIPTIONS[type]}</p></div></div>
-      <ContentLongEditor editorId={editorId} label={type === 'character' ? 'ข้อมูลตัวละคร' : 'เนื้อเรื่องและโลกทัศน์'} placeholder={CONTENT_PLACEHOLDERS[type]} value={type === 'character' ? draft.character : draft.story} counterMode={counterMode} onChange={value => updateText(editorId, value)} onExpand={onExpand} />
+      <ContentLongEditor editorId={editorId} label={type === 'character' ? 'ข้อมูลตัวละคร' : 'เนื้อเรื่องและโลกทัศน์'} placeholder={CONTENT_PLACEHOLDERS[type]} value={type === 'character' ? draft.character : draft.story} counterMode={counterMode} onChange={value => updateText(editorId, value)} onExpand={onExpand}
+        extraTool={type === 'character' ? <button type="button" className="csp-content-expand-button" onClick={() => updateText('character', withCharacterTemplate(draft.character))}>📋 ใส่แม่แบบ</button> : undefined} />
     </article>;
   }
 
