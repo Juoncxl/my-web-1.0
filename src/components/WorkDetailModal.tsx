@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Clock3,
+  Lightbulb,
   Code2,
   Copy,
   Download,
@@ -30,6 +31,7 @@ import { AUDIENCE_RATING_LABELS, CATEGORIES } from '../lib/constants';
 import { getWorkStatusDisplay } from '../lib/workStatus';
 import { displayDeadlineLabel } from '../lib/collabSchedule';
 import { summarizeCollabParticipants } from '../lib/collabParticipantSummary';
+import { IdeaList } from './IdeaList';
 import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatThaiDate } from '../lib/dateUtils';
@@ -653,6 +655,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผลงานที่เชื่อมโยง</strong><span>ผลงานที่เชื่อมโยงจากรายการเดียวกัน</span></div></div></div>
           <div className="work-detail-linked-grid">{linkedAssets.map(linked => <button type="button" key={linked.id} onClick={() => onSelectLinkedAsset?.(linked.id)}><WorkMark icon={linked.icon} /><span><strong>{linked.title}</strong><small>{CATEGORIES[linked.category]?.name || linked.category}</small></span><b>ดู →</b></button>)}</div>
         </section>}
+        {isOwner && interactionMode !== 'preview' && asset && <section className="work-detail-section work-detail-ideas" data-work-detail-section="ideas"><div className="work-detail-section-heading"><div><Lightbulb aria-hidden="true" /><div><strong>ไอเดียของงานนี้</strong><span>เห็นเฉพาะคุณ</span></div></div></div><IdeaList workId={asset.id} /></section>}
       </div>
 
       {!embedded && <footer className="work-detail-footer" data-work-detail-actions={isOwner ? 'owner' : 'visitor'}>

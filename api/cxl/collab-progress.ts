@@ -1,24 +1,24 @@
-import { randomBytes } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { directDriveGet } from './googleDirect.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
+import { findOwnerFile, readOwnerJson, writeOwnerJson } from '../../src/server/cxlOwnerFiles.js';
+import { applyIdeaOp, IdeaError, parseIdeaOp, sanitizeIdeaFile } from '../../src/server/cxlIdeas.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse;
 type Progress = Record<string, string>;
 
 /**
- * Owner-only Collab Schedule ticks ("this milestone is done"). Kept in one small
- * file next to the Owner's Drive credential so Works and the public projection
- * are never touched; visitors never see this data.
+ * Owner-only Collab Schedule ticks ("this milestone is done") and, with ?store=ideas, the idea inbox.
+ * Each is one small file next to the Owner's Drive credential so Works and the public projection
+ * are never touched; visitors never see this data. (One function for both: Vercel Hobby allows 12.)
  */
 export const PROGRESS_FILE = 'cxl-collab-progress.json';
-const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
-const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+export const IDEAS_FILE = 'cxl-owner-ideas.json';
 const KEY_RE = /^asset_[A-Za-z0-9_-]{1,96}\|\d{4}-\d{2}-\d{2}\|[^\n]{0,200}$/;
 const MAX_ENTRIES = 2000;
-const TIMEOUT_MS = 10_000;
 
 function send(res: Response, status: number, body: unknown) {
   res.statusCode = status;
@@ -52,45 +52,9 @@ async function ownerToken(): Promise<{ token: string; folderId: string } | null>
   return sealed ? { token: await ownerDriveAccessToken(sealed, config), folderId } : null;
 }
 
-async function findProgressFile(token: string, folderId: string): Promise<string | null> {
-  const query = `'${folderId.replace(/['\\]/g, '\\$&')}' in parents and name = '${PROGRESS_FILE}' and trashed = false`;
-  const listed = await fetch(`${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
-    headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS)
-  });
-  if (!listed.ok) throw new Error(`Progress lookup failed (HTTP ${listed.status})`);
-  return ((await listed.json()) as { files?: { id?: string }[] }).files?.[0]?.id || null;
-}
-
-async function readProgress(token: string, fileId: string | null): Promise<Progress> {
-  if (!fileId) return {};
-  const response = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {
-    headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS)
-  });
-  if (!response.ok) throw new Error(`Progress read failed (HTTP ${response.status})`);
-  return sanitizeProgress(await response.json().catch(() => ({})));
-}
-
-async function writeProgress(token: string, folderId: string, fileId: string | null, progress: Progress): Promise<void> {
-  const boundary = `cxl-${randomBytes(12).toString('hex')}`;
-  const metadata = fileId ? {} : { name: PROGRESS_FILE, parents: [folderId], mimeType: 'application/json' };
-  const body = [
-    `--${boundary}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify(metadata),
-    `--${boundary}`, 'Content-Type: application/json', '', JSON.stringify(progress), `--${boundary}--`, ''
-  ].join('\r\n');
-  const saved = await fetch(fileId
-    ? `${DRIVE_UPLOAD}/${encodeURIComponent(fileId)}?uploadType=multipart&supportsAllDrives=true`
-    : `${DRIVE_UPLOAD}?uploadType=multipart&supportsAllDrives=true`, {
-    method: fileId ? 'PATCH' : 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
-    body,
-    signal: AbortSignal.timeout(TIMEOUT_MS)
-  });
-  if (!saved.ok) throw new Error(`Progress save failed (HTTP ${saved.status})`);
-}
-
-function parseBody(req: Request): { key?: unknown; done?: unknown } | null {
+function parseBody(req: Request): Record<string, unknown> | null {
   const raw = req.body;
-  if (raw && typeof raw === 'object') return raw as { key?: unknown; done?: unknown };
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
   if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return null; } }
   return null;
 }
@@ -103,6 +67,7 @@ export default async function handler(req: Request, res: Response) {
   if (req.method === 'POST' && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
     return send(res, 403, { ok: false, error: 'Request origin could not be verified' });
   }
+  if (new URL(req.url || '/', 'https://cxl.invalid').searchParams.get('store') === 'ideas') return handleIdeas(req, res);
   let change: { key: string; done: boolean } | null = null;
   if (req.method === 'POST') {
     const body = parseBody(req);
@@ -114,14 +79,34 @@ export default async function handler(req: Request, res: Response) {
   try {
     const owner = await ownerToken();
     if (!owner) return send(res, 503, { ok: false, error: 'Connect Google Drive first' });
-    const fileId = await findProgressFile(owner.token, owner.folderId);
-    let progress = await readProgress(owner.token, fileId);
+    const fileId = await findOwnerFile(owner.token, owner.folderId, PROGRESS_FILE);
+    let progress = sanitizeProgress(await readOwnerJson(owner.token, fileId));
     if (change) {
       progress = applyProgressChange(progress, change.key, change.done);
-      await writeProgress(owner.token, owner.folderId, fileId, progress);
+      await writeOwnerJson(owner.token, owner.folderId, fileId, PROGRESS_FILE, progress);
     }
     return send(res, 200, { ok: true, data: progress });
   } catch (error) {
     return send(res, 502, { ok: false, error: (error instanceof Error ? error.message : 'Progress request failed').slice(0, 200) });
+  }
+}
+
+/** Idea inbox: every write re-reads the file first, so ideas jotted from two tabs both survive. */
+async function handleIdeas(req: Request, res: Response) {
+  const op = req.method === 'POST' ? parseIdeaOp(parseBody(req)) : null;
+  if (req.method === 'POST' && !op) return send(res, 400, { ok: false, error: 'Invalid idea change' });
+  try {
+    const owner = await ownerToken();
+    if (!owner) return send(res, 503, { ok: false, error: 'Connect Google Drive first' });
+    const fileId = await findOwnerFile(owner.token, owner.folderId, IDEAS_FILE);
+    let ideas = sanitizeIdeaFile(await readOwnerJson(owner.token, fileId));
+    if (op) {
+      ideas = applyIdeaOp(ideas, op, new Date(), randomUUID);
+      await writeOwnerJson(owner.token, owner.folderId, fileId, IDEAS_FILE, ideas);
+    }
+    return send(res, 200, { ok: true, data: ideas });
+  } catch (error) {
+    if (error instanceof IdeaError) return send(res, error.status, { ok: false, error: error.message });
+    return send(res, 502, { ok: false, error: (error instanceof Error ? error.message : 'Idea request failed').slice(0, 200) });
   }
 }

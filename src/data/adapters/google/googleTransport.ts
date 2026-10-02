@@ -26,7 +26,7 @@ function readCsrfCookie(): string {
 }
 
 /** The CSRF cookie; when it is gone, the session check re-issues it if the Owner is still signed in. */
-async function ownerCsrfToken(): Promise<string> {
+export async function ownerCsrfToken(): Promise<string> {
   let token = readCsrfCookie();
   if (!token && typeof fetch === 'function') {
     await fetch('/api/cxl/auth/session', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).catch(() => undefined);
