@@ -3,6 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleMediaPoc } from '../../src/server/cxlMediaPoc.js';
 import { handleGoogleWorkMediaRead, ownerSessionValid } from '../../src/server/cxlGoogleWorkMedia.js';
 import { directOwnerReadsEnabled, directWorkMedia } from './googleDirect.js';
+import { clientIp, PUBLIC_MEDIA_RATE_LIMIT, rateLimitRetryAfter } from '../../src/server/rateLimit.js';
+import { RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 export { mediaPocLimits } from '../../src/server/cxlMediaPoc.js';
 
 type Request = IncomingMessage & { body?: unknown; url?: string };
@@ -162,6 +164,9 @@ export default async function handler(req: Request, res: Response) {
   let params: URLSearchParams;
   try { params = new URL(req.url || '/', 'https://cxl.invalid').searchParams; }
   catch { return sendError(res, 400, 'Invalid media request'); }
+
+  const retryAfter = ownerSessionValid(req) ? 0 : rateLimitRetryAfter(`media:${clientIp(req)}`, PUBLIC_MEDIA_RATE_LIMIT);
+  if (retryAfter) { res.setHeader('Retry-After', String(retryAfter)); return sendError(res, 429, RATE_LIMITED_MESSAGE); }
 
   if (params.has('poc')) {
     if (params.getAll('poc').length !== 1 || params.get('poc') !== '1') {

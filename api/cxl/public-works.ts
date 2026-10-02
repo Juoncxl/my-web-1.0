@@ -3,6 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fetchPublicWorksSnapshot } from './google.js';
 import { invalidatePublicReadCache } from './googleDirect.js';
 import { ownerSessionValid } from '../../src/server/cxlGoogleWorkMedia.js';
+import { clientIp, PUBLIC_API_RATE_LIMIT, rateLimitRetryAfter } from '../../src/server/rateLimit.js';
+import { publicErrorMessage, RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 
 type Request = IncomingMessage;
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -40,10 +42,13 @@ function previewTiming(res: Response, timing: Awaited<ReturnType<typeof fetchPub
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'GET') return send(res, 405, { ok: false, error: 'Method not allowed' });
+  const owner = ownerSessionValid(req);
+  const retryAfter = owner ? 0 : rateLimitRetryAfter(`api:${clientIp(req)}`, PUBLIC_API_RATE_LIMIT);
+  if (retryAfter) { res.setHeader('Retry-After', String(retryAfter)); return send(res, 429, { ok: false, error: RATE_LIMITED_MESSAGE }); }
   const startedAt = Date.now();
   // The signed-in Owner asks for `?fresh=1` so a Work just made public shows at once;
   // guests keep the CDN copy (refreshed within a minute) to protect the Sheets quota.
-  const fresh = new URL(req.url || '/', 'https://cxl.invalid').searchParams.get('fresh') === '1' && ownerSessionValid(req);
+  const fresh = new URL(req.url || '/', 'https://cxl.invalid').searchParams.get('fresh') === '1' && owner;
   try {
     if (fresh) invalidatePublicReadCache();
     const { works, timing } = await fetchPublicWorksSnapshot();
@@ -67,7 +72,8 @@ export default async function handler(req: Request, res: Response) {
       ? error.status
       : error instanceof Error && (error.name === 'TimeoutError' || /time.?out/i.test(message)) ? 504 : 502;
     res.setHeader('Server-Timing', `total;dur=${(Date.now() - startedAt).toFixed(2)}`);
-    return send(res, status, { ok: false, error: message.slice(0, 300) });
+    console.info(JSON.stringify({ event: 'cxl_public_works_failed', status, reason: message.slice(0, 120) }));
+    return send(res, status, { ok: false, error: publicErrorMessage(status) });
   }
 }
 
