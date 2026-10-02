@@ -356,6 +356,26 @@ describe('direct Work update', () => {
       .rejects.toMatchObject({ code: 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' });
   });
 
+  it('accepts a WebP saved with a .jpg name: Drive records the real type and the retried save goes through', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    google.files.seed = { name: 'cxl-work-media-00000000-0000-4000-8000-000000000000.png', parent: 'mediaFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {} };
+    const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4, 1), Buffer.from('WEBP'), Buffer.alloc(30, 3)]);
+    const mediaId = '33333333-3333-4333-8333-333333333333';
+    const sha256 = createHash('sha256').update(webp).digest('hex');
+    // The browser declares image/jpeg because of the file name.
+    const begin = (uploadId: string) => ({ uploadId, mediaId, workId: WORK, totalFileSize: webp.length, rawChunkSize: 2 * 1024 * 1024, totalChunks: 1, mimeType: 'image/jpeg', sha256, purpose: 'gallery', contextId: null, sortOrder: 1, isCover: false });
+    const first = '44444444-4444-4444-8444-444444444444';
+    await directMediaBegin(begin(first), OWNER, google.env);
+    await directMediaChunk({ uploadId: first, chunkIndex: 0, base64: webp.toString('base64'), sha256 }, OWNER, google.env);
+    const file = Object.values(google.files).find(item => item.props?.cxlMediaId === mediaId && !item.name.includes('session'))!;
+    file.mimeType = 'image/webp'; // Drive sniffs the bytes
+    await expect(directMediaBegin(begin('55555555-5555-4555-8555-555555555555'), OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+    expect(file.props?.cxlState).toBe('finalized');
+    await expect(directUpdateWork([WORK, { previewImages: ['media:m1', `media:${mediaId}`] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: [mediaId] }], OWNER, google.env))
+      .resolves.toMatchObject({ fallback: false });
+  });
+
   it('still refuses two different files claiming the same media id', async () => {
     const google = fakeGoogle();
     vi.stubGlobal('fetch', google.fetchMock);
