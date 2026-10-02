@@ -12,9 +12,12 @@ import {
   Sun,
   Moon,
   HardDrive,
-  Check
+  Check,
+  Download,
+  Lightbulb
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { IdeaInboxModal } from './IdeaInboxModal';
 import { useTheme } from '../context/ThemeContext';
 import { getCanonicalProfilePath } from '../lib/profileIdentity';
 
@@ -47,6 +50,8 @@ export const Header: React.FC<HeaderProps> = ({
   const { currentUser, isAuthenticated, isLoading, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  // The idea inbox lives with the menu so every page that shows the Header gets it.
+  const [ideasOpen, setIdeasOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -261,6 +266,24 @@ export const Header: React.FC<HeaderProps> = ({
                           <Settings className="w-4 h-4 text-purple-500" />
                           <span>ตั้งค่าบัญชี</span>
                         </button>
+                        {/* Backup lives in the settings dialog; a direct entry keeps it easy to find. */}
+                        <button
+                          onClick={() => {
+                            if (onOpenSettingsModal) onOpenSettingsModal();
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
+                        >
+                          <Download className="w-4 h-4 text-sky-500" />
+                          <span>สำรองข้อมูล (ดาวน์โหลด)</span>
+                        </button>
+                        <button
+                          onClick={() => { setIdeasOpen(true); setDropdownOpen(false); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left cursor-pointer"
+                        >
+                          <Lightbulb className="w-4 h-4 text-amber-500" />
+                          <span>💡 กล่องไอเดีย</span>
+                        </button>
                         <a
                           href="/api/cxl/auth/login?drive=1"
                           className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50/80 dark:hover:bg-purple-950/50 rounded-xl transition-colors text-left"
@@ -324,6 +347,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         </div>
       </div>
+      <IdeaInboxModal isOpen={ideasOpen} onClose={() => setIdeasOpen(false)} />
     </header>
   );
 };

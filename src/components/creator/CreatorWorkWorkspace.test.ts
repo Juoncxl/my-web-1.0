@@ -217,9 +217,9 @@ describe('CreatorWorkWorkspace live draft preview', () => {
     expect(workspaceSource).toContain('<h2>ข้อมูลพื้นฐาน</h2>');
   });
 
-  it('keeps the five-tab Composer anatomy while preserving temporary inner surfaces', () => {
+  it('keeps the five-tab Composer anatomy (plus an ideas tab for saved Works) while preserving temporary inner surfaces', () => {
     expect(workspaceSource).toContain("...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const])");
-    expect(workspaceSource).toContain("['settings', 'การตั้งค่าผลงาน'], ['review', 'ตรวจสอบ']");
+    expect(workspaceSource).toContain("['settings', 'การตั้งค่าผลงาน'], ...(initialData?.id ? [['ideas', 'ไอเดีย'] as const] : []), ['review', 'ตรวจสอบ']");
     expect(workspaceSource).toContain('className="csp-work-main"');
     expect(workspaceSource).not.toContain('className="csp-work-sidebar"');
     expect(workspaceSource).not.toContain('isInspectorOpen');

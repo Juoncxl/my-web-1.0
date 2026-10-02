@@ -3,7 +3,9 @@ import confetti from 'canvas-confetti';
 import {
   Bookmark,
   Check,
+  ChevronDown,
   Clock3,
+  Lightbulb,
   Code2,
   Copy,
   Download,
@@ -28,6 +30,8 @@ import type { Asset, AssetIcon, Folder as WorkFolder, User, WorkContentBlock } f
 import { AUDIENCE_RATING_LABELS, CATEGORIES } from '../lib/constants';
 import { getWorkStatusDisplay } from '../lib/workStatus';
 import { displayDeadlineLabel } from '../lib/collabSchedule';
+import { summarizeCollabParticipants } from '../lib/collabParticipantSummary';
+import { IdeaList } from './IdeaList';
 import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 import { canViewAssetDetail } from '../lib/accessPolicy';
 import { formatThaiDate } from '../lib/dateUtils';
@@ -200,6 +204,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [codeView, setCodeView] = useState<CodeView>('split');
   const [shareStatus, setShareStatus] = useState<'success' | 'error' | null>(null);
   const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
+  // Participants are folded once a Collab has more than three; each opens on its own.
+  const [openParticipantIds, setOpenParticipantIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => { setOpenParticipantIds(new Set()); }, [asset?.id]);
   const [galleryImageError, setGalleryImageError] = useState<string | null>(null);
   const [tagCopyStatus, setTagCopyStatus] = useState<'success' | 'error' | null>(null);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
@@ -267,6 +274,9 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const { contentBlocks, shortDescription, uiCode, legacyContent: resolvedLegacyContent } = resolveWorkPresentationContent(asset);
   const display = getWorkDisplayPresentation(asset);
   const publicCollaboration = display.collaboration;
+  const participantSummary = summarizeCollabParticipants(publicCollaboration?.participants || []);
+  const participantsCollapsible = (publicCollaboration?.participants?.length || 0) > 3;
+  const allParticipantsOpen = Boolean(publicCollaboration?.participants?.length) && (publicCollaboration?.participants || []).every(item => openParticipantIds.has(item.id));
   const collaborationMemberWorks = display.isCollaborationFocused
     ? allAssets.filter(candidate => candidate.collaborationAssetId === asset.id)
       .filter(candidate => canViewAssetDetail(candidate, isOwner && candidate.userId === asset.userId))
@@ -592,12 +602,17 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
         </section> : null}
 
         {display.isCollaborationFocused && publicCollaboration?.participants?.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
-          <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div></div>
+          <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div>{participantsCollapsible && <button type="button" className="work-detail-participant-toggle-all" onClick={() => setOpenParticipantIds(allParticipantsOpen ? new Set() : new Set(publicCollaboration.participants.map(item => item.id)))}>{allParticipantsOpen ? 'ปิดทั้งหมด' : 'เปิดทั้งหมด'}</button>}</div>
+          {participantSummary && <div className="work-detail-participant-summary" role="status"><strong>ข้อมูลผ่าน {participantSummary.dataApproved}/{participantSummary.total} · รูปผ่าน {participantSummary.imageApproved}/{participantSummary.total}</strong><span>{participantSummary.missing.length ? `ยังขาด: ${participantSummary.missing.map(item => `${item.name} (${item.items.join(', ')})`).join(' · ')}` : 'ส่งครบทุกคนแล้ว 🎉'}</span></div>}
           <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => {
             const participantTagText = participantTagCopy(participant);
             const participantContentText = participantContentCopy(participant);
-            return <article key={participant.id}>
-            <header><div><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
+            const isParticipantOpen = !participantsCollapsible || openParticipantIds.has(participant.id);
+            const participantStatusText = [participant.dataStatus && `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล`, participant.imageStatus && `${getCollabStatusLabel(participant.imageStatus)} รูป`].filter(Boolean).join(' · ');
+            return <article key={participant.id} className={isParticipantOpen ? '' : 'is-folded'}>
+            <header><div>{participantsCollapsible ? <button type="button" className="work-detail-participant-toggle" aria-expanded={isParticipantOpen} onClick={() => setOpenParticipantIds(current => { const next = new Set(current); if (next.has(participant.id)) next.delete(participant.id); else next.add(participant.id); return next; })}><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong><ChevronDown aria-hidden="true" className={isParticipantOpen ? 'is-open' : ''} /></button> : <strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>}{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
+            {!isParticipantOpen && participantStatusText && <p className="work-detail-participant-status-compact">{participantStatusText}</p>}
+            {isParticipantOpen && <>
             <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms?.map(platform => <span key={platform}>{platform}</span>)}</div>
             {participant.externalWorkName && <p><strong>ผลงาน:</strong> {participant.externalWorkName}</p>}
             {(participant.dataStatus || participant.imageStatus) && <p><strong>สถานะ:</strong> {participant.dataStatus ? `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล` : ''}{participant.dataStatus && participant.imageStatus ? ' · ' : ''}{participant.imageStatus ? `${getCollabStatusLabel(participant.imageStatus)} รูป` : ''}</p>}
@@ -605,6 +620,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             {participant.deadlineOverrides && Object.values(participant.deadlineOverrides).some(Boolean) && <p><strong>กำหนดส่งเฉพาะคน:</strong> {Object.values(participant.deadlineOverrides).filter(Boolean).join(' · ')}</p>}
             {Boolean(participant.referenceImages?.some(image => !failedImageSrcs.has(image.src))) && <div className="work-detail-participant-references">{participant.referenceImages?.map((image, index) => failedImageSrcs.has(image.src) ? null : <figure key={image.id}><img src={image.src} alt={`รูปอ้างอิงของ ${participant.creatorName || 'ผู้เข้าร่วม'} รูปที่ ${index + 1}`} referrerPolicy="no-referrer" onError={() => markImageFailed(image.src)} /><button type="button" className="work-detail-reference-download" onClick={() => void saveReferenceImage(image, participant.creatorName, index)} aria-label={`บันทึกรูปอ้างอิงที่ ${index + 1}`} title="บันทึกรูป"><Download aria-hidden="true" /></button></figure>)}</div>}
             {referenceImageError && <p className="work-detail-reference-error" role="status">{referenceImageError}</p>}
+            </>}
           </article>;
           })}</div>
         </section> : null}
@@ -639,6 +655,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผลงานที่เชื่อมโยง</strong><span>ผลงานที่เชื่อมโยงจากรายการเดียวกัน</span></div></div></div>
           <div className="work-detail-linked-grid">{linkedAssets.map(linked => <button type="button" key={linked.id} onClick={() => onSelectLinkedAsset?.(linked.id)}><WorkMark icon={linked.icon} /><span><strong>{linked.title}</strong><small>{CATEGORIES[linked.category]?.name || linked.category}</small></span><b>ดู →</b></button>)}</div>
         </section>}
+        {isOwner && interactionMode !== 'preview' && asset && <section className="work-detail-section work-detail-ideas" data-work-detail-section="ideas"><div className="work-detail-section-heading"><div><Lightbulb aria-hidden="true" /><div><strong>ไอเดียของงานนี้</strong><span>เห็นเฉพาะคุณ</span></div></div></div><IdeaList workId={asset.id} /></section>}
       </div>
 
       {!embedded && <footer className="work-detail-footer" data-work-detail-actions={isOwner ? 'owner' : 'visitor'}>

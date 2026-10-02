@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { Asset, AssetCategory, AssetIcon, AssetStatus, AssetVisibility, Folder, User, WorkContentBlock, WorkContentBlockType } from '../../types';
 import { normalizeAssetVisibility } from '../../lib/assetVisibility';
 import { isWorkOwnedBy } from '../../lib/publicCreatorIdentity';
+import { IdeaList } from '../IdeaList';
 import { normalizeWorkStatus, WORK_STATUS_OPTIONS, workStatusFromLegacy, workStatusToLegacy, type WorkStatusValue } from '../../lib/workStatus';
 import { clearWorkMutationRequestId, composerDraftKey, deleteComposerDraft, getOrCreateWorkMutationRequestId, loadComposerDraft, saveComposerDraft } from '../../lib/composerDraftStore';
 import { SandboxedCodePreview } from '../SandboxedCodePreview';
@@ -44,7 +45,7 @@ import {
   type CreatorContentType
 } from './creatorContentModel';
 
-type WorkSection = 'details' | 'content' | 'media' | 'collab' | 'settings' | 'review';
+type WorkSection = 'details' | 'content' | 'media' | 'collab' | 'settings' | 'review' | 'ideas';
 export type WorkBlockType = WorkContentBlockType;
 type WorkIconKind = 'emoji' | 'image' | 'gif';
 type WorkBlock = WorkContentBlock;
@@ -630,7 +631,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
 
   return <div className="csp-modal-backdrop" role="presentation"><section className="csp-work-modal" data-review-actions={section === 'review'} role="dialog" aria-modal="true" aria-labelledby="csp-work-title">
     <header className="csp-modal-header csp-composer-header"><div><h2 id="csp-work-title">{initialData ? 'แก้ไขผลงาน' : 'สร้างผลงานใหม่'}</h2><p>กำหนดตัวตนและการจัดหมวดหมู่ของผลงาน</p></div><button type="button" className="csp-icon-button" onClick={requestClose} aria-label="ปิดหน้าต่างสร้างผลงาน"><X className="h-4 w-4" /></button></header>
-    <nav className="csp-work-nav" aria-label="เมนูพื้นที่ทำงานผลงาน">{([['details', 'ข้อมูลผลงาน'], ['content', 'เนื้อหา'], ...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const]), ['settings', 'การตั้งค่าผลงาน'], ['review', 'ตรวจสอบ']] as const).map(([value, label]) => <button type="button" key={value} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)}>{label}</button>)}</nav>
+    <nav className="csp-work-nav" aria-label="เมนูพื้นที่ทำงานผลงาน">{([['details', 'ข้อมูลผลงาน'], ['content', 'เนื้อหา'], ...(workMode === 'collab' ? [['collab', 'คอลแลป'] as const] : [['media', 'สื่อ'] as const]), ['settings', 'การตั้งค่าผลงาน'], ...(initialData?.id ? [['ideas', 'ไอเดีย'] as const] : []), ['review', 'ตรวจสอบ']] as const).map(([value, label]) => <button type="button" key={value} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)}>{label}</button>)}</nav>
     <div className="csp-composer-alert">{error && <div className="csp-inline-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="ปิดข้อความผิดพลาด">×</button></div>}</div>
     <div className="csp-work-body"><main className="csp-work-main">
       {section === 'settings' && <section className="csp-work-section csp-composer-settings" aria-labelledby="csp-composer-settings-title">
@@ -695,6 +696,7 @@ export const CreatorWorkWorkspace: React.FC<CreatorWorkWorkspaceProps> = ({ isOp
           onChange={setCollaboration}
         />
       </div>}
+      {section === 'ideas' && initialData?.id && <section className="csp-work-section" aria-labelledby="csp-ideas-title"><div className="csp-section-heading"><div><h2 id="csp-ideas-title">💡 ไอเดียของงานนี้</h2><p>เห็นเฉพาะคุณ · บันทึกทันที ไม่ต้องกดบันทึกงาน</p></div></div><IdeaList workId={initialData.id} /></section>}
       {section === 'review' && <section className="csp-work-section csp-review-work-section" aria-labelledby="csp-review-title">
         <div className="csp-section-heading csp-review-heading">
           <div><h2 id="csp-review-title">ตรวจสอบผลงาน</h2><p>ดูตัวอย่างก่อนสร้างผลงานจริง</p></div>
