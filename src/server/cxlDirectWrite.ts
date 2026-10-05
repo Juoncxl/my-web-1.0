@@ -476,7 +476,7 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
 type Placement = { id: string; purpose: string; contextId: string | null; sortOrder: number; isCover: boolean; references: Placement[] };
 
 /** Port of mediaWorkReferenceMap_. */
-function mediaReferenceMap(asset: Json): Record<string, Placement> {
+export function mediaReferenceMap(asset: Json): Record<string, Placement> {
   const refs: Record<string, Placement> = {};
   const add = (value: unknown, purpose: string, contextId: unknown, sortOrder: number, isCover: boolean, declaredMediaId?: unknown) => {
     const match = typeof value === 'string' ? value.match(/^media:([A-Za-z0-9_-]+)$/i) : null;
@@ -510,7 +510,7 @@ function referencedMediaIds(asset: Json): Set<string> {
 }
 
 /** Port of rejectUnsupportedWorkMedia_. */
-function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, mediaIds: string[]): void {
+export function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, mediaIds: string[]): void {
   const now = mediaReferences(asset);
   if (now.inline) fail('UNSUPPORTED_MEDIA_MUTATION', 'Inline media must be uploaded before saving a Work.');
   const uniqueRefs = [...new Set(now.refs)];

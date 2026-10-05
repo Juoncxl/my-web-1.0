@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { cxlDataService } from '../data/cxlDataService';
 import { deleteQaProfileImage, getQaProfileImage, getQaProfileImageUrl, restoreQaProfileImage, isQaObjectUrl, validateQaProfileImage } from '../lib/qaProfileImageStore';
 import { SettingsBackupSection } from './settings/SettingsBackupSection';
+import { SettingsImageOptimizeSection } from './settings/SettingsImageOptimizeSection';
 import { SettingsProfileSection } from './settings/SettingsProfileSection';
 import { SettingsSecuritySection } from './settings/SettingsSecuritySection';
 import { SettingsTabs } from './settings/SettingsTabs';
@@ -205,6 +206,7 @@ export const SettingsModal: React.FC = () => {
         {!isVercelOwnerAuth && activeTab === 'profile' && <SettingsProfileSection displayName={displayName} username={currentUser?.username} bio={bio} avatarUrl={avatarUrl} email={currentUser?.email || 'บัญชี OAuth'} message={profileMsg} isSaving={isSavingProfile} onDisplayNameChange={setDisplayName} onBioChange={setBio} onAvatarUpload={handleAvatarUpload} onSubmit={handleProfileSubmit} />}
         {!isVercelOwnerAuth && activeTab === 'security' && <SettingsSecuritySection provider={currentUser?.provider} currentPassword={currentPassword} newPassword={newPassword} confirmPassword={confirmPassword} message={passwordMsg} isSaving={isSavingPassword} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onConfirmPasswordChange={setConfirmPassword} onSubmit={handlePasswordSubmit} />}
         {activeTab === 'backup' && <SettingsBackupSection message={backupMsg} isExporting={isExporting} isImportingLegacy={isImportingLegacy} legacySummary={legacySummary} onExport={() => void handleExportFullVault()} onImportLegacy={() => void handleImportLegacyGuestData()} />}
+        {activeTab === 'backup' && isVercelOwnerAuth && currentUser?.id && <SettingsImageOptimizeSection ownerId={currentUser.id} />}
       </div>
     </div>
   </div>;
