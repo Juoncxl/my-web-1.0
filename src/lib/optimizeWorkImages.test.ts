@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Asset } from '../types';
 import { prepareGoogleWorkMedia } from '../data/adapters/google/googleWorkMedia';
 import { mediaReferenceMap, rejectUnsupportedWorkMedia } from '../server/cxlDirectWrite';
-import { buildOptimizedWorkUpdate, optimizeWorkImages, planWorkImageOptimization } from './optimizeWorkImages';
+import { gifIconReplacement, buildOptimizedWorkUpdate, optimizeWorkImages, planWorkImageOptimization } from './optimizeWorkImages';
 
 const WORK = 'asset_0123456789abcdef0123456789abcdef';
 const ID = {
@@ -216,5 +216,30 @@ describe('optimizeWorkImages batching', () => {
     expect(updateWork).toHaveBeenCalledTimes(2);
     const calls = updateWork.mock.calls as unknown as Array<[string, { workMediaDraft: unknown[] }, { expectedRevision: number }]>;
     expect(calls.map(([, updates, options]) => [updates.workMediaDraft.length, options.expectedRevision])).toEqual([[12, 1], [3, 2]]);
+  });
+});
+
+describe('GIF icons', () => {
+  const gifWork = () => work({ icon: { type: 'image', value: url(ID.gif), mediaId: ID.gif }, previewImages: [], previewImage: '', contentBlocks: [] });
+
+  it('turns a GIF icon into the category emoji', () => {
+    expect(gifIconReplacement(gifWork())).toEqual({ type: 'emoji', value: '🎭' });
+    expect(gifIconReplacement(work())).toBeNull();
+  });
+
+  it('saves the emoji icon even when no image needs shrinking', async () => {
+    const updateWork = vi.fn(async (_id: string, _updates: Partial<Asset>, _options: unknown) => ({ error: null }));
+    let current = gifWork();
+    const result = await optimizeWorkImages(WORK, {
+      fetchFullWork: async () => current,
+      updateWork: async (id, updates, options) => { current = { ...current, ...updates } as Asset; return updateWork(id, updates, options); },
+      download: async () => { throw new Error('not expected'); },
+      newId: () => '99999999-9999-4999-8999-999999999999', toObjectUrl: () => 'blob:x', revokeObjectUrl: () => undefined
+    });
+    expect(result).toMatchObject({ gifIconReplaced: true, optimized: 0 });
+    expect(updateWork).toHaveBeenCalledTimes(1);
+    const updates = (updateWork.mock.calls[0] as unknown as [string, Partial<Asset> & { workMediaDraft: unknown[] }])[1];
+    expect(updates.icon).toEqual({ type: 'emoji', value: '🎭' });
+    expect(updates.workMediaDraft).toEqual([]);
   });
 });

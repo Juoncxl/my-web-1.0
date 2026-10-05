@@ -12,6 +12,7 @@
 import type { Asset, AssetMediaRecord } from '../types';
 import type { StandardWorkMediaDraft } from './workMedia';
 import { shrinkImageForUpload } from './imageShrink';
+import { CATEGORIES } from './constants';
 
 /** Images at or below this size are left alone; shrinking them saves too little. */
 export const OPTIMIZE_MIN_BYTES = 300 * 1024;
@@ -170,6 +171,8 @@ export interface OptimizeWorkResult {
   skipped?: number;
   /** Images downloaded and measured. */
   checked?: number;
+  /** True when a GIF icon was replaced by the category emoji. */
+  gifIconReplaced?: boolean;
   error?: string;
 }
 
@@ -184,6 +187,18 @@ export interface OptimizeDependencies {
 }
 
 /** Optimizes one Work end to end. Never throws; failures come back in `error`. */
+/**
+ * GIF icons are swapped for the category emoji (the Owner's choice): an animated icon is
+ * loaded on every card and can weigh several MB, and shrinking would lose the animation.
+ */
+export function gifIconReplacement(asset: Asset): Asset['icon'] | null {
+  if (asset.icon?.type !== 'image' || !asset.icon.value) return null;
+  const record = recordFor(asset, asset.icon.value, asset.icon.mediaId);
+  const type = (record?.mimeType || asset.icon.mimeType || '').toLowerCase();
+  if (type !== 'image/gif' && !/\.gif(?:$|\?)/i.test(asset.icon.value)) return null;
+  return { type: 'emoji', value: CATEGORIES[asset.category]?.emoji || '✨' };
+}
+
 /** Images per save: a big Collaboration (dozens of participants) is optimized over several saves. */
 export const OPTIMIZE_BATCH_SIZE = 12;
 const MAX_ROUNDS = 60;
@@ -206,8 +221,9 @@ export async function optimizeWorkImages(workId: string, deps: OptimizeDependenc
       const asset = await deps.fetchFullWork(workId);
       if (!asset) throw new Error('โหลดผลงานไม่สำเร็จ');
       result.title = asset.title || workId;
+      const emojiIcon = asset.deletedAt ? null : gifIconReplacement(asset);
       const targets = planWorkImageOptimization(asset).filter(target => !examined.has(imageKey(target.url)));
-      if (!targets.length) break;
+      if (!targets.length && !emojiIcon) break;
 
       const replaced = new Map<string, OptimizedImage>();
       const objectUrls: string[] = [];
@@ -233,11 +249,16 @@ export async function optimizeWorkImages(workId: string, deps: OptimizeDependenc
           before += original.size;
           after += smaller.size;
         }
-        if (!replaced.size) continue;
+        if (!replaced.size && !emojiIcon) continue;
         const { updates } = buildOptimizedWorkUpdate(asset, replaced);
+        if (emojiIcon) {
+          updates.icon = emojiIcon;
+          updates.workMediaDraft = updates.workMediaDraft.filter(item => item.purpose !== 'icon');
+        }
         const saved = await deps.updateWork(workId, updates, { requestId: newId(), expectedRevision: asset.revision });
         if (saved.error) throw new Error(saved.error);
         result.optimized += replaced.size;
+        if (emojiIcon) result.gifIconReplaced = true;
         result.bytesBefore += before;
         result.bytesAfter += after;
       } finally {
