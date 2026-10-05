@@ -115,6 +115,21 @@ async function findSessionFile(env: DirectMediaEnv, folderId: string, uploadId: 
   return { id, session: await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`)).json() };
 }
 
+/**
+ * Drive's name search can lag a few seconds behind a just-created session file, which made
+ * busy uploads (dozens of images in one save) fail with "session not found". Chunk and
+ * finalize look again a few times before giving up; begin keeps the single lookup.
+ */
+async function findSessionFileSettled(env: DirectMediaEnv, folderId: string, uploadId: string, waitMs = SESSION_LOOKUP_WAIT_MS): Promise<{ id: string; session: Json } | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    const found = await findSessionFile(env, folderId, uploadId);
+    if (found || attempt >= SESSION_LOOKUP_RETRIES) return found;
+    await new Promise(resolve => setTimeout(resolve, waitMs * (attempt + 1)));
+  }
+}
+const SESSION_LOOKUP_RETRIES = 4;
+const SESSION_LOOKUP_WAIT_MS = 750;
+
 // The declared mime type is not compared: browsers guess it from the file name (a WebP saved as .jpg is
 // declared image/jpeg) while Drive records the real one. Checksum + size already pin the bytes.
 function metadataMatches(stored: Json, input: Json, ownerUserId: string): boolean {
@@ -216,7 +231,7 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
 
 export async function directMediaChunk(input: Json, ownerUserId: string, env: DirectMediaEnv): Promise<Json> {
   const folderId = await workMediaFolderId(env);
-  const known = await findSessionFile(env, folderId, input.uploadId);
+  const known = await findSessionFileSettled(env, folderId, input.uploadId);
   if (!known) fail('MEDIA_UPLOAD_SESSION_NOT_FOUND', 'Work media upload session was not found');
   const session = known!.session;
   if (String(session.ownerUserId) !== ownerUserId) fail('MEDIA_UPLOAD_SESSION_NOT_FOUND', 'Work media upload session was not found');
@@ -309,7 +324,7 @@ async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expec
 
 export async function directMediaFinalize(input: Json, ownerUserId: string, env: DirectMediaEnv): Promise<Json> {
   const folderId = await workMediaFolderId(env);
-  const known = await findSessionFile(env, folderId, input.uploadId);
+  const known = await findSessionFileSettled(env, folderId, input.uploadId);
   let file: WorkMediaFile | null;
   if (!known) {
     // Already finalized (session file removed): answer from the media file itself.

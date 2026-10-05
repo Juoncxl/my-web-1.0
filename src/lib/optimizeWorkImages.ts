@@ -184,47 +184,69 @@ export interface OptimizeDependencies {
 }
 
 /** Optimizes one Work end to end. Never throws; failures come back in `error`. */
+/** Images per save: a big Collaboration (dozens of participants) is optimized over several saves. */
+export const OPTIMIZE_BATCH_SIZE = 12;
+const MAX_ROUNDS = 60;
+
+/** Stable key of a stored image: its ref, since display URLs change version after every save. */
+function imageKey(url: string): string {
+  try { return new URL(url, 'https://cxl.invalid').searchParams.get('ref') || url; } catch { return url; }
+}
+
+/** Optimizes one Work end to end, saving in batches. Never throws; failures come back in `error`. */
 export async function optimizeWorkImages(workId: string, deps: OptimizeDependencies): Promise<OptimizeWorkResult> {
   const result: OptimizeWorkResult = { workId, title: '', optimized: 0, bytesBefore: 0, bytesAfter: 0 };
-  const objectUrls: string[] = [];
   const shrink = deps.shrink || shrinkImageForUpload;
   const newId = deps.newId || (() => crypto.randomUUID());
   const toObjectUrl = deps.toObjectUrl || (blob => URL.createObjectURL(blob));
   const revoke = deps.revokeObjectUrl || (url => URL.revokeObjectURL(url));
+  const examined = new Set<string>();
   try {
-    const asset = await deps.fetchFullWork(workId);
-    if (!asset) throw new Error('โหลดผลงานไม่สำเร็จ');
-    result.title = asset.title || workId;
-    const targets = planWorkImageOptimization(asset);
-    if (!targets.length) return result;
+    for (let round = 0; round < MAX_ROUNDS; round += 1) {
+      const asset = await deps.fetchFullWork(workId);
+      if (!asset) throw new Error('โหลดผลงานไม่สำเร็จ');
+      result.title = asset.title || workId;
+      const targets = planWorkImageOptimization(asset).filter(target => !examined.has(imageKey(target.url)));
+      if (!targets.length) break;
 
-    const replaced = new Map<string, OptimizedImage>();
-    for (const target of targets) {
-      if (replaced.has(target.url)) continue; // the same image used twice
-      // An image that can no longer be read (e.g. a legacy file that is gone) is skipped,
-      // not fatal: the rest of the Work can still be optimized.
-      let original: Blob;
-      try { original = await deps.download(target.url); } catch { result.skipped = (result.skipped || 0) + 1; continue; }
-      result.checked = (result.checked || 0) + 1;
-      if (original.size <= OPTIMIZE_MIN_BYTES || !SHRINKABLE_TYPES.has((original.type || '').toLowerCase())) continue;
-      const smaller = await shrink(original);
-      if (smaller === original || smaller.size > original.size * OPTIMIZE_MIN_SAVING_RATIO) continue;
-      const source = toObjectUrl(smaller);
-      objectUrls.push(source);
-      replaced.set(target.url, { newMediaId: newId(), source });
-      result.bytesBefore += original.size;
-      result.bytesAfter += smaller.size;
+      const replaced = new Map<string, OptimizedImage>();
+      const objectUrls: string[] = [];
+      let before = 0;
+      let after = 0;
+      try {
+        for (const target of targets) {
+          if (replaced.size >= OPTIMIZE_BATCH_SIZE) break;
+          const key = imageKey(target.url);
+          if (examined.has(key)) continue; // the same image used twice
+          examined.add(key);
+          // An image that can no longer be read (e.g. a legacy file that is gone) is skipped,
+          // not fatal: the rest of the Work can still be optimized.
+          let original: Blob;
+          try { original = await deps.download(target.url); } catch { result.skipped = (result.skipped || 0) + 1; continue; }
+          result.checked = (result.checked || 0) + 1;
+          if (original.size <= OPTIMIZE_MIN_BYTES || !SHRINKABLE_TYPES.has((original.type || '').toLowerCase())) continue;
+          const smaller = await shrink(original);
+          if (smaller === original || smaller.size > original.size * OPTIMIZE_MIN_SAVING_RATIO) continue;
+          const source = toObjectUrl(smaller);
+          objectUrls.push(source);
+          replaced.set(target.url, { newMediaId: newId(), source });
+          before += original.size;
+          after += smaller.size;
+        }
+        if (!replaced.size) continue;
+        const { updates } = buildOptimizedWorkUpdate(asset, replaced);
+        const saved = await deps.updateWork(workId, updates, { requestId: newId(), expectedRevision: asset.revision });
+        if (saved.error) throw new Error(saved.error);
+        result.optimized += replaced.size;
+        result.bytesBefore += before;
+        result.bytesAfter += after;
+      } finally {
+        objectUrls.forEach(url => revoke(url));
+      }
     }
-    if (!replaced.size) return result;
-
-    const { updates } = buildOptimizedWorkUpdate(asset, replaced);
-    const saved = await deps.updateWork(workId, updates, { requestId: newId(), expectedRevision: asset.revision });
-    if (saved.error) throw new Error(saved.error);
-    result.optimized = replaced.size;
     return result;
   } catch (error) {
-    return { ...result, optimized: 0, bytesBefore: 0, bytesAfter: 0, error: error instanceof Error ? error.message : 'ย่อรูปไม่สำเร็จ' };
-  } finally {
-    objectUrls.forEach(url => revoke(url));
+    // Earlier batches of this Work are already saved; report them along with the failure.
+    return { ...result, error: error instanceof Error ? error.message : 'ย่อรูปไม่สำเร็จ' };
   }
 }
