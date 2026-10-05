@@ -559,9 +559,12 @@ async function attachWorkMedia(record: Json, asset: Json, mediaIds: string[], wo
 /** saveOwnerWork_ media steps after the row fields are applied. Returns vercel_proxy media IDs no longer referenced. */
 async function settleRecordMedia(record: Json, previousIds: Set<string>, env: DirectWriteEnv): Promise<string[]> {
   const r = record.row;
+  // Proxy media no longer referenced anywhere is retired below, not orphaned.
+  const stillReferenced = referencedMediaIds(cxlAssetFromRecord(record));
   // A public Work may not carry unassigned or orphaned collaboration images.
   if (r.visibility === 'public' && (record.mediaRecords || []).some((m: Json) => {
     if (!m.drive_file_id) return false;
+    if (m.delivery === 'vercel_proxy' && !stillReferenced.has(m.id)) return false;
     if (m.purpose === 'unassigned') return true;
     if (m.purpose !== 'collab' && m.purpose !== 'collab_reference') return false;
     return !(record.collaborationDraft?.participants || []).some((p: Json) => (p.referenceImages || []).some((x: Json) => (typeof x === 'string' ? x : (x.src || x.storageKey || '')) === `media:${m.id}`));

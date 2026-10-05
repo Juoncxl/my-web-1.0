@@ -52,8 +52,8 @@ export const SettingsImageOptimizeSection: React.FC<{ ownerId: string }> = ({ ow
     <section className="cv-settings-card">
       <div className="cv-settings-card-heading"><div>
         <h3><ImageDown className="cv-settings-inline-icon" />ย่อรูปเก่าให้เล็กลง</h3>
-        <p>ย่อรูปขนาดใหญ่ในผลงานเก่า (ไอคอน รูปปก แกลเลอรี และรูปในเนื้อหา) ให้เหมือนรูปที่อัปใหม่ ส่วนรูปอ้างอิงของผู้เข้าร่วมในคอลแลปยังไม่ย่อ เว็บจะโหลดเร็วขึ้นและใช้โควตาน้อยลง</p>
-        <p><strong>ไฟล์เดิมไม่ถูกลบ</strong> ยังอยู่ใน Google Drive ครบ แนะนำให้กด "ลองกับ 1 ผลงาน" แล้วเปิดดูก่อนว่ารูปขึ้นปกติ</p>
+        <p>ย่อรูปขนาดใหญ่ในผลงานเก่า (ไอคอน รูปปก แกลเลอรี รูปในเนื้อหา และรูปอ้างอิงของผู้เข้าร่วมคอลแลป) ให้เหมือนรูปที่อัปใหม่ ส่วน GIF ไม่ย่อ เว็บจะโหลดเร็วขึ้นและใช้โควตาน้อยลง</p>
+        <p><strong>ไฟล์เดิมไม่ถูกเขียนทับ</strong> ระบบจะย้ายไฟล์เดิมไปถังขยะของ Google Drive ภายในประมาณ 1 วัน (กู้คืนได้ 30 วัน) แนะนำให้กด "ลองกับ 1 ผลงาน" แล้วเปิดดูก่อนว่ารูปขึ้นปกติ</p>
       </div></div>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="cv-settings-primary-button" disabled={running} onClick={() => void run('one')}>ลองกับ 1 ผลงาน</button>

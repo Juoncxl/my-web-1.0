@@ -2,11 +2,12 @@
  * One-off Owner tool: re-encode the large images of existing Works the same way
  * new uploads are shrunk, then save them through the normal Work update path.
  *
- * Nothing is overwritten in Drive. Each optimized image is uploaded as a new media
- * file and the Work switches its reference to it; the old file stays in Drive
- * (marked retired by the server), so a Work can always be restored from it.
- * In Collaboration Works only the Work's own images (icon, gallery, content) are
- * optimized; participant reference images inside the collaboration data are left as is.
+ * Nothing is overwritten in place. Each optimized image is uploaded as a new media
+ * file and the Work switches its reference to it. The server marks the old proxy
+ * file retired; its hourly cleanup later moves it to Drive trash (restorable for
+ * 30 days). Legacy files are never touched.
+ * Collaboration participant reference images are included: both the owner draft
+ * (`collaboration`) and the public copy (`publicCollaboration`) switch together.
  */
 import type { Asset, AssetMediaRecord } from '../types';
 import type { StandardWorkMediaDraft } from './workMedia';
@@ -18,7 +19,7 @@ export const OPTIMIZE_MIN_BYTES = 300 * 1024;
 export const OPTIMIZE_MIN_SAVING_RATIO = 0.8;
 const SHRINKABLE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-export type OptimizeTargetKind = 'icon' | 'gallery' | 'content';
+export type OptimizeTargetKind = 'icon' | 'gallery' | 'content' | 'collab_reference';
 
 export interface OptimizeTarget {
   kind: OptimizeTargetKind;
@@ -76,6 +77,15 @@ export function planWorkImageOptimization(asset: Asset): OptimizeTarget[] {
       targets.push({ kind: 'content', url: block.body, blockId: block.id, fileSize: size(block.body, block.mediaId) });
     }
   });
+  // Owner draft first; the public copy only when there is no draft. Both carry the same images.
+  const collaboration = asset.collaboration || asset.publicCollaboration;
+  (collaboration?.participants || []).forEach(participant => {
+    (participant.referenceImages || []).forEach((image, index) => {
+      if (image && isCandidate(asset, image.src, image.mediaId)) {
+        targets.push({ kind: 'collab_reference', url: image.src, index, blockId: participant.id, fileSize: size(image.src, image.mediaId) });
+      }
+    });
+  });
   return targets;
 }
 
@@ -116,7 +126,38 @@ export function buildOptimizedWorkUpdate(asset: Asset, replaced: Map<string, Opt
     });
   }
 
-  return { updates, mediaIds: [...new Set(drafts.map(item => item.mediaId))] };
+  // Collaboration reference images. The server places them by their index in the owner
+  // draft (or the public copy when there is no draft), so the uploads follow that order.
+  type Collab = NonNullable<Asset['collaboration']> | NonNullable<Asset['publicCollaboration']>;
+  const swap = <T extends Collab>(collaboration: T): T => ({
+    ...collaboration,
+    participants: (collaboration.participants || []).map(participant => ({
+      ...participant,
+      referenceImages: (participant.referenceImages || []).map(image => {
+        const optimized = image ? replaced.get(image.src) : undefined;
+        return optimized ? { ...image, src: optimized.source, mediaId: optimized.newMediaId, localBlobKey: undefined } : image;
+      })
+    }))
+  }) as T;
+  const placementSource = asset.collaboration || asset.publicCollaboration;
+  const collabHits = (placementSource?.participants || []).flatMap(participant => (participant.referenceImages || [])
+    .map((image, sortOrder) => ({ participant, image, sortOrder }))
+    .filter(({ image }) => image && replaced.has(image.src)));
+  if (collabHits.length) {
+    for (const { participant, image, sortOrder } of collabHits) {
+      const optimized = replaced.get(image.src)!;
+      drafts.push({ mediaId: optimized.newMediaId, source: optimized.source, purpose: 'collab_reference', contextId: participant.id, sortOrder, isCover: false });
+    }
+    // The server only accepts a collaboration draft on a payload that names the collab category.
+    updates.category = asset.category;
+    if (asset.collaboration) updates.collaboration = swap(asset.collaboration);
+    if (asset.publicCollaboration) updates.publicCollaboration = swap(asset.publicCollaboration);
+  }
+
+  // One upload per new image, even when it sits in more than one place.
+  const seen = new Set<string>();
+  updates.workMediaDraft = drafts.filter(item => !seen.has(item.mediaId) && Boolean(seen.add(item.mediaId)));
+  return { updates, mediaIds: [...seen] };
 }
 
 export interface OptimizeWorkResult {
