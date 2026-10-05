@@ -50,6 +50,11 @@ describe('planWorkImageOptimization', () => {
     ]);
   });
 
+  it('measures images whose stored record has no size or type instead of skipping them', () => {
+    const unsized = work({ media: work().media!.map(item => item.id === ID.small ? { ...item, fileSize: 0, mimeType: '' } : item) });
+    expect(planWorkImageOptimization(unsized).map(target => target.url)).toContain(url(ID.small));
+  });
+
   it('includes the own images of Collaboration Works and skips trashed Works', () => {
     expect(planWorkImageOptimization(work({ category: 'collab' } as Partial<Asset>))).toHaveLength(3);
     expect(planWorkImageOptimization(work({ deletedAt: '2026-01-02T00:00:00Z' }))).toEqual([]);
