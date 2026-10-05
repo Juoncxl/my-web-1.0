@@ -214,9 +214,13 @@ export async function handleGoogleWorkMediaRead(req: Request, res: Response) {
   // Owner's own browser may keep them; shared caches never do. Public images stay at the
   // CDN a few minutes so repeat views skip the Sheets authorization (and its quota), while
   // a Work turned private still stops being served soon after.
-  res.setHeader('Cache-Control', scope === 'public' && download !== '1'
-    ? 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
-    : download === '1' ? 'private, no-store' : 'private, max-age=3600');
+  // A versioned URL (?v=, the Work's update time) never changes content, so browsers keep
+  // it for days: repeat views cost no transfer at all. Unversioned URLs keep the short policy.
+  const versioned = /^-?\d{1,16}$/.test(params.get('v') || '');
+  res.setHeader('Cache-Control', download === '1' ? 'private, no-store'
+    : scope === 'public'
+      ? versioned ? 'public, max-age=604800, s-maxage=86400, stale-while-revalidate=604800' : 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+      : versioned ? 'private, max-age=2592000' : 'private, max-age=3600');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // Read straight from Drive when the Service Account is configured; the Apps Script
   // chunk path below remains the fallback (it often stalls without answering).

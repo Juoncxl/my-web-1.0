@@ -1,3 +1,4 @@
+import { shrinkImageForUpload } from '../../../lib/imageShrink';
 import type { Asset, PublicAssetCollaboration } from '../../../types';
 import { isInlineMediaUrl, mediaReference } from '../../../lib/workMedia';
 import type { StandardWorkMediaDraft } from '../../../lib/workMedia';
@@ -56,7 +57,7 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
     ids.add(draft.mediaId);
     byMediaId.set(draft.mediaId, draft);
     if (!isInlineMediaUrl(draft.source)) continue;
-    const blob = await sourceBlob(draft.source, draft.mimeType);
+    const blob = await shrinkImageForUpload(await sourceBlob(draft.source, draft.mimeType));
     const mimeType = (blob.type || draft.mimeType || '').toLowerCase();
     if (!SUPPORTED_MIME_TYPES.has(mimeType)) throw new Error(`ไม่รองรับไฟล์ชนิด ${mimeType || 'ไม่ทราบชนิด'}`);
     if (blob.size <= 0 || blob.size > GOOGLE_WORK_MEDIA_MAX_BYTES) throw new Error('รูปต้องมีขนาดไม่เกิน 10MB ต่อไฟล์');

@@ -40,7 +40,8 @@ function publicGasEndpoint(value: string | undefined): URL | null {
 }
 
 function cacheHeaders(res: Response, etag?: string) {
-  res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+  // Legacy refs point at fixed bytes (media id or content hash), so viewers may keep them for a day.
+  res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=3600, stale-while-revalidate=86400');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (etag) res.setHeader('ETag', etag);
 }

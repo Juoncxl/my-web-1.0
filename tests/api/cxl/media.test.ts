@@ -20,7 +20,7 @@ describe('Public Google icon media proxy', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['Content-Type']).toBe('image/png');
     expect(response.headers['X-Content-Type-Options']).toBe('nosniff');
-    expect(response.headers['Cache-Control']).toContain('s-maxage=300');
+    expect(response.headers['Cache-Control']).toBe('public, max-age=86400, s-maxage=3600, stale-while-revalidate=86400');
     expect(response.body).toEqual(Buffer.from('icon-bytes'));
     expect(fetchMock.mock.calls[0][0]).toContain('cxlApi=media.icon');
     expect(fetchMock.mock.calls[0][0]).toContain('ref=media%3Aicon-1');
