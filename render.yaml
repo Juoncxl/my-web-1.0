@@ -1,0 +1,73 @@
+# Render Blueprint: one Node web service that serves the app and its /api/cxl routes.
+# Secrets are marked sync: false, so Render asks for each value instead of storing it here.
+services:
+  - type: web
+    name: cxlstudio
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build && npm run build:server
+    startCommand: npm start
+    healthCheckPath: /robots.txt
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Build-time (browser) settings: copy the same values Vercel uses.
+      - key: VITE_CXL_OWNER_AUTH_BACKEND
+        sync: false
+      - key: VITE_CXL_WORKS_READ_BACKEND
+        sync: false
+      - key: VITE_CXL_WORKS_WRITE_BACKEND
+        sync: false
+      - key: VITE_CXL_PUBLIC_CREATOR_READ_BACKEND
+        sync: false
+      - key: VITE_PERSISTENCE_MODE
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      # Server-only settings.
+      - key: CXL_OWNER_AUTH_BACKEND
+        sync: false
+      - key: CXL_OWNER_APP_ORIGIN
+        sync: false
+      - key: CXL_OWNER_OIDC_REDIRECT_URI
+        sync: false
+      - key: GOOGLE_OIDC_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OIDC_CLIENT_SECRET
+        sync: false
+      - key: CXL_OWNER_GOOGLE_SUB
+        sync: false
+      - key: CXL_OWNER_SESSION_SECRET
+        sync: false
+      - key: CXL_OWNER_USER_ID
+        sync: false
+      - key: CXL_OWNER_PUBLIC_CREATOR_ID
+        sync: false
+      - key: CXL_OWNER_PROFILE_SLUG
+        sync: false
+      - key: CXL_API_SHARED_SECRET
+        sync: false
+      - key: CXL_GAS_PUBLIC_URL
+        sync: false
+      - key: CXL_GAS_OWNER_URL
+        sync: false
+      - key: CXL_GOOGLE_SA_EMAIL
+        sync: false
+      - key: CXL_GOOGLE_SA_PRIVATE_KEY
+        sync: false
+      - key: CXL_PRIVATE_SHEET_ID
+        sync: false
+      - key: CXL_PUBLIC_SHEET_ID
+        sync: false
+      - key: CXL_INCOMING_FOLDER_ID
+        sync: false
+      - key: CXL_GOOGLE_WORK_MEDIA_ENABLED
+        sync: false
+      - key: CXL_DIRECT_WRITES
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
