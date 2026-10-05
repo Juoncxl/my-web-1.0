@@ -540,6 +540,12 @@ export default async function handler(req: Request, res: Response) {
           return send(res, ownerErrorStatus(code), { ok: false, error: error instanceof Error ? error.message.slice(0, 300) : 'Media upload failed', ...(code ? { code } : {}) });
         }
       }
+      // A chunk or finalize for a direct session must never reach Apps Script, which cannot see
+      // that session and answers "session not found". Ask the browser to retry instead.
+      if (action !== 'media.upload.begin') {
+        console.info(JSON.stringify({ event: 'cxl_direct_media_env_unavailable', action }));
+        return send(res, 503, { ok: false, error: 'Media upload is temporarily unavailable, retry', code: 'MEDIA_UPLOAD_RETRY' });
+      }
     }
     // Direct Google API update (Preview by default). Unsupported cases and unexpected
     // failures fall through to Apps Script, whose idempotent path repairs a partial write.

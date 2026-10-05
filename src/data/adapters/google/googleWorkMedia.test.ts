@@ -214,4 +214,28 @@ describe('Google standard Work media upload foundation', () => {
     expect(firstChunk.base64.length).toBe(4 * Math.ceil(GOOGLE_WORK_MEDIA_CHUNK_BYTES / 3));
     expect(lastChunk).toMatchObject({ chunkIndex: 1, base64: 'AAAAAAA=' });
   });
+
+  it('restarts an upload whose session was lost, with a fresh upload id', async () => {
+    const calls: Array<{ action: string; uploadId?: string }> = [];
+    let lostOnce = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, request: RequestInit) => {
+      const body = JSON.parse(String(request.body)) as { action: string; args: Array<{ uploadId?: string }> };
+      calls.push({ action: body.action, uploadId: body.args[0]?.uploadId });
+      if (body.action === 'media.upload.chunk' && !lostOnce) {
+        lostOnce = true;
+        return { ok: false, status: 503, json: async () => ({ ok: false, error: 'retry', code: 'MEDIA_UPLOAD_RETRY' }) } as Response;
+      }
+      const data = body.action === 'media.upload.begin' ? { uploadId: body.args[0].uploadId, finalized: false } : { stored: true };
+      return { ok: true, status: 200, json: async () => ({ ok: true, data }) } as Response;
+    }));
+    const pending = uploadGoogleWorkMedia([{
+      mediaId: '123e4567-e89b-42d3-a456-426614174011', source: 'blob:x', purpose: 'gallery', sortOrder: 0, isCover: false,
+      blob: new Blob([new Uint8Array(10)], { type: 'image/png' }), mimeType: 'image/png', fileSize: 10
+    }], { workId: 'asset_1234567890abcdef1234567890abcdef' });
+    await pending;
+    expect(calls.map(item => item.action)).toEqual([
+      'media.upload.begin', 'media.upload.chunk', 'media.upload.begin', 'media.upload.chunk', 'media.upload.finalize'
+    ]);
+    expect(calls[2].uploadId).not.toBe(calls[0].uploadId);
+  }, 15000);
 });

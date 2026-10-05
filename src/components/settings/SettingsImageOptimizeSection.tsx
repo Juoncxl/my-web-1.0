@@ -31,14 +31,15 @@ export const SettingsImageOptimizeSection: React.FC<{ ownerId: string }> = ({ ow
           }
         });
         checkedTotal += result.checked || 0;
-        if (result.optimized || result.error) { done.push(result); setResults([...done]); }
+        if (result.optimized || result.gifIconReplaced || result.error) { done.push(result); setResults([...done]); }
         if (mode === 'one' && result.optimized) break;
       }
       const saved = done.reduce((sum, item) => sum + item.bytesBefore - item.bytesAfter, 0);
+      const gifs = done.filter(item => item.gifIconReplaced).length;
       const checked = checkedTotal;
       const failed = done.filter(item => item.error).length;
-      setStatus(done.some(item => item.optimized)
-        ? `เสร็จแล้ว ย่อรูปใน ${done.filter(item => item.optimized).length} ผลงาน ลดลง ${mb(saved)}${failed ? ` · มี ${failed} ผลงานที่ไม่สำเร็จ กดอีกครั้งเพื่อลองใหม่ได้` : ''}`
+      setStatus(done.some(item => item.optimized || item.gifIconReplaced)
+        ? `เสร็จแล้ว ย่อรูปใน ${done.filter(item => item.optimized).length} ผลงาน ลดลง ${mb(saved)}${gifs ? ` · เปลี่ยนไอคอน GIF เป็นอีโมจิ ${gifs} ผลงาน` : ''}${failed ? ` · มี ${failed} ผลงานที่ไม่สำเร็จ กดอีกครั้งเพื่อลองใหม่ได้` : ''}`
         : failed ? `ไม่สำเร็จ ${failed} ผลงาน กดอีกครั้งเพื่อลองใหม่ได้` : `ไม่มีรูปที่ต้องย่อแล้ว (ตรวจ ${works.length} ผลงาน วัดขนาดรูป ${checked} รูป)`);
       window.dispatchEvent(new CustomEvent('creator-vault-cloud-data-changed'));
     } catch (error) {
@@ -52,7 +53,7 @@ export const SettingsImageOptimizeSection: React.FC<{ ownerId: string }> = ({ ow
     <section className="cv-settings-card">
       <div className="cv-settings-card-heading"><div>
         <h3><ImageDown className="cv-settings-inline-icon" />ย่อรูปเก่าให้เล็กลง</h3>
-        <p>ย่อรูปขนาดใหญ่ในผลงานเก่า (ไอคอน รูปปก แกลเลอรี รูปในเนื้อหา และรูปอ้างอิงของผู้เข้าร่วมคอลแลป) ให้เหมือนรูปที่อัปใหม่ ส่วน GIF ไม่ย่อ เว็บจะโหลดเร็วขึ้นและใช้โควตาน้อยลง</p>
+        <p>ย่อรูปขนาดใหญ่ในผลงานเก่า (ไอคอน รูปปก แกลเลอรี รูปในเนื้อหา และรูปอ้างอิงของผู้เข้าร่วมคอลแลป) ให้เหมือนรูปที่อัปใหม่ ไอคอนที่เป็น GIF จะเปลี่ยนเป็นอีโมจิประจำหมวด เว็บจะโหลดเร็วขึ้นและใช้โควตาน้อยลง</p>
         <p><strong>ไฟล์เดิมไม่ถูกเขียนทับ</strong> ระบบจะย้ายไฟล์เดิมไปถังขยะของ Google Drive ภายในประมาณ 1 วัน (กู้คืนได้ 30 วัน) แนะนำให้กด "ลองกับ 1 ผลงาน" แล้วเปิดดูก่อนว่ารูปขึ้นปกติ</p>
       </div></div>
       <div className="flex flex-wrap gap-2">
@@ -61,7 +62,7 @@ export const SettingsImageOptimizeSection: React.FC<{ ownerId: string }> = ({ ow
       </div>
       {status && <p role="status" className="mt-3 text-sm">{status}</p>}
       {results.length > 0 && <ul className="mt-2 text-sm list-disc pl-5">{results.map(item => (
-        <li key={item.workId}>{item.title}: {item.error ? `ไม่สำเร็จ (${item.error})` : `ย่อ ${item.optimized} รูป ${mb(item.bytesBefore)} → ${mb(item.bytesAfter)}${item.skipped ? ` (ข้ามรูปที่เปิดไม่ได้ ${item.skipped} รูป)` : ''}`}</li>
+        <li key={item.workId}>{item.title}: {item.error ? `ไม่สำเร็จ (${item.error})` : `${item.gifIconReplaced ? 'ไอคอน GIF → อีโมจิ · ' : ''}ย่อ ${item.optimized} รูป ${mb(item.bytesBefore)} → ${mb(item.bytesAfter)}${item.skipped ? ` (ข้ามรูปที่เปิดไม่ได้ ${item.skipped} รูป)` : ''}`}</li>
       ))}</ul>}
     </section>
   );

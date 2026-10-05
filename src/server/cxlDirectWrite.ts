@@ -444,7 +444,7 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   record.collaborationDraft = asset.category === 'collab' ? (asset.collaboration || null) : null;
   record.cxlAsset = asset;
   record.lastWriteRequestId = requestId; record.lastWriteOperation = 'update'; record.lastWriteFingerprint = fingerprint;
-  const retiredMediaIds = await settleRecordMedia(record, previousMediaIds, env);
+  const retiredMediaIds = await settleRecordMedia(record, previousMediaIds, env, new Set(previousMediaRecords.map((m: Json) => String(m.id))));
   record.revision = (Number(record.revision) || 1) + 1;
   const nowPublic = isPublicRow(r);
   const privateFolderId = await driveParent(env, previousFileId);
@@ -557,7 +557,7 @@ async function attachWorkMedia(record: Json, asset: Json, mediaIds: string[], wo
 }
 
 /** saveOwnerWork_ media steps after the row fields are applied. Returns vercel_proxy media IDs no longer referenced. */
-async function settleRecordMedia(record: Json, previousIds: Set<string>, env: DirectWriteEnv): Promise<string[]> {
+async function settleRecordMedia(record: Json, previousIds: Set<string>, env: DirectWriteEnv, existingRecordIds: Set<string> = new Set()): Promise<string[]> {
   const r = record.row;
   // Proxy media no longer referenced anywhere is retired below, not orphaned.
   const stillReferenced = referencedMediaIds(cxlAssetFromRecord(record));
@@ -567,6 +567,9 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
     if (m.delivery === 'vercel_proxy' && !stillReferenced.has(m.id)) return false;
     // An image this save removed (e.g. replaced by a smaller copy) was assigned before; dropping it is not an orphan.
     if (previousIds.has(m.id) && !stillReferenced.has(m.id)) return false;
+    // Only images attached by this save are judged. Older records (e.g. migrated Collaboration
+    // images that were never assigned) would otherwise block every later save of the Work.
+    if (existingRecordIds.has(String(m.id))) return false;
     if (m.purpose === 'unassigned') return true;
     if (m.purpose !== 'collab' && m.purpose !== 'collab_reference') return false;
     return !(record.collaborationDraft?.participants || []).some((p: Json) => (p.referenceImages || []).some((x: Json) => (typeof x === 'string' ? x : (x.src || x.storageKey || '')) === `media:${m.id}`));

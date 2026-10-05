@@ -269,7 +269,24 @@ export async function uploadGoogleWorkMedia(
   return pending.map(item => item.mediaId);
 }
 
+/** A lost upload session (busy Drive, or a step that could not reach the direct path) is restarted. */
+const UPLOAD_RESTART_CODES = new Set(['MEDIA_UPLOAD_SESSION_NOT_FOUND', 'MEDIA_UPLOAD_RETRY']);
+const UPLOAD_ATTEMPTS = 3;
+
 async function uploadOneGoogleWorkMedia(item: GooglePendingWorkMedia, workId: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await uploadOneGoogleWorkMediaAttempt(item, workId);
+      return;
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : '';
+      if (attempt >= UPLOAD_ATTEMPTS || !UPLOAD_RESTART_CODES.has(code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
+    }
+  }
+}
+
+async function uploadOneGoogleWorkMediaAttempt(item: GooglePendingWorkMedia, workId: string): Promise<void> {
   const bytes = new Uint8Array(await item.blob.arrayBuffer());
     const sha256 = await sha256Hex(bytes);
     const totalChunks = Math.ceil(bytes.length / GOOGLE_WORK_MEDIA_CHUNK_BYTES);
