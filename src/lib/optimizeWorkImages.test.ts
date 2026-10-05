@@ -50,8 +50,8 @@ describe('planWorkImageOptimization', () => {
     ]);
   });
 
-  it('skips Collaboration and trashed Works', () => {
-    expect(planWorkImageOptimization(work({ category: 'collab' } as Partial<Asset>))).toEqual([]);
+  it('includes the own images of Collaboration Works and skips trashed Works', () => {
+    expect(planWorkImageOptimization(work({ category: 'collab' } as Partial<Asset>))).toHaveLength(3);
     expect(planWorkImageOptimization(work({ deletedAt: '2026-01-02T00:00:00Z' }))).toEqual([]);
   });
 });
@@ -133,5 +133,21 @@ describe('optimizeWorkImages', () => {
       download: async () => bigPng(), shrink: async () => new Blob([new Uint8Array(10)], { type: 'image/webp' }),
       newId: () => '99999999-9999-4999-8999-999999999999', toObjectUrl: () => 'blob:x', revokeObjectUrl: () => undefined });
     expect(failed).toMatchObject({ optimized: 0, error: 'Work revision is stale' });
+  });
+
+  it('skips an image that can no longer be downloaded instead of failing the Work', async () => {
+    const updateWork = vi.fn(async () => ({ error: null }));
+    let next = 0;
+    const result = await optimizeWorkImages(WORK, {
+      fetchFullWork: async () => work(),
+      updateWork,
+      download: async source => { if (source === url(ID.icon)) throw new Error('โหลดรูปไม่สำเร็จ (404)'); return bigPng(); },
+      shrink: async () => new Blob([new Uint8Array(10)], { type: 'image/webp' }),
+      newId: () => ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', '99999999-9999-4999-8999-999999999999'][next++],
+      toObjectUrl: () => `blob:${next}`, revokeObjectUrl: () => undefined
+    });
+    expect(result).toMatchObject({ optimized: 2, skipped: 1 });
+    expect(result.error).toBeUndefined();
+    expect((updateWork.mock.calls[0] as unknown as [string, Partial<Asset>])[1].icon).toBeUndefined();
   });
 });
