@@ -149,13 +149,21 @@ describe('Google standard Work media proxy', () => {
     expect(res.body()).toEqual(IMAGE_BYTES);
   });
 
-  it('accepts a client retry attempt and lets the CDN keep public media for a few minutes', async () => {
+  it('keeps unversioned public media at the CDN only briefly', async () => {
+    setReadEnvironment();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, data: chunkResponse() }), { status: 200 })));
+    const res = new MockResponse();
+    await handleGoogleWorkMediaRead(request(`/api/cxl/media?scope=public&workId=${WORK_ID}&ref=media%3A${MEDIA_ID}`), res as unknown as ServerResponse);
+    expect(res.headers['Cache-Control']).toBe('public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+  });
+
+  it('accepts a client retry attempt and lets browsers keep versioned public media for days', async () => {
     setReadEnvironment();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, data: chunkResponse() }), { status: 200 })));
     const res = new MockResponse();
     await handleGoogleWorkMediaRead(request(`/api/cxl/media?scope=public&workId=${WORK_ID}&ref=media%3A${MEDIA_ID}&v=1700000000000&retry=2`), res as unknown as ServerResponse);
     expect(res.statusCode).toBe(200);
-    expect(res.headers['Cache-Control']).toBe('public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+    expect(res.headers['Cache-Control']).toBe('public, max-age=604800, s-maxage=86400, stale-while-revalidate=604800');
     expect(res.body()).toEqual(IMAGE_BYTES);
   });
 

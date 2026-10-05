@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "npm run typecheck",
     "test": "vitest run",
-    "cxl:public-creator:dry-run": "node scripts/cxl-public-creator-foundation.mjs"
+    "cxl:public-creator:dry-run": "node scripts/cxl-public-creator-foundation.mjs",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node20 --packages=external --outfile=dist-server/index.mjs",
+    "start": "node dist-server/index.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
