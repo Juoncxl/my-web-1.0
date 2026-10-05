@@ -156,3 +156,43 @@ describe('optimizeWorkImages', () => {
     expect((updateWork.mock.calls[0] as unknown as [string, Partial<Asset>])[1].icon).toBeUndefined();
   });
 });
+
+describe('Collaboration reference images', () => {
+  const P = 'participant-1';
+  const R = { a: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', b: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' };
+  const NEW_A = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const ref = (id: string) => ({ id: `ref-${id}`, src: url(id), mediaId: id, kind: 'image', mimeType: 'image/png' });
+  const collab = (order: string[]) => ({ name: 'C', sharedTag: 't', platforms: [], sharedInformation: [], deadlines: [],
+    participants: [{ id: P, creatorName: 'x', referenceImages: order.map(ref) }] });
+  const collabWork = () => work({
+    category: 'collab', icon: { type: 'emoji', value: '✨' }, previewImages: [], previewImage: '', contentBlocks: [],
+    media: [record(R.a, 'gallery', 'image/png', 1_300_000), record(R.b, 'gallery', 'image/png', 100_000)]
+      .map(item => ({ ...item, purpose: 'collab_reference' as const, contextId: P })),
+    // The owner draft and the public copy list the same images in a different order.
+    collaboration: collab([R.b, R.a]), publicCollaboration: collab([R.a, R.b])
+  } as unknown as Partial<Asset>);
+
+  it('plans large reference images from the owner draft', () => {
+    expect(planWorkImageOptimization(collabWork()).map(target => [target.kind, target.url, target.index])).toEqual([
+      ['collab_reference', url(R.a), 1]
+    ]);
+  });
+
+  it('switches both copies to the new upload and matches the server placement', async () => {
+    const { updates, mediaIds } = buildOptimizedWorkUpdate(collabWork(), new Map([[url(R.a), { newMediaId: NEW_A, source: 'blob:a' }]]));
+    expect(mediaIds).toEqual([NEW_A]);
+    expect(updates.category).toBe('collab');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: 'image/webp' }) })));
+    const prepared = await prepareGoogleWorkMedia(updates);
+    expect(prepared.pending.map(item => [item.mediaId, item.purpose, item.contextId, item.sortOrder])).toEqual([[NEW_A, 'collab_reference', P, 1]]);
+    const srcs = (c: unknown) => (c as { participants: Array<{ referenceImages: Array<{ src: string }> }> }).participants[0].referenceImages.map(i => i.src);
+    expect(srcs(prepared.asset.collaboration)).toEqual([`media:${R.b}`, `media:${NEW_A}`]);
+    expect(srcs(prepared.asset.publicCollaboration)).toEqual([`media:${NEW_A}`, `media:${R.b}`]);
+
+    const toRefs = (c: ReturnType<typeof collab>) => ({ ...c, participants: c.participants.map(p => ({ ...p, referenceImages: p.referenceImages.map(i => ({ ...i, src: `media:${i.mediaId}` })) })) });
+    const stored = { ...collabWork(), collaboration: toRefs(collab([R.b, R.a])), publicCollaboration: toRefs(collab([R.a, R.b])) };
+    const merged = { ...stored, ...JSON.parse(JSON.stringify(prepared.asset)) };
+    expect(() => rejectUnsupportedWorkMedia(merged, stored, mediaIds)).not.toThrow();
+    expect(mediaReferenceMap(merged)[NEW_A].references).toEqual([expect.objectContaining({ purpose: 'collab_reference', contextId: P, sortOrder: 1 })]);
+  });
+});
