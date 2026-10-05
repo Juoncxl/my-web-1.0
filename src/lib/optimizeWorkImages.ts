@@ -54,7 +54,10 @@ function isCandidate(asset: Asset, url: string | undefined, mediaId?: string | n
   if (!url || !url.includes('/api/cxl/media')) return false;
   const record = recordFor(asset, url, mediaId);
   if (!record) return true; // legacy media: size unknown until downloaded
-  return SHRINKABLE_TYPES.has((record.mimeType || '').toLowerCase()) && record.fileSize > OPTIMIZE_MIN_BYTES;
+  // Many stored records carry no size (0) or type; those are measured after download instead.
+  const type = (record.mimeType || '').toLowerCase();
+  if (type && !SHRINKABLE_TYPES.has(type)) return false;
+  return !(record.fileSize > 0 && record.fileSize <= OPTIMIZE_MIN_BYTES);
 }
 
 /** Lists the images of one (hydrated, full) Work that are worth optimizing. */
@@ -124,6 +127,8 @@ export interface OptimizeWorkResult {
   bytesAfter: number;
   /** Images that could not be downloaded and were left untouched. */
   skipped?: number;
+  /** Images downloaded and measured. */
+  checked?: number;
   error?: string;
 }
 
@@ -159,6 +164,7 @@ export async function optimizeWorkImages(workId: string, deps: OptimizeDependenc
       // not fatal: the rest of the Work can still be optimized.
       let original: Blob;
       try { original = await deps.download(target.url); } catch { result.skipped = (result.skipped || 0) + 1; continue; }
+      result.checked = (result.checked || 0) + 1;
       if (original.size <= OPTIMIZE_MIN_BYTES || !SHRINKABLE_TYPES.has((original.type || '').toLowerCase())) continue;
       const smaller = await shrink(original);
       if (smaller === original || smaller.size > original.size * OPTIMIZE_MIN_SAVING_RATIO) continue;

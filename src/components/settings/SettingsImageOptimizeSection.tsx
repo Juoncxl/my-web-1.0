@@ -18,6 +18,7 @@ export const SettingsImageOptimizeSection: React.FC<{ ownerId: string }> = ({ ow
       if (list.error) throw new Error(list.error);
       const works = (list.data || []).filter(work => work.userId === ownerId && !work.deletedAt);
       const done: OptimizeWorkResult[] = [];
+      let checkedTotal = 0;
       for (let index = 0; index < works.length; index += 1) {
         setStatus(`กำลังตรวจผลงาน ${index + 1}/${works.length}: ${works[index].title || works[index].id}`);
         const result = await optimizeWorkImages(works[index].id, {
@@ -29,14 +30,16 @@ export const SettingsImageOptimizeSection: React.FC<{ ownerId: string }> = ({ ow
             return response.blob();
           }
         });
+        checkedTotal += result.checked || 0;
         if (result.optimized || result.error) { done.push(result); setResults([...done]); }
         if (mode === 'one' && result.optimized) break;
       }
       const saved = done.reduce((sum, item) => sum + item.bytesBefore - item.bytesAfter, 0);
+      const checked = checkedTotal;
       const failed = done.filter(item => item.error).length;
       setStatus(done.some(item => item.optimized)
         ? `เสร็จแล้ว ย่อรูปใน ${done.filter(item => item.optimized).length} ผลงาน ลดลง ${mb(saved)}${failed ? ` · มี ${failed} ผลงานที่ไม่สำเร็จ กดอีกครั้งเพื่อลองใหม่ได้` : ''}`
-        : failed ? `ไม่สำเร็จ ${failed} ผลงาน กดอีกครั้งเพื่อลองใหม่ได้` : 'ไม่มีรูปที่ต้องย่อแล้ว ทุกรูปเล็กพออยู่แล้ว');
+        : failed ? `ไม่สำเร็จ ${failed} ผลงาน กดอีกครั้งเพื่อลองใหม่ได้` : `ไม่มีรูปที่ต้องย่อแล้ว (ตรวจ ${works.length} ผลงาน วัดขนาดรูป ${checked} รูป)`);
       window.dispatchEvent(new CustomEvent('creator-vault-cloud-data-changed'));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'ย่อรูปไม่สำเร็จ');
