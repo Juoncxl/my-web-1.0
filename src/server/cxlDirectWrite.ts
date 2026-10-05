@@ -565,6 +565,8 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
   if (r.visibility === 'public' && (record.mediaRecords || []).some((m: Json) => {
     if (!m.drive_file_id) return false;
     if (m.delivery === 'vercel_proxy' && !stillReferenced.has(m.id)) return false;
+    // An image this save removed (e.g. replaced by a smaller copy) was assigned before; dropping it is not an orphan.
+    if (previousIds.has(m.id) && !stillReferenced.has(m.id)) return false;
     if (m.purpose === 'unassigned') return true;
     if (m.purpose !== 'collab' && m.purpose !== 'collab_reference') return false;
     return !(record.collaborationDraft?.participants || []).some((p: Json) => (p.referenceImages || []).some((x: Json) => (typeof x === 'string' ? x : (x.src || x.storageKey || '')) === `media:${m.id}`));

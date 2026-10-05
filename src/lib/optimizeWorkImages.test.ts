@@ -196,3 +196,25 @@ describe('Collaboration reference images', () => {
     expect(mediaReferenceMap(merged)[NEW_A].references).toEqual([expect.objectContaining({ purpose: 'collab_reference', contextId: P, sortOrder: 1 })]);
   });
 });
+
+describe('optimizeWorkImages batching', () => {
+  it('saves a large Work in batches of 12 and refetches the latest revision between them', async () => {
+    const ids = Array.from({ length: 15 }, (_, i) => `${String(i).padStart(8, '0')}-0000-4000-8000-000000000000`);
+    let revision = 1;
+    const bigWork = () => work({ icon: { type: 'emoji', value: '✨' }, contentBlocks: [], previewImage: url(ids[0]),
+      previewImages: ids.map(url), media: ids.map(id => record(id, 'gallery', 'image/png', 1_000_000)), revision });
+    const updateWork = vi.fn(async () => { revision += 1; return { error: null }; });
+    let n = 0;
+    const result = await optimizeWorkImages(WORK, {
+      fetchFullWork: async () => bigWork(), updateWork,
+      download: async () => new Blob([new Uint8Array(1_000_000)], { type: 'image/png' }),
+      shrink: async () => new Blob([new Uint8Array(100_000)], { type: 'image/webp' }),
+      newId: () => `${String(++n).padStart(8, 'a')}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      toObjectUrl: () => `blob:${n}`, revokeObjectUrl: () => undefined
+    });
+    expect(result).toMatchObject({ optimized: 15, bytesBefore: 15_000_000, bytesAfter: 1_500_000 });
+    expect(updateWork).toHaveBeenCalledTimes(2);
+    const calls = updateWork.mock.calls as unknown as Array<[string, { workMediaDraft: unknown[] }, { expectedRevision: number }]>;
+    expect(calls.map(([, updates, options]) => [updates.workMediaDraft.length, options.expectedRevision])).toEqual([[12, 1], [3, 2]]);
+  });
+});
