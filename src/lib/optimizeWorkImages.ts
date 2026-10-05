@@ -5,7 +5,8 @@
  * Nothing is overwritten in Drive. Each optimized image is uploaded as a new media
  * file and the Work switches its reference to it; the old file stays in Drive
  * (marked retired by the server), so a Work can always be restored from it.
- * Collaboration Works are skipped: their images live inside participant data.
+ * In Collaboration Works only the Work's own images (icon, gallery, content) are
+ * optimized; participant reference images inside the collaboration data are left as is.
  */
 import type { Asset, AssetMediaRecord } from '../types';
 import type { StandardWorkMediaDraft } from './workMedia';
@@ -58,7 +59,7 @@ function isCandidate(asset: Asset, url: string | undefined, mediaId?: string | n
 
 /** Lists the images of one (hydrated, full) Work that are worth optimizing. */
 export function planWorkImageOptimization(asset: Asset): OptimizeTarget[] {
-  if (asset.category === 'collab' || asset.collaboration || asset.deletedAt) return [];
+  if (asset.deletedAt) return [];
   const targets: OptimizeTarget[] = [];
   const size = (url: string, mediaId?: string | null) => recordFor(asset, url, mediaId)?.fileSize;
   if (asset.icon?.type === 'image' && isCandidate(asset, asset.icon.value, asset.icon.mediaId)) {
@@ -121,6 +122,8 @@ export interface OptimizeWorkResult {
   optimized: number;
   bytesBefore: number;
   bytesAfter: number;
+  /** Images that could not be downloaded and were left untouched. */
+  skipped?: number;
   error?: string;
 }
 
@@ -152,7 +155,10 @@ export async function optimizeWorkImages(workId: string, deps: OptimizeDependenc
     const replaced = new Map<string, OptimizedImage>();
     for (const target of targets) {
       if (replaced.has(target.url)) continue; // the same image used twice
-      const original = await deps.download(target.url);
+      // An image that can no longer be read (e.g. a legacy file that is gone) is skipped,
+      // not fatal: the rest of the Work can still be optimized.
+      let original: Blob;
+      try { original = await deps.download(target.url); } catch { result.skipped = (result.skipped || 0) + 1; continue; }
       if (original.size <= OPTIMIZE_MIN_BYTES || !SHRINKABLE_TYPES.has((original.type || '').toLowerCase())) continue;
       const smaller = await shrink(original);
       if (smaller === original || smaller.size > original.size * OPTIMIZE_MIN_SAVING_RATIO) continue;
