@@ -22,7 +22,8 @@ var PUBLIC_WIDGET_CONFIG_FIELDS_={
 };
 function doGet(e) {
   if(e&&e.parameter&&e.parameter.cxlApi) return publicApi_(e.parameter);
-  return HtmlService.createHtmlOutputFromFile('Index').setTitle('CXL Studio · คลังผลงาน');
+  // Apps Script ignores a viewport <meta> inside Index.html; without this, phones render the desktop layout zoomed out.
+  return HtmlService.createHtmlOutputFromFile('Index').setTitle('CXL Studio · คลังผลงาน').addMetaTag('viewport','width=device-width, initial-scale=1');
 }
 function publicApi_(p) {
   var action=String(p.cxlApi||''),timing=action===PUBLIC_TIMING_ACTION_&&p.includeTiming==='1'?{action:action,startedAt:Date.now(),phases:{}}:null;
@@ -237,7 +238,46 @@ function publicIconData_(id,ref) {
   if(!match||match[2].length>14*1024*1024)throw new Error('Public icon media is unavailable');
   return {mimeType:match[1].toLowerCase(),base64:match[2]};
 }
-function getPublicWork(id) { var r=publicRecord_(id);var linked=r.collaboration_asset_id;if(linked){var match=rows_().filter(function(x){return x.id===linked&&x.category==='collab';})[0];r.linkedCollaboration=match?{id:match.id,title:match.title}:null;delete r.collaboration_asset_id;}return r; }
+function getPublicWork(id) {
+  var r=publicRecord_(id),view=publicWorkView_(r),src=r.cxlAsset||r,linked=src.collaboration_asset_id||src.collaborationAssetId;
+  if(linked){var match=rows_().filter(function(x){return x.id===linked&&x.category==='collab';})[0];view.linkedCollaboration=match?{id:match.id,title:match.title}:null;}
+  return view;
+}
+/** Browser-facing Work: an allowlist, so contacts, private notes and Drive file IDs never leave the server. */
+function publicWorkView_(record) {
+  var src=record.cxlAsset||record;
+  function pick(snake,camel){return src[snake]!==undefined?src[snake]:src[camel];}
+  function str(value,max){return typeof value==='string'?value.slice(0,max||200000):'';}
+  function list(value){return Array.isArray(value)?value:[];}
+  function ref(value){return typeof value==='string'?value:(value&&typeof value==='object'?str(value.src||value.storageKey,2048):'');}
+  var view={id:str(src.id,128),title:str(src.title,500),category:str(src.category,64),status:str(src.status,64),
+    short_description:str(pick('short_description','shortDescription'),4000),content:str(src.content),
+    ui_code_snippet:str(pick('ui_code_snippet','uiCodeSnippet')),preview_image:ref(pick('preview_image','previewImage')),
+    preview_images:list(pick('preview_images','previewImages')).map(ref).filter(Boolean),
+    tags:list(src.tags).filter(function(x){return typeof x==='string';}),updated_at:str(pick('updated_at','updatedAt'),64),
+    content_blocks:list(pick('content_blocks','contentBlocks')).filter(function(b){return b&&typeof b==='object';})
+      .map(function(b){return {id:str(b.id,128),type:str(b.type,32),title:str(b.title,500),body:str(b.body)};})};
+  var c=pick('public_collaboration','publicCollaboration');
+  if(c&&typeof c==='object'){
+    var policy=c.visibilityPolicy||{};
+    view.public_collaboration={name:str(c.name,500),sharedTag:str(c.sharedTag,200),platforms:list(c.platforms).filter(function(x){return typeof x==='string';}),
+      sharedInformation:list(c.sharedInformation).filter(Boolean).map(function(x){return {title:str(x.title,500),type:str(x.type,32),content:str(x.content)};}),
+      deadlines:list(c.deadlines).filter(Boolean).map(function(x){return {label:str(x.label,500),date:str(x.date,64)};}),
+      participants:list(c.participants).filter(Boolean).map(function(p){
+        var person={creatorName:str(p.creatorName,200),externalWorkName:str(p.externalWorkName,500),houseTag:str(p.houseTag,200),
+          referenceImages:list(p.referenceImages).map(ref).filter(Boolean)};
+        if(policy.showParticipantNotes)person.notes=str(p.notes,4000);
+        if(policy.showParticipantStatuses){person.dataStatus=str(p.dataStatus,64);person.imageStatus=str(p.imageStatus,64);}
+        return person;})};
+  }
+  // Tell the page which images can be served, without sending the Drive records it would need to work that out itself.
+  var records=list(record.mediaRecords),available={},refs=[view.preview_image].concat(view.preview_images);
+  if(view.public_collaboration)view.public_collaboration.participants.forEach(function(p){refs=refs.concat(p.referenceImages);});
+  refs.forEach(function(key){if(!key||available[key])return;var mediaId=key.indexOf('media:')===0?key.slice(6):'';
+    if(records.some(function(m){return m&&m.drive_file_id&&(m.id===mediaId||m.storage_path===key||m.original_ref===key);}))available[key]=true;});
+  view.mediaAvailable=available;
+  return view;
+}
 function searchPublicContent(query) {
   var q=String(query||'').trim().toLocaleLowerCase();if(q.length<2)throw new Error('กรุณาใส่คำค้นอย่างน้อย 2 ตัวอักษร');
   var index=rows_();if(index.some(function(x){return !validPublicSummaryJson_(x.summaryJson);}))throw new Error('Public summary index is not ready');
