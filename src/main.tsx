@@ -2,6 +2,11 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import {normalizeEncodedProfilePath} from './lib/appRoutes';
+
+// Show and route profile links as /@slug even when a host handed us /%40slug.
+const profilePath = normalizeEncodedProfilePath(window.location.pathname);
+if (profilePath) window.history.replaceState(window.history.state, '', `${profilePath}${window.location.search}${window.location.hash}`);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -4,6 +4,7 @@ import { SECURITY_HEADERS } from '../server/securityHeaders';
 import { API_ROUTES } from '../server/apiRoutes';
 import { MAX_BODY_BYTES, runNodeHandler, toNodeRequest } from './nodeAdapter';
 import worker from './index';
+import { normalizeEncodedProfilePath } from '../src/lib/appRoutes';
 
 const SHELL = '<!doctype html><html><head><title>CXL Studio</title><meta name="description" content="x" /></head><body><script type="module" src="/assets/index-abc.js"></script></body></html>';
 
@@ -103,6 +104,23 @@ describe('Cloudflare Worker routing', () => {
   });
 });
 
+describe('profile links', () => {
+  it('serves /@slug with the app shell instead of letting static assets redirect it to /%40slug', async () => {
+    const { env, seen } = assets();
+    const response = await worker.fetch(new Request('https://cxl.example/@juoncxl?tab=works'), env);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(SHELL);
+    expect(seen).toEqual(['/']);
+  });
+
+  it('turns an already-encoded /%40slug back into /@slug in the app', () => {
+    expect(normalizeEncodedProfilePath('/%40juoncxl')).toBe('/@juoncxl');
+    expect(normalizeEncodedProfilePath('/%40juoncxl/')).toBe('/@juoncxl/');
+    expect(normalizeEncodedProfilePath('/@juoncxl')).toBeNull();
+    expect(normalizeEncodedProfilePath('/schedule')).toBeNull();
+  });
+});
+
 describe('static asset headers', () => {
   it('public/_headers applies the same security headers to every static file', () => {
     const file = readFileSync('public/_headers', 'utf8');
@@ -113,7 +131,7 @@ describe('static asset headers', () => {
 
   it('wrangler.jsonc sends API and share routes to the Worker before static assets', () => {
     const config = readFileSync('wrangler.jsonc', 'utf8');
-    expect(config).toContain('"run_worker_first": ["/api/*", "/work/*"]');
+    expect(config).toContain('"run_worker_first": ["/api/*", "/work/*", "/@*"]');
     expect(config).toContain('"nodejs_compat"');
   });
 });

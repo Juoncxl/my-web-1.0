@@ -2,8 +2,9 @@
  * Cloudflare Workers entry: the same /api/cxl/* handlers Vercel and Render run.
  *
  * Static files (the built SPA in dist/) are served by Workers Static Assets and never
- * reach this code, except the paths wrangler.jsonc routes here first: /api/* and
- * /work/* (rewritten to the share handler so link previews see the Work's own tags).
+ * reach this code, except the paths wrangler.jsonc routes here first: /api/*,
+ * /work/* (rewritten to the share handler so link previews see the Work's own tags)
+ * and /@slug profiles.
  * Headers for static files come from public/_headers.
  */
 import { API_ROUTES } from '../server/apiRoutes';
@@ -35,6 +36,8 @@ async function route(request: Request, env: Env): Promise<Response> {
     const shareUrl = new URL(`/api/cxl/share?id=${work[1]}`, url);
     return runNodeHandler(API_ROUTES['/api/cxl/share'], request, shareUrl);
   }
+  // Static Assets would redirect /@slug to /%40slug; serve the app shell as is.
+  if (url.pathname.startsWith('/@')) return env.ASSETS.fetch(new URL('/', url));
   // Anything else routed here (e.g. /work/:id/edit) is the app itself.
   return env.ASSETS.fetch(request);
 }
