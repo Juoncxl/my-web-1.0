@@ -213,6 +213,19 @@ describe('direct Work update', () => {
     expect(JSON.parse(String(publicRow[PUBLIC_HEADERS.indexOf('summary_json')]))).toMatchObject({ summaryVersion: 2, asset: { id: WORK, title: 'New title', isPublic: true } });
   });
 
+  it('heals duplicate public rows of a Work: the first row is updated, the copies are removed', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const index = google.sheets.pub[''];
+    index.push([...index[1]], ['asset_other', 'Other', 'prompts', 'finished', '', '[]', '', 'x', 'true', '', '{}'], [...index[1]]);
+    const result = await directUpdateWork([WORK, { title: 'Healed' }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env);
+    expect(result.fallback).toBe(false);
+    const rows = index.filter(row => row[0] === WORK);
+    expect(rows).toHaveLength(1);
+    expect(rows[0][PUBLIC_HEADERS.indexOf('title')]).toBe('Healed');
+    expect(index.some(row => row[0] === 'asset_other')).toBe(true);
+  });
+
   it('leaves trash changes to softDelete/restore and rejects inline or unknown media, without writing', async () => {
     const google = fakeGoogle();
     vi.stubGlobal('fetch', google.fetchMock);

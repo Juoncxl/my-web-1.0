@@ -660,17 +660,19 @@ async function publishWork(env: DirectWriteEnv, record: Json): Promise<void> {
   }
   const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
   if (PUBLIC_HEADERS.some((header, index) => publicHeaders[index] !== header)) fail('PUBLIC_SYNC_PENDING', 'Public index headers are unexpected');
-  const publicRows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
-  if (publicRows.length > 1) fail('PUBLIC_SYNC_PENDING', 'Public index contains duplicate Work rows');
-  const existing = publicRows.length ? await readRow(env, env.publicSheetId, '', publicHeaders, publicRows[0]) : null;
+  // A Work has one public row. Extra copies (e.g. two saves appending at once) are healed below:
+  // the first row takes the new values and the rest are removed.
+  const [publicRow, ...extraRows] = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
+  const existing = publicRow ? await readRow(env, env.publicSheetId, '', publicHeaders, publicRow) : null;
   const publicFolderId = existing?.file_id ? await driveParent(env, String(existing.file_id)) : await folderOfIndexedFiles(env, env.publicSheetId, publicHeaders);
   if (!publicFolderId) fail('PUBLIC_SYNC_PENDING', 'Public projection folder is unknown');
   const pub = projection(record);
   const publicFileId = await putJsonRevision(env, publicFolderId!, `${id}__r${record.revision}.json`, pub);
   const values = PUBLIC_HEADERS.map(header => ({ id: pub.id, title: pub.title, category: pub.category, status: pub.status, updated_at: pub.updated_at, tags: JSON.stringify(pub.tags),
     short_description: pub.short_description || '', file_id: publicFileId, active: 'true', cover_ref: pub.preview_image || '', summary_json: publicSummaryJson(pub) } as Row)[header] ?? '');
-  if (publicRows.length) await writeRange(env, env.publicSheetId, `A${publicRows[0]}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRows[0]}`, [values]);
+  if (publicRow) await writeRange(env, env.publicSheetId, `A${publicRow}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRow}`, [values]);
   else await appendRows(env, env.publicSheetId, '', [values]);
+  if (extraRows.length) await deleteSheetRows(env, env.publicSheetId, (await sheetTabIds(env, env.publicSheetId))[''], extraRows);
 }
 
 /** Port of deactivatePublicWork_. */
