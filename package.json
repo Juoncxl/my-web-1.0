@@ -13,7 +13,9 @@
     "test": "vitest run",
     "cxl:public-creator:dry-run": "node scripts/cxl-public-creator-foundation.mjs",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node20 --packages=external --outfile=dist-server/index.mjs",
-    "start": "node dist-server/index.mjs"
+    "start": "node dist-server/index.mjs",
+    "cf:dev": "vite build && wrangler dev",
+    "cf:deploy": "vite build && wrangler deploy"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -34,6 +36,7 @@
     "@types/react-dom": "^19.2.4",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "wrangler": "^4.149.0"
   }
 }

@@ -9,3 +9,7 @@ supabase/.temp/
 .env*
 !.env.example
 .tmp-edge-simple-*/
+
+# Cloudflare (wrangler) local state and secrets
+.wrangler/
+.dev.vars*

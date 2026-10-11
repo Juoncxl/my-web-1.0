@@ -1,0 +1,19 @@
+// Cloudflare Workers deploy (Static Assets + the /api/cxl/* handlers).
+// Build first with `npm run build`; secrets and settings live in the Cloudflare dashboard.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cxlstudio",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  // node:crypto, Buffer and process.env for the shared Node handlers.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/work/*"]
+  },
+  "observability": { "enabled": true },
+  // Keep the dashboard's variables and secrets on deploy (they are not listed here).
+  "keep_vars": true
+}

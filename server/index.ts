@@ -11,44 +11,13 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-import google from '../api/cxl/google';
-import media from '../api/cxl/media';
-import publicWork from '../api/cxl/public-work';
-import publicWorks from '../api/cxl/public-works';
+import { API_ROUTES } from './apiRoutes';
+import { SECURITY_HEADERS } from './securityHeaders';
 import share from '../api/cxl/share';
-import collabProgress from '../api/cxl/collab-progress';
-import authCallback from '../api/cxl/auth/callback';
-import authLogin from '../api/cxl/auth/login';
-import authLogout from '../api/cxl/auth/logout';
-import authSession from '../api/cxl/auth/session';
-
-type Handler = (req: any, res: any) => unknown;
-
-const API_ROUTES: Record<string, Handler> = {
-  '/api/cxl/google': google,
-  '/api/cxl/media': media,
-  '/api/cxl/public-work': publicWork,
-  '/api/cxl/public-works': publicWorks,
-  '/api/cxl/share': share,
-  '/api/cxl/collab-progress': collabProgress,
-  '/api/cxl/auth/callback': authCallback,
-  '/api/cxl/auth/login': authLogin,
-  '/api/cxl/auth/logout': authLogout,
-  '/api/cxl/auth/session': authSession
-};
 
 const DIST = path.resolve(process.cwd(), 'dist');
 // Media upload chunks are ~2 MiB of base64 inside JSON.
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
-
-export const SECURITY_HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https:; font-src 'self' https: data:; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https: wss: blob: data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
-  'X-Frame-Options': 'DENY',
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
-  'Strict-Transport-Security': 'max-age=63072000; includeSubDomains'
-};
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
-import { findWorkMediaFile, markWorkMediaState, setLegacyMediaSharing, trashDriveFile, type WorkMediaFile } from './cxlDirectMedia.js';
+import { findWorkMediaFiles, patchDriveFiles, setLegacyMediaSharingMany, trashDriveFiles, type WorkMediaFile } from './cxlDirectMedia.js';
 
 /**
  * Direct Work update (step 3.1 of the Apps Script → Google API migration).
@@ -529,12 +529,8 @@ export function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, m
 async function attachWorkMedia(record: Json, asset: Json, mediaIds: string[], workId: string, ownerUserId: string, env: DirectWriteEnv): Promise<WorkMediaFile[]> {
   const placements = mediaReferenceMap(asset);
   if (new Set(mediaIds).size !== mediaIds.length || mediaIds.some(id => !REQUEST_ID_RE.test(id))) fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media attachment list is invalid');
-  // Look the files up a few at a time: a Collab save can attach dozens of images.
-  const found = new Map<string, WorkMediaFile | null>();
-  for (let start = 0; start < mediaIds.length; start += 8) {
-    const batch = mediaIds.slice(start, start + 8);
-    (await Promise.all(batch.map(id => findWorkMediaFile(env, id)))).forEach((file, index) => found.set(batch[index], file));
-  }
+  // One Drive query per 20 images: a Collab save can attach dozens of them.
+  const found = await findWorkMediaFiles(env, mediaIds);
   const attached: WorkMediaFile[] = [];
   for (const id of mediaIds) {
     const placement = placements[id];
@@ -586,14 +582,14 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
   const refs: string[] = [r.preview_image].concat(r.preview_images || []);
   (record.collaborationDraft?.participants || []).forEach((p: Json) => (p.referenceImages || []).forEach((x: Json) => refs.push(typeof x === 'string' ? x : (x.src || x.storageKey || ''))));
   const publicAccess = isPublicRow(r);
+  const sharingChanges: { media: Json; visible: boolean }[] = [];
   for (const m of record.mediaRecords || []) {
     if (!m.drive_file_id || m.delivery === 'vercel_proxy') continue;
     const visible = publicAccess && (refs.includes(`media:${m.id}`) || refs.includes(m.storage_path));
-    const access = visible ? 'public' : 'private';
-    if (m.sharing_access === access) continue;
-    await setLegacyMediaSharing(env, String(m.drive_file_id), visible);
-    m.sharing_access = access;
+    if (m.sharing_access !== (visible ? 'public' : 'private')) sharingChanges.push({ media: m, visible });
   }
+  await setLegacyMediaSharingMany(env, sharingChanges.map(change => ({ fileId: String(change.media.drive_file_id), makePublic: change.visible })));
+  sharingChanges.forEach(change => { change.media.sharing_access = change.visible ? 'public' : 'private'; });
   const nextIds = referencedMediaIds(cxlAssetFromRecord(record));
   const retired = [...previousIds].filter(id => !nextIds.has(id) && (record.mediaRecords || []).some((m: Json) => m.id === id && m.delivery === 'vercel_proxy'));
   record.mediaRecords = (record.mediaRecords || []).filter((m: Json) => m.delivery !== 'vercel_proxy' || nextIds.has(m.id));
@@ -602,13 +598,14 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
 
 /** After the commit point: record attach/retire state on the media files (best effort, like Apps Script manifests). */
 async function markMediaAfterCommit(env: DirectWriteEnv, attached: WorkMediaFile[], retiredIds: string[], previousRecords: Json[], workId: string, revision: number): Promise<void> {
-  for (let start = 0; start < attached.length; start += 8) {
-    await Promise.all(attached.slice(start, start + 8).map(file => markWorkMediaState(env, file.id, { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) })));
-  }
-  for (const id of retiredIds) {
-    const media = previousRecords.find(m => m.id === id);
-    if (media?.drive_file_id) await markWorkMediaState(env, String(media.drive_file_id), { cxlState: 'retired', cxlRetiredAt: new Date().toISOString(), cxlRetiredRevision: String(revision) }).catch(() => undefined);
-  }
+  // One Drive batch for every file. Retiring is best effort; attaching must succeed.
+  const retiredAt = new Date().toISOString();
+  const retiredFiles = retiredIds.map(id => previousRecords.find(m => m.id === id)?.drive_file_id).filter(Boolean).map(String);
+  const results = await patchDriveFiles(env, [
+    ...attached.map(file => ({ fileId: file.id, body: { appProperties: { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) } } })),
+    ...retiredFiles.map(fileId => ({ fileId, body: { appProperties: { cxlState: 'retired', cxlRetiredAt: retiredAt, cxlRetiredRevision: String(revision) } } }))
+  ]);
+  if (results.slice(0, attached.length).some(ok => !ok)) throw new DirectWriteError('Drive PATCH failed while attaching Work media', 'MEDIA_UPLOAD_DRIVE_FAILED');
 }
 
 // ------------------------------------------------------- shared write steps
@@ -849,7 +846,7 @@ async function trashRevisionFiles(env: DirectWriteEnv, folderId: string | null, 
   if (!folderId) return;
   const query = `'${folderId.replace(/['\\]/g, '\\$&')}' in parents and name contains '${workId}__r' and trashed = false`;
   const listed = await (await google(env, `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: { id: string; name: string }[] };
-  for (const file of listed.files || []) if (file.name.startsWith(`${workId}__r`) && /\.json$/i.test(file.name)) await trashDriveFile(env, file.id);
+  await trashDriveFiles(env, (listed.files || []).filter(file => file.name.startsWith(`${workId}__r`) && /\.json$/i.test(file.name)).map(file => file.id));
 }
 
 /** Port of mutateCxlWorkDeletionApi_('works.permanentDelete') + finishPermanentWorkDelete_. */
@@ -883,9 +880,9 @@ export async function directPermanentDelete(workId: unknown, ownerUserId: string
 
   try {
     // Media first, while the record still says which files belonged to this Work.
-    for (const media of record?.mediaRecords || []) {
-      if (media?.delivery === 'vercel_proxy' && media.drive_file_id && String(media.asset_id || id) === id) await trashDriveFile(env, String(media.drive_file_id));
-    }
+    await trashDriveFiles(env, (record?.mediaRecords || [])
+      .filter((media: Json) => media?.delivery === 'vercel_proxy' && media.drive_file_id && String(media.asset_id || id) === id)
+      .map((media: Json) => String(media.drive_file_id)));
     await deactivatePublicWork(env, id);
     const mapHeaders = await sheetHeaders(env, env.publicSheetId, 'WorkCreatorMap!');
     if (mapHeaders.includes('workId')) {

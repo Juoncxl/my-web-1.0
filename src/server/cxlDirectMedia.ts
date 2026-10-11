@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
 
 /**
@@ -64,20 +64,60 @@ const SAME_UPLOAD_PROPS = ['cxlWorkId', 'cxlOwner', 'cxlSha256'];
 
 /** The canonical media file carrying this mediaId in its appProperties (or legacy name), if any. */
 export async function findWorkMediaFile(env: DirectMediaEnv, mediaId: string): Promise<WorkMediaFile | null> {
-  if (!UUID_RE.test(mediaId)) return null;
-  const query = `appProperties has { key='cxlMediaId' and value='${quote(mediaId)}' } and trashed = false`;
-  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(${FILE_FIELDS})&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: Json[] };
-  const files = (listed.files || []).filter(file => !String(file.name || '').includes('session')).map(toMediaFile);
-  if (files.length <= 1) return files[0] || null;
-  // A retried save could upload the same image twice. Identical copies are healed: keep the
-  // furthest-along (then oldest) and move the rest to Drive trash. Anything else stays an error.
-  const [first] = files;
-  const identical = files.every(file => file.sha256 && file.sha256 === first.sha256 && file.size === first.size && file.mimeType === first.mimeType
-    && SAME_UPLOAD_PROPS.every(key => (file.props[key] || '') === (first.props[key] || '')) && file.props.cxlState in STATE_RANK);
-  if (!identical) fail('MEDIA_UPLOAD_DUPLICATE_FILE', 'Work media storage contains duplicate upload files');
-  const [keep, ...extra] = [...files].sort((a, b) => STATE_RANK[a.props.cxlState] - STATE_RANK[b.props.cxlState] || a.createdTime.localeCompare(b.createdTime));
-  for (const file of extra) await trashDriveFile(env, file.id);
-  return keep;
+  return (await findWorkMediaFiles(env, [mediaId])).get(mediaId) ?? null;
+}
+
+// Media IDs looked up per Drive query. Each one adds ~80 characters to the query string.
+const FIND_IDS_PER_QUERY = 20;
+
+/**
+ * The canonical media files for many mediaIds, in as few Drive calls as possible (one query per
+ * 20 IDs). Workers on the free plan may only make 50 outbound calls per request, and a Collab save
+ * can attach dozens of images.
+ */
+export async function findWorkMediaFiles(env: DirectMediaEnv, mediaIds: string[]): Promise<Map<string, WorkMediaFile | null>> {
+  const ids = [...new Set(mediaIds.filter(id => UUID_RE.test(id)))];
+  const byId = new Map<string, WorkMediaFile[]>(ids.map(id => [id, []]));
+  const collect = async (group: string[]) => {
+    const clauses = group.map(id => `appProperties has { key='cxlMediaId' and value='${quote(id)}' }`);
+    const query = `${clauses.length > 1 ? `(${clauses.join(' or ')})` : clauses[0]} and trashed = false`;
+    const files: WorkMediaFile[] = [];
+    let pageToken = '';
+    do {
+      const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=nextPageToken,files(${FILE_FIELDS})&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`)).json() as { files?: Json[]; nextPageToken?: string };
+      files.push(...(listed.files || []).filter(file => !String(file.name || '').includes('session')).map(toMediaFile));
+      pageToken = listed.nextPageToken || '';
+    } while (pageToken);
+    files.forEach(file => byId.get(file.props.cxlMediaId)?.push(file));
+  };
+  for (let start = 0; start < ids.length; start += FIND_IDS_PER_QUERY) {
+    const group = ids.slice(start, start + FIND_IDS_PER_QUERY);
+    try {
+      await collect(group);
+    } catch (error) {
+      // Should Drive ever refuse the combined query, look the IDs up one by one as before.
+      if (group.length === 1) throw error;
+      console.warn(JSON.stringify({ event: 'cxl_media_find_combined_failed', ids: group.length }));
+      for (const id of group) await collect([id]);
+    }
+  }
+  const found = new Map<string, WorkMediaFile | null>();
+  const extras: string[] = [];
+  for (const id of mediaIds) {
+    const files = byId.get(id) || [];
+    if (files.length <= 1) { found.set(id, files[0] || null); continue; }
+    // A retried save could upload the same image twice. Identical copies are healed: keep the
+    // furthest-along (then oldest) and move the rest to Drive trash. Anything else stays an error.
+    const [first] = files;
+    const identical = files.every(file => file.sha256 && file.sha256 === first.sha256 && file.size === first.size && file.mimeType === first.mimeType
+      && SAME_UPLOAD_PROPS.every(key => (file.props[key] || '') === (first.props[key] || '')) && file.props.cxlState in STATE_RANK);
+    if (!identical) fail('MEDIA_UPLOAD_DUPLICATE_FILE', 'Work media storage contains duplicate upload files');
+    const [keep, ...extra] = [...files].sort((a, b) => STATE_RANK[a.props.cxlState] - STATE_RANK[b.props.cxlState] || a.createdTime.localeCompare(b.createdTime));
+    found.set(id, keep);
+    extras.push(...extra.map(file => file.id));
+  }
+  if (extras.length) await trashDriveFiles(env, extras);
+  return found;
 }
 
 export async function markWorkMediaState(env: DirectMediaEnv, fileId: string, props: Record<string, string>): Promise<void> {
@@ -86,18 +126,88 @@ export async function markWorkMediaState(env: DirectMediaEnv, fileId: string, pr
   });
 }
 
-/** Port of the legacy branch of shareRecordMedia_: anyone-with-link for public, private otherwise. */
-export async function setLegacyMediaSharing(env: DirectMediaEnv, fileId: string, makePublic: boolean): Promise<void> {
-  const listed = await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true&fields=permissions(id,type,role)`)).json() as { permissions?: { id: string; type: string }[] };
-  const anyone = (listed.permissions || []).filter(permission => permission.type === 'anyone');
-  if (makePublic && !anyone.length) {
-    await drive(env, `${DRIVE_FILES}/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'anyone', role: 'reader' })
-    });
+const DRIVE_BATCH = 'https://www.googleapis.com/batch/drive/v3';
+const DRIVE_BATCH_LIMIT = 100;
+export interface DriveBatchCall { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; path: string; body?: unknown }
+export interface DriveBatchResult { status: number; body: Json }
+
+/**
+ * Many small Drive calls sent as one HTTP request (Drive's batch endpoint, up to 100 calls each).
+ * Results come back in call order; a call that got no answer has status 0.
+ */
+export async function driveBatch(env: DirectMediaEnv, calls: DriveBatchCall[]): Promise<DriveBatchResult[]> {
+  const results: DriveBatchResult[] = [];
+  for (let start = 0; start < calls.length; start += DRIVE_BATCH_LIMIT) {
+    const slice = calls.slice(start, start + DRIVE_BATCH_LIMIT);
+    const boundary = `cxl_batch_${randomUUID()}`;
+    const body = slice.map((call, index) => [
+      `--${boundary}`, 'Content-Type: application/http', `Content-ID: <item${index}>`, '',
+      `${call.method} ${call.path} HTTP/1.1`,
+      ...(call.body === undefined ? [] : ['Content-Type: application/json; charset=UTF-8']), '',
+      call.body === undefined ? '' : JSON.stringify(call.body)
+    ].join('\r\n')).join('\r\n') + `\r\n--${boundary}--\r\n`;
+    const response = await drive(env, DRIVE_BATCH, { method: 'POST', headers: { 'Content-Type': `multipart/mixed; boundary=${boundary}` }, body });
+    const answers = parseBatchResponse(response.headers.get('content-type') || '', await response.text());
+    slice.forEach((_, index) => results.push(answers.get(index) || { status: 0, body: null }));
   }
-  if (!makePublic) for (const permission of anyone) {
-    await drive(env, `${DRIVE_FILES}/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permission.id)}?supportsAllDrives=true`, { method: 'DELETE' });
+  return results;
+}
+
+/** Splits a multipart/mixed batch answer into per-call results keyed by the request's Content-ID index. */
+export function parseBatchResponse(contentType: string, text: string): Map<number, DriveBatchResult> {
+  const boundary = contentType.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i);
+  const answers = new Map<number, DriveBatchResult>();
+  if (!boundary) return answers;
+  for (const part of text.split(`--${boundary[1] || boundary[2]}`)) {
+    const id = part.match(/Content-ID:\s*<response-item(\d+)>/i);
+    const status = part.match(/HTTP\/1\.[01] (\d{3})/);
+    if (!id || !status) continue;
+    const afterStatus = part.slice(status.index! + status[0].length);
+    const bodyStart = afterStatus.search(/\r?\n\r?\n/);
+    const raw = bodyStart < 0 ? '' : afterStatus.slice(bodyStart).trim();
+    let body: Json = null;
+    try { body = raw ? JSON.parse(raw) : null; } catch { body = raw; }
+    answers.set(Number(id[1]), { status: Number(status[1]), body });
   }
+  return answers;
+}
+
+const batchOk = (result: DriveBatchResult, okStatuses: number[] = []) => (result.status >= 200 && result.status < 300) || okStatuses.includes(result.status);
+const filePath = (fileId: string, suffix = '') => `/drive/v3/files/${encodeURIComponent(fileId)}${suffix}`;
+
+/** PATCHes many Drive files in one batch. Returns whether each one succeeded, in order. */
+export async function patchDriveFiles(env: DirectMediaEnv, patches: { fileId: string; body: Json }[]): Promise<boolean[]> {
+  if (!patches.length) return [];
+  const results = await driveBatch(env, patches.map(patch => ({ method: 'PATCH', path: filePath(patch.fileId, '?supportsAllDrives=true&fields=id'), body: patch.body })));
+  return results.map(result => batchOk(result));
+}
+
+/** Moves many files to the Owner's Drive trash (recoverable for 30 days) in one batch. Files already gone count as done. */
+export async function trashDriveFiles(env: DirectMediaEnv, fileIds: string[]): Promise<void> {
+  if (!fileIds.length) return;
+  const results = await driveBatch(env, fileIds.map(fileId => ({ method: 'PATCH', path: filePath(fileId, '?supportsAllDrives=true&fields=id'), body: { trashed: true } })));
+  const failed = results.find(result => !batchOk(result, [404]));
+  if (failed) throw new DirectWriteError(`Drive trash failed (HTTP ${failed.status})`, 'MEDIA_UPLOAD_DRIVE_FAILED');
+}
+
+/**
+ * Port of the legacy branch of shareRecordMedia_ (anyone-with-link for public, private otherwise),
+ * for many files in two batches: read permissions, then change them.
+ */
+export async function setLegacyMediaSharingMany(env: DirectMediaEnv, items: { fileId: string; makePublic: boolean }[]): Promise<void> {
+  if (!items.length) return;
+  const listed = await driveBatch(env, items.map(item => ({ method: 'GET', path: filePath(item.fileId, '/permissions?supportsAllDrives=true&fields=permissions(id,type,role)') })));
+  const failedRead = listed.find(result => !batchOk(result));
+  if (failedRead) throw new DirectWriteError(`Drive GET failed (HTTP ${failedRead.status})`, 'MEDIA_UPLOAD_DRIVE_FAILED');
+  const changes: DriveBatchCall[] = [];
+  items.forEach((item, index) => {
+    const anyone = ((listed[index].body?.permissions || []) as { id: string; type: string }[]).filter(permission => permission.type === 'anyone');
+    if (item.makePublic && !anyone.length) changes.push({ method: 'POST', path: filePath(item.fileId, '/permissions?supportsAllDrives=true'), body: { type: 'anyone', role: 'reader' } });
+    if (!item.makePublic) anyone.forEach(permission => changes.push({ method: 'DELETE', path: filePath(item.fileId, `/permissions/${encodeURIComponent(permission.id)}?supportsAllDrives=true`) }));
+  });
+  if (!changes.length) return;
+  const failedChange = (await driveBatch(env, changes)).find(result => !batchOk(result));
+  if (failedChange) throw new DirectWriteError(`Drive permission change failed (HTTP ${failedChange.status})`, 'MEDIA_UPLOAD_DRIVE_FAILED');
 }
 
 async function ensurePrivate(env: DirectMediaEnv, fileId: string): Promise<void> {
@@ -255,18 +365,11 @@ export async function directMediaChunk(input: Json, ownerUserId: string, env: Di
   return { uploadId: input.uploadId, chunkIndex: input.chunkIndex, stored: true, idempotent: false };
 }
 
-/** Move a Drive file to the Owner's trash (recoverable for 30 days). */
-export async function trashDriveFile(env: DirectMediaEnv, fileId: string): Promise<void> {
-  await drive(env, `${DRIVE_FILES}/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true })
-  }, [404]);
-}
-
 const CLEANUP_AFTER_MS = 24 * 60 * 60 * 1000;
-const CLEANUP_MAX_ITEMS = 10;
+const CLEANUP_MAX_ITEMS = 50;
 
 async function listFiles(env: DirectMediaEnv, query: string): Promise<Json[]> {
-  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(${FILE_FIELDS},modifiedTime)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: Json[] };
+  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(${FILE_FIELDS},modifiedTime)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: Json[] };
   return listed.files || [];
 }
 
@@ -279,19 +382,21 @@ export async function cleanupWorkMedia(env: DirectMediaEnv, now = Date.now()): P
   const cutoff = now - CLEANUP_AFTER_MS;
   const stamp = (value: unknown) => Date.parse(String(value || '')) || 0;
   const candidates: string[] = [];
-  for (const file of await listFiles(env, "appProperties has { key='cxlState' and value='retired' } and trashed = false")) {
-    if (stamp(file.appProperties?.cxlRetiredAt) && stamp(file.appProperties?.cxlRetiredAt) < cutoff) candidates.push(file.id);
-  }
-  for (const state of ['finalized', 'uploading']) {
-    for (const file of await listFiles(env, `appProperties has { key='cxlState' and value='${state}' } and trashed = false`)) {
-      if (stamp(file.appProperties?.cxlFinalizedAt || file.createdTime) < cutoff) candidates.push(file.id);
-    }
+  // One query for all three states, one for stale sessions, one batch to trash: a cleanup rides
+  // along with a save and must stay within the request's outbound call budget.
+  const states = ['retired', 'finalized', 'uploading'].map(state => `appProperties has { key='cxlState' and value='${state}' }`).join(' or ');
+  for (const file of await listFiles(env, `(${states}) and trashed = false`)) {
+    const props = file.appProperties || {};
+    const stale = props.cxlState === 'retired' ? Boolean(stamp(props.cxlRetiredAt)) && stamp(props.cxlRetiredAt) < cutoff
+      : (props.cxlState === 'finalized' || props.cxlState === 'uploading') && stamp(props.cxlFinalizedAt || file.createdTime) < cutoff;
+    if (stale) candidates.push(file.id);
   }
   for (const file of await listFiles(env, `name contains 'cxl-work-media-session-' and modifiedTime < '${new Date(cutoff).toISOString()}' and trashed = false`)) {
     candidates.push(file.id);
   }
-  let trashed = 0;
-  for (const id of candidates.slice(0, CLEANUP_MAX_ITEMS)) { await trashDriveFile(env, id); trashed++; }
+  const chosen = candidates.slice(0, CLEANUP_MAX_ITEMS);
+  await trashDriveFiles(env, chosen);
+  const trashed = chosen.length;
   return { trashed };
 }
 
