@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
-import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from './cxlDirectMedia';
+import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize, parseBatchResponse } from './cxlDirectMedia';
 import { sniffCreatorMediaType } from '../components/creator/creatorMediaModel';
 
 const PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_version','search_chunk_count','search_index_token'];
@@ -35,6 +35,7 @@ function fakeGoogle() {
     pubfile3: { name: `${WORK}__r3.json`, parent: 'pubFolder', content: {} }
   };
   let nextId = 1;
+  let batchCalls = 0, replayedCalls = 0;
   const col = (letters: string) => letters.split('').reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1;
   const parse = (range: string) => {
     const [sheet, a1] = range.includes('!') ? range.split('!') : ['', range];
@@ -110,14 +111,30 @@ function fakeGoogle() {
       if (init.method === 'PATCH') { files[existing].content = content; return ok({ id: existing }); }
       const id = `new${nextId++}`; files[id] = { name: meta.name, parent: meta.parents[0], content }; return ok({ id });
     }
+    // Drive batch: replay each part against this fake and answer multipart/mixed.
+    if (url.pathname === '/batch/drive/v3') {
+      batchCalls++;
+      replayedCalls += String(init.body).split('Content-ID').length - 1;
+      const boundary = headers.get('content-type')!.match(/boundary=(\S+)/)![1];
+      const parts = String(init.body).split(`--${boundary}`).filter(part => part.includes('Content-ID'));
+      const answers = await Promise.all(parts.map(async part => {
+        const id = part.match(/Content-ID: <item(\d+)>/)![1];
+        const [, method, path] = part.match(/\r\n(GET|POST|PATCH|DELETE) (\S+) HTTP\/1\.1/)!;
+        const body = part.split('\r\n\r\n')[2]?.trim();
+        const answer = await fetchMock(`https://www.googleapis.com${path}`, { method, ...(body ? { body } : {}) });
+        return `--batch_ans\r\nContent-Type: application/http\r\nContent-ID: <response-item${id}>\r\n\r\nHTTP/1.1 ${answer.status} X\r\nContent-Type: application/json\r\n\r\n${answer.status === 204 ? '' : await answer.text()}\r\n`;
+      }));
+      return new Response(answers.join('') + '--batch_ans--', { status: 200, headers: { 'Content-Type': 'multipart/mixed; boundary=batch_ans' } });
+    }
     if (url.pathname === '/drive/v3/files') {
       const q = url.searchParams.get('q')!;
-      const prop = q.match(/appProperties has \{ key='([^']+)' and value='([^']+)' \}/);
+      const props = [...q.matchAll(/appProperties has \{ key='([^']+)' and value='([^']+)' \}/g)];
+      const prop = props[0];
       const parent = q.match(/'([^']+)' in parents/)?.[1], name = q.match(/name = '([^']+)'/)?.[1], contains = q.match(/name contains '([^']+)'/)?.[1];
       const matches = Object.keys(files).filter(id => {
         const f = files[id];
         if (f.trashed) return false;
-        if (prop) return f.props?.[prop[1]] === prop[2];
+        if (prop) return props.some(p => f.props?.[p[1]] === p[2]);
         if (q.includes("name contains 'cxl-work-media-session-'")) return f.name.startsWith('cxl-work-media-session-');
         if (q.includes("name contains 'cxl-work-media-'")) return /^cxl-work-media-[a-f0-9-]{36}\./.test(f.name);
         if (contains) return f.parent === parent && f.name.includes(contains);
@@ -154,7 +171,7 @@ function fakeGoogle() {
     throw new Error(`Unexpected request ${input}`);
   });
   const env: DirectWriteEnv = { ownerToken: 'tok', privateSheetId: 'priv', publicSheetId: 'pub', publicCreatorId: 'cxlc_' + 'a'.repeat(32), ownerFolderIds: async () => ['folder_1'] };
-  return { sheets, files, fetchMock, env };
+  return { sheets, files, fetchMock, env, batchCalls: () => batchCalls, outboundCalls: () => fetchMock.mock.calls.length - replayedCalls };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -194,6 +211,19 @@ describe('direct Work update', () => {
     expect(publicRow[PUBLIC_HEADERS.indexOf('title')]).toBe('New title');
     expect(publicRow[PUBLIC_HEADERS.indexOf('active')]).toBe('true');
     expect(JSON.parse(String(publicRow[PUBLIC_HEADERS.indexOf('summary_json')]))).toMatchObject({ summaryVersion: 2, asset: { id: WORK, title: 'New title', isPublic: true } });
+  });
+
+  it('heals duplicate public rows of a Work: the first row is updated, the copies are removed', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const index = google.sheets.pub[''];
+    index.push([...index[1]], ['asset_other', 'Other', 'prompts', 'finished', '', '[]', '', 'x', 'true', '', '{}'], [...index[1]]);
+    const result = await directUpdateWork([WORK, { title: 'Healed' }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, google.env);
+    expect(result.fallback).toBe(false);
+    const rows = index.filter(row => row[0] === WORK);
+    expect(rows).toHaveLength(1);
+    expect(rows[0][PUBLIC_HEADERS.indexOf('title')]).toBe('Healed');
+    expect(index.some(row => row[0] === 'asset_other')).toBe(true);
   });
 
   it('leaves trash changes to softDelete/restore and rejects inline or unknown media, without writing', async () => {
@@ -476,5 +506,74 @@ describe('direct Work update', () => {
     await expect(directUpdateWork([WORK, { title: 'x' }, { requestId: REQUEST, expectedRevision: 2 }], OWNER, google.env))
       .rejects.toMatchObject({ code: 'REVISION_CONFLICT' } satisfies Partial<DirectWriteError>);
     expect(Object.keys(google.files)).toEqual(['rec3', 'pubfile3']);
+  });
+});
+
+// Workers on the free plan may make only 50 outbound calls per request.
+describe('outbound call budget', () => {
+  const mediaFile = (google: ReturnType<typeof fakeGoogle>, id: string, index: number) => {
+    google.files[`f${index}`] = { name: `cxl-work-media-${id}.webp`, parent: 'mediaFolder', bytes: Buffer.from('x'), mimeType: 'image/webp', createdTime: '2026-10-01T00:00:00.000Z',
+      props: { cxlOwner: OWNER, cxlWorkId: WORK, cxlMediaId: id, cxlDelivery: 'vercel_proxy', cxlState: 'finalized', cxlPurpose: 'gallery', cxlContextId: '',
+        cxlSortOrder: String(index), cxlIsCover: index === 0 ? 'true' : 'false', cxlSha256: 'x' } };
+  };
+
+  it('attaches 30 images and retires the old one in a single save within 50 calls', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    google.files.m1file = { name: 'cxl-work-media-m1.png', parent: 'mediaFolder', props: { cxlState: 'attached' } };
+    (google.files.rec3.content as Record<string, any>).mediaRecords[0].drive_file_id = 'm1file';
+    const ids = Array.from({ length: 30 }, (_, i) => `33333333-3333-4333-8333-${String(i).padStart(12, '0')}`);
+    ids.forEach((id, index) => mediaFile(google, id, index));
+    const result = await directUpdateWork([WORK, { previewImages: ids.map(id => `media:${id}`), previewImage: `media:${ids[0]}` },
+      { requestId: REQUEST, expectedRevision: 3, mediaIds: ids }], OWNER, google.env);
+    expect(result.fallback).toBe(false);
+    expect(ids.every((_, index) => google.files[`f${index}`].props?.cxlState === 'attached')).toBe(true);
+    expect(google.files.m1file.props?.cxlState).toBe('retired');
+    expect(google.outboundCalls()).toBeLessThanOrEqual(30);
+  });
+
+  it('still finds the images one by one if Drive refuses the combined query', async () => {
+    const google = fakeGoogle();
+    const strict = vi.fn(async (input: string, init?: RequestInit) => decodeURIComponent(String(input)).includes(' or appProperties')
+      ? new Response('{}', { status: 400 }) : google.fetchMock(input, init));
+    vi.stubGlobal('fetch', strict);
+    const ids = Array.from({ length: 3 }, (_, i) => `33333333-3333-4333-8333-${String(i).padStart(12, '0')}`);
+    ids.forEach((id, index) => mediaFile(google, id, index));
+    const result = await directUpdateWork([WORK, { previewImages: ids.map(id => `media:${id}`), previewImage: `media:${ids[0]}` },
+      { requestId: REQUEST, expectedRevision: 3, mediaIds: ids }], OWNER, google.env);
+    expect(result.fallback).toBe(false);
+    expect(ids.every((_, index) => google.files[`f${index}`].props?.cxlState === 'attached')).toBe(true);
+  });
+
+  it('permanently deletes a Work with many revisions and images within 50 calls', async () => {
+    const google = fakeGoogle();
+    vi.stubGlobal('fetch', google.fetchMock);
+    const record = google.files.rec3.content as Record<string, any>;
+    record.row.deleted_at = '2026-10-01';
+    record.mediaRecords = Array.from({ length: 40 }, (_, i) => ({ id: `m${i}`, asset_id: WORK, delivery: 'vercel_proxy', drive_file_id: `img${i}` }));
+    record.mediaRecords.forEach((m: { drive_file_id: string }) => { google.files[m.drive_file_id] = { name: `${m.drive_file_id}.webp`, parent: 'mediaFolder' }; });
+    for (let r = 1; r < 60; r++) {
+      google.files[`old${r}`] = { name: `${WORK}__r${r}.json`, parent: 'privFolder', content: {} };
+      google.files[`pubold${r}`] = { name: `${WORK}__r${r}.json`, parent: 'pubFolder', content: {} };
+    }
+    await expect(directPermanentDelete(WORK, OWNER, google.env)).resolves.toMatchObject({ fallback: false });
+    expect(Object.values(google.files).filter(file => file.name.startsWith(`${WORK}__r`) && !file.trashed)).toHaveLength(0);
+    expect(record.mediaRecords.every((m: { drive_file_id: string }) => google.files[m.drive_file_id].trashed)).toBe(true);
+    expect(google.outboundCalls()).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('Drive batch answers', () => {
+  it('maps each part back to its call by Content-ID, in any order', () => {
+    const text = [
+      '--batch_x', 'Content-Type: application/http', 'Content-ID: <response-item1>', '', 'HTTP/1.1 404 Not Found', 'Content-Type: application/json; charset=UTF-8', '', '{"error":{"code":404}}',
+      '--batch_x', 'Content-Type: application/http', 'Content-ID: <response-item0>', '', 'HTTP/1.1 200 OK', 'Content-Type: application/json; charset=UTF-8', '', '{"id":"a"}',
+      '--batch_x', 'Content-Type: application/http', 'Content-ID: <response-item2>', '', 'HTTP/1.1 204 No Content', '', '',
+      '--batch_x--'
+    ].join('\r\n');
+    const answers = parseBatchResponse('multipart/mixed; boundary=batch_x', text);
+    expect(answers.get(0)).toEqual({ status: 200, body: { id: 'a' } });
+    expect(answers.get(1)).toEqual({ status: 404, body: { error: { code: 404 } } });
+    expect(answers.get(2)).toEqual({ status: 204, body: null });
   });
 });

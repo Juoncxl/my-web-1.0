@@ -77,9 +77,19 @@ export function injectShareMeta(shell: string, meta: string): string {
 }
 
 let cachedShell: string | null = null;
+let shellLoader: (() => Promise<string>) | null = null;
+
+/** Hosts without a dist/ folder on disk (Cloudflare Workers) hand over their own way to read the shell. */
+export function setShareShellLoader(loader: () => Promise<string>): void {
+  shellLoader = loader;
+}
 
 async function loadShell(req: Request, origin: string): Promise<string> {
   if (cachedShell) return cachedShell;
+  if (shellLoader) {
+    const html = await shellLoader();
+    if (!html.includes('/src/main.tsx')) return (cachedShell = html);
+  }
   for (const candidate of [path.join(process.cwd(), 'dist', 'index.html'), path.join(process.cwd(), 'index.html')]) {
     try {
       const html = await readFile(candidate, 'utf8');

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
-import { findWorkMediaFile, markWorkMediaState, setLegacyMediaSharing, trashDriveFile, type WorkMediaFile } from './cxlDirectMedia.js';
+import { findWorkMediaFiles, patchDriveFiles, setLegacyMediaSharingMany, trashDriveFiles, type WorkMediaFile } from './cxlDirectMedia.js';
 
 /**
  * Direct Work update (step 3.1 of the Apps Script → Google API migration).
@@ -529,12 +529,8 @@ export function rejectUnsupportedWorkMedia(asset: Json, existing: Json | null, m
 async function attachWorkMedia(record: Json, asset: Json, mediaIds: string[], workId: string, ownerUserId: string, env: DirectWriteEnv): Promise<WorkMediaFile[]> {
   const placements = mediaReferenceMap(asset);
   if (new Set(mediaIds).size !== mediaIds.length || mediaIds.some(id => !REQUEST_ID_RE.test(id))) fail('UNSUPPORTED_MEDIA_MUTATION', 'Work media attachment list is invalid');
-  // Look the files up a few at a time: a Collab save can attach dozens of images.
-  const found = new Map<string, WorkMediaFile | null>();
-  for (let start = 0; start < mediaIds.length; start += 8) {
-    const batch = mediaIds.slice(start, start + 8);
-    (await Promise.all(batch.map(id => findWorkMediaFile(env, id)))).forEach((file, index) => found.set(batch[index], file));
-  }
+  // One Drive query per 20 images: a Collab save can attach dozens of them.
+  const found = await findWorkMediaFiles(env, mediaIds);
   const attached: WorkMediaFile[] = [];
   for (const id of mediaIds) {
     const placement = placements[id];
@@ -586,14 +582,14 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
   const refs: string[] = [r.preview_image].concat(r.preview_images || []);
   (record.collaborationDraft?.participants || []).forEach((p: Json) => (p.referenceImages || []).forEach((x: Json) => refs.push(typeof x === 'string' ? x : (x.src || x.storageKey || ''))));
   const publicAccess = isPublicRow(r);
+  const sharingChanges: { media: Json; visible: boolean }[] = [];
   for (const m of record.mediaRecords || []) {
     if (!m.drive_file_id || m.delivery === 'vercel_proxy') continue;
     const visible = publicAccess && (refs.includes(`media:${m.id}`) || refs.includes(m.storage_path));
-    const access = visible ? 'public' : 'private';
-    if (m.sharing_access === access) continue;
-    await setLegacyMediaSharing(env, String(m.drive_file_id), visible);
-    m.sharing_access = access;
+    if (m.sharing_access !== (visible ? 'public' : 'private')) sharingChanges.push({ media: m, visible });
   }
+  await setLegacyMediaSharingMany(env, sharingChanges.map(change => ({ fileId: String(change.media.drive_file_id), makePublic: change.visible })));
+  sharingChanges.forEach(change => { change.media.sharing_access = change.visible ? 'public' : 'private'; });
   const nextIds = referencedMediaIds(cxlAssetFromRecord(record));
   const retired = [...previousIds].filter(id => !nextIds.has(id) && (record.mediaRecords || []).some((m: Json) => m.id === id && m.delivery === 'vercel_proxy'));
   record.mediaRecords = (record.mediaRecords || []).filter((m: Json) => m.delivery !== 'vercel_proxy' || nextIds.has(m.id));
@@ -602,13 +598,14 @@ async function settleRecordMedia(record: Json, previousIds: Set<string>, env: Di
 
 /** After the commit point: record attach/retire state on the media files (best effort, like Apps Script manifests). */
 async function markMediaAfterCommit(env: DirectWriteEnv, attached: WorkMediaFile[], retiredIds: string[], previousRecords: Json[], workId: string, revision: number): Promise<void> {
-  for (let start = 0; start < attached.length; start += 8) {
-    await Promise.all(attached.slice(start, start + 8).map(file => markWorkMediaState(env, file.id, { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) })));
-  }
-  for (const id of retiredIds) {
-    const media = previousRecords.find(m => m.id === id);
-    if (media?.drive_file_id) await markWorkMediaState(env, String(media.drive_file_id), { cxlState: 'retired', cxlRetiredAt: new Date().toISOString(), cxlRetiredRevision: String(revision) }).catch(() => undefined);
-  }
+  // One Drive batch for every file. Retiring is best effort; attaching must succeed.
+  const retiredAt = new Date().toISOString();
+  const retiredFiles = retiredIds.map(id => previousRecords.find(m => m.id === id)?.drive_file_id).filter(Boolean).map(String);
+  const results = await patchDriveFiles(env, [
+    ...attached.map(file => ({ fileId: file.id, body: { appProperties: { cxlState: 'attached', cxlAttachedWorkId: workId, cxlAttachedRevision: String(revision) } } })),
+    ...retiredFiles.map(fileId => ({ fileId, body: { appProperties: { cxlState: 'retired', cxlRetiredAt: retiredAt, cxlRetiredRevision: String(revision) } } }))
+  ]);
+  if (results.slice(0, attached.length).some(ok => !ok)) throw new DirectWriteError('Drive PATCH failed while attaching Work media', 'MEDIA_UPLOAD_DRIVE_FAILED');
 }
 
 // ------------------------------------------------------- shared write steps
@@ -663,17 +660,19 @@ async function publishWork(env: DirectWriteEnv, record: Json): Promise<void> {
   }
   const publicHeaders = await sheetHeaders(env, env.publicSheetId, '');
   if (PUBLIC_HEADERS.some((header, index) => publicHeaders[index] !== header)) fail('PUBLIC_SYNC_PENDING', 'Public index headers are unexpected');
-  const publicRows = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
-  if (publicRows.length > 1) fail('PUBLIC_SYNC_PENDING', 'Public index contains duplicate Work rows');
-  const existing = publicRows.length ? await readRow(env, env.publicSheetId, '', publicHeaders, publicRows[0]) : null;
+  // A Work has one public row. Extra copies (e.g. two saves appending at once) are healed below:
+  // the first row takes the new values and the rest are removed.
+  const [publicRow, ...extraRows] = await findRows(env, env.publicSheetId, '', publicHeaders, 'id', id);
+  const existing = publicRow ? await readRow(env, env.publicSheetId, '', publicHeaders, publicRow) : null;
   const publicFolderId = existing?.file_id ? await driveParent(env, String(existing.file_id)) : await folderOfIndexedFiles(env, env.publicSheetId, publicHeaders);
   if (!publicFolderId) fail('PUBLIC_SYNC_PENDING', 'Public projection folder is unknown');
   const pub = projection(record);
   const publicFileId = await putJsonRevision(env, publicFolderId!, `${id}__r${record.revision}.json`, pub);
   const values = PUBLIC_HEADERS.map(header => ({ id: pub.id, title: pub.title, category: pub.category, status: pub.status, updated_at: pub.updated_at, tags: JSON.stringify(pub.tags),
     short_description: pub.short_description || '', file_id: publicFileId, active: 'true', cover_ref: pub.preview_image || '', summary_json: publicSummaryJson(pub) } as Row)[header] ?? '');
-  if (publicRows.length) await writeRange(env, env.publicSheetId, `A${publicRows[0]}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRows[0]}`, [values]);
+  if (publicRow) await writeRange(env, env.publicSheetId, `A${publicRow}:${columnLetter(PUBLIC_HEADERS.length - 1)}${publicRow}`, [values]);
   else await appendRows(env, env.publicSheetId, '', [values]);
+  if (extraRows.length) await deleteSheetRows(env, env.publicSheetId, (await sheetTabIds(env, env.publicSheetId))[''], extraRows);
 }
 
 /** Port of deactivatePublicWork_. */
@@ -849,7 +848,7 @@ async function trashRevisionFiles(env: DirectWriteEnv, folderId: string | null, 
   if (!folderId) return;
   const query = `'${folderId.replace(/['\\]/g, '\\$&')}' in parents and name contains '${workId}__r' and trashed = false`;
   const listed = await (await google(env, `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: { id: string; name: string }[] };
-  for (const file of listed.files || []) if (file.name.startsWith(`${workId}__r`) && /\.json$/i.test(file.name)) await trashDriveFile(env, file.id);
+  await trashDriveFiles(env, (listed.files || []).filter(file => file.name.startsWith(`${workId}__r`) && /\.json$/i.test(file.name)).map(file => file.id));
 }
 
 /** Port of mutateCxlWorkDeletionApi_('works.permanentDelete') + finishPermanentWorkDelete_. */
@@ -883,9 +882,9 @@ export async function directPermanentDelete(workId: unknown, ownerUserId: string
 
   try {
     // Media first, while the record still says which files belonged to this Work.
-    for (const media of record?.mediaRecords || []) {
-      if (media?.delivery === 'vercel_proxy' && media.drive_file_id && String(media.asset_id || id) === id) await trashDriveFile(env, String(media.drive_file_id));
-    }
+    await trashDriveFiles(env, (record?.mediaRecords || [])
+      .filter((media: Json) => media?.delivery === 'vercel_proxy' && media.drive_file_id && String(media.asset_id || id) === id)
+      .map((media: Json) => String(media.drive_file_id)));
     await deactivatePublicWork(env, id);
     const mapHeaders = await sheetHeaders(env, env.publicSheetId, 'WorkCreatorMap!');
     if (mapHeaders.includes('workId')) {

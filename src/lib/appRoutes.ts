@@ -17,3 +17,11 @@ const KNOWN_APP_PATHS: readonly RegExp[] = [
 export function isKnownAppPath(pathname: string): boolean {
   return KNOWN_APP_PATHS.some(pattern => pattern.test(pathname));
 }
+
+/**
+ * Some hosts (Cloudflare Static Assets) redirect /@slug to /%40slug. Turn the
+ * percent-encoded "@" of a profile path back into "/@slug"; null when unchanged.
+ */
+export function normalizeEncodedProfilePath(pathname: string): string | null {
+  return /^\/%40/i.test(pathname) ? `/@${pathname.slice(4)}` : null;
+}
