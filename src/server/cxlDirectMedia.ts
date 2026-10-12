@@ -41,13 +41,18 @@ const sessionFileName = (uploadId: string) => `cxl-work-media-session-${uploadId
 
 let cachedMediaFolder: string | null = null;
 
-/** The private folder holding canonical Work media (Apps Script's CXL_WORK_MEDIA_FOLDER_ID). */
+/**
+ * The private folder holding canonical Work media (Apps Script's CXL_WORK_MEDIA_FOLDER_ID).
+ * Without a configured ID, the folder is found from a media file the Owner owns: anyone can
+ * share a folder with the Owner, so a file merely visible to the Owner must not pick where
+ * private uploads land.
+ */
 export async function workMediaFolderId(env: DirectMediaEnv): Promise<string> {
   if (env.mediaFolderId) return env.mediaFolderId;
   if (cachedMediaFolder) return cachedMediaFolder;
-  const query = "name contains 'cxl-work-media-' and not name contains 'chunk' and not name contains 'session' and trashed = false";
-  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(name,parents)&pageSize=20&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: { name?: string; parents?: string[] }[] };
-  const found = (listed.files || []).find(file => /^cxl-work-media-[a-f0-9-]{36}\.(jpg|png|webp|gif)$/i.test(file.name || '') && file.parents?.[0]);
+  const query = "'me' in owners and name contains 'cxl-work-media-' and not name contains 'chunk' and not name contains 'session' and trashed = false";
+  const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(name,parents,ownedByMe)&pageSize=20`)).json() as { files?: { name?: string; parents?: string[]; ownedByMe?: boolean }[] };
+  const found = (listed.files || []).find(file => file.ownedByMe === true && /^cxl-work-media-[a-f0-9-]{36}\.(jpg|png|webp|gif)$/i.test(file.name || '') && file.parents?.[0]);
   if (!found) fail('MEDIA_UPLOAD_NOT_CONFIGURED', 'Work media storage folder could not be located');
   cachedMediaFolder = found!.parents![0];
   return cachedMediaFolder;
@@ -218,11 +223,29 @@ async function ensurePrivate(env: DirectMediaEnv, fileId: string): Promise<void>
 }
 
 async function findSessionFile(env: DirectMediaEnv, folderId: string, uploadId: string): Promise<{ id: string; session: Json } | null> {
-  const query = `'${quote(folderId)}' in parents and name = '${sessionFileName(uploadId)}' and trashed = false`;
+  const query = `'${quote(folderId)}' in parents and 'me' in owners and name = '${sessionFileName(uploadId)}' and trashed = false`;
   const listed = await (await drive(env, `${DRIVE_FILES}?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=2&supportsAllDrives=true&includeItemsFromAllDrives=true`)).json() as { files?: { id: string }[] };
-  const id = listed.files?.[0]?.id;
-  if (!id) return null;
-  return { id, session: await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`)).json() };
+  const found = listed.files || [];
+  if (!found.length) return null;
+  // One upload, one session file: a second same-named file means someone else wrote one.
+  if (found.length > 1) fail('MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT', 'Work media upload session is ambiguous');
+  const id = found[0].id;
+  const session = await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`)).json();
+  if (String(session?.uploadId) !== uploadId) fail('MEDIA_UPLOAD_SESSION_NOT_FOUND', 'Work media upload session was not found');
+  return { id, session };
+}
+
+/**
+ * The session file is stored in Drive, so its sessionUri is data, not something we created
+ * in this request. The Owner's token is only ever sent to Drive's own resumable endpoint.
+ */
+function trustedSessionUri(sessionUri: unknown): string {
+  let url: URL | null = null;
+  try { url = new URL(String(sessionUri)); } catch { url = null; }
+  const upload = new URL(DRIVE_UPLOAD);
+  if (!url || url.origin !== upload.origin || url.pathname !== upload.pathname || !url.searchParams.get('upload_id') || url.username || url.password)
+    fail('MEDIA_UPLOAD_SESSION_NOT_FOUND', 'Work media upload session was not found');
+  return url!.toString();
 }
 
 /**
@@ -276,7 +299,7 @@ export function mediaFileManifest(file: WorkMediaFile): Json {
 }
 
 async function uploadStatus(env: DirectMediaEnv, sessionUri: string, total: number): Promise<{ complete: boolean; received: number }> {
-  const response = await fetch(sessionUri, { method: 'PUT', headers: { Authorization: `Bearer ${env.ownerToken}`, 'Content-Range': `bytes */${total}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const response = await fetch(trustedSessionUri(sessionUri), { method: 'PUT', headers: { Authorization: `Bearer ${env.ownerToken}`, 'Content-Range': `bytes */${total}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (response.status === 200 || response.status === 201) return { complete: true, received: total };
   if (response.status === 308) {
     const range = response.headers.get('range');
@@ -329,6 +352,7 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
   });
   const sessionUri = started.headers.get('location');
   if (!sessionUri) fail('MEDIA_UPLOAD_DRIVE_FAILED', 'Drive did not open an upload session');
+  trustedSessionUri(sessionUri);
   const session = { uploadId: input.uploadId, mediaId: input.mediaId, workId: input.workId, ownerUserId, totalFileSize: input.totalFileSize, totalChunks: input.totalChunks,
     mimeType: input.mimeType, sha256: String(input.sha256).toLowerCase(), purpose: input.purpose, contextId: input.contextId || null, sortOrder: input.sortOrder,
     isCover: input.isCover, sessionUri, expiresAt: Date.now() + SESSION_TTL_MS };
@@ -357,7 +381,7 @@ export async function directMediaChunk(input: Json, ownerUserId: string, env: Di
   const status = await uploadStatus(env, session.sessionUri, total);
   if (status.complete || status.received >= start + bytes.length) return { uploadId: input.uploadId, chunkIndex: input.chunkIndex, stored: true, idempotent: true };
   if (status.received !== start) fail('MEDIA_UPLOAD_CHUNK_MISSING', 'An earlier Work media chunk is missing');
-  const response = await fetch(session.sessionUri, {
+  const response = await fetch(trustedSessionUri(session.sessionUri), {
     method: 'PUT', headers: { Authorization: `Bearer ${env.ownerToken}`, 'Content-Length': String(bytes.length), 'Content-Range': `bytes ${start}-${start + bytes.length - 1}/${total}` },
     body: bytes, signal: AbortSignal.timeout(TIMEOUT_MS)
   });

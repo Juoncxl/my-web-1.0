@@ -24,7 +24,7 @@ function fakeGoogle() {
       WorkCreatorMap: [['schemaVersion','workId','publicCreatorId'], [1, WORK, 'cxlc_' + 'a'.repeat(32)]]
     }
   };
-  type FakeFile = { name: string; parent: string; content?: unknown; bytes?: Buffer; mimeType?: string; props?: Record<string, string>; perms?: { id: string; type: string; role?: string }[]; trashed?: boolean; createdTime?: string };
+  type FakeFile = { name: string; parent: string; content?: unknown; bytes?: Buffer; mimeType?: string; props?: Record<string, string>; perms?: { id: string; type: string; role?: string }[]; trashed?: boolean; createdTime?: string; ownedByMe?: boolean };
   const sessions: Record<string, { meta: Record<string, any>; total: number; received: Buffer; fileId?: string }> = {};
   const files: Record<string, FakeFile> = {
     rec3: { name: `${WORK}__r3.json`, parent: 'privFolder', content: {
@@ -79,11 +79,12 @@ function fakeGoogle() {
     const describe = (id: string) => {
       const f = files[id];
       return { id, name: f.name, parents: [f.parent], size: String(f.bytes?.length ?? 0), mimeType: f.mimeType || 'application/json',
-        sha256Checksum: f.bytes ? createHash('sha256').update(f.bytes).digest('hex') : undefined, createdTime: f.createdTime || '2026-10-01T00:00:00.000Z', appProperties: f.props };
+        sha256Checksum: f.bytes ? createHash('sha256').update(f.bytes).digest('hex') : undefined, createdTime: f.createdTime || '2026-10-01T00:00:00.000Z', appProperties: f.props,
+        ownedByMe: f.ownedByMe !== false };
     };
     // Resumable upload sessions (media bytes).
-    if (url.hostname === 'upload.test') {
-      const session = sessions[url.pathname.split('/').pop()!];
+    if (url.pathname === '/upload/drive/v3/files' && url.searchParams.get('upload_id')) {
+      const session = sessions[url.searchParams.get('upload_id')!];
       const range = headers.get('content-range') || '';
       const status = () => session.received.length >= session.total
         ? new Response(JSON.stringify(describe(session.fileId!)), { status: 200 })
@@ -103,7 +104,7 @@ function fakeGoogle() {
       if (url.searchParams.get('uploadType') === 'resumable') {
         const sid = `s${nextId++}`;
         sessions[sid] = { meta: JSON.parse(String(init.body)), total: Number(headers.get('x-upload-content-length')), received: Buffer.alloc(0) };
-        return new Response('{}', { status: 200, headers: { Location: `https://upload.test/session/${sid}` } });
+        return new Response('{}', { status: 200, headers: { Location: `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=${sid}` } });
       }
       const body = String(init.body), parts = body.split(/--cxl-[^\r\n]+/).map(part => part.split('\r\n\r\n')[1]?.trim()).filter(Boolean);
       const meta = JSON.parse(parts[0]), content = JSON.parse(parts[1]);
@@ -134,6 +135,7 @@ function fakeGoogle() {
       const matches = Object.keys(files).filter(id => {
         const f = files[id];
         if (f.trashed) return false;
+        if (q.includes("'me' in owners") && f.ownedByMe === false) return false;
         if (prop) return props.some(p => f.props?.[p[1]] === p[2]);
         if (q.includes("name contains 'cxl-work-media-session-'")) return f.name.startsWith('cxl-work-media-session-');
         if (q.includes("name contains 'cxl-work-media-'")) return /^cxl-work-media-[a-f0-9-]{36}\./.test(f.name);
@@ -334,6 +336,68 @@ describe('direct Work update', () => {
     const r5 = Object.values(google.files).find(file => file.name === `${WORK}__r5.json` && file.parent === 'privFolder')!.content as Record<string, any>;
     expect(r5.mediaRecords.some((m: { id: string }) => m.id === mediaId)).toBe(false);
     expect(media.props?.cxlState).toBe('retired');
+  });
+
+  describe('upload storage trust', () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 7)]);
+    const sha256 = createHash('sha256').update(png).digest('hex');
+    const mediaId = '77777777-7777-4777-8777-777777777777', uploadId = '88888888-8888-4888-8888-888888888888';
+    const begin = { uploadId, mediaId, workId: WORK, totalFileSize: png.length, rawChunkSize: 2 * 1024 * 1024, totalChunks: 1, mimeType: 'image/png', sha256, purpose: 'gallery', contextId: null, sortOrder: 1, isCover: false };
+    const freshMedia = async () => { vi.resetModules(); return import('./cxlDirectMedia'); };
+    const sessionFile = (google: ReturnType<typeof fakeGoogle>) => Object.values(google.files).find(file => file.name === `cxl-work-media-session-${uploadId}.json`)!;
+
+    it('ignores media files shared by someone else when locating the upload folder', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      google.files.decoy = { name: 'cxl-work-media-00000000-0000-4000-8000-00000000000d.png', parent: 'strangerFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {}, ownedByMe: false };
+      google.files.seed = { name: 'cxl-work-media-00000000-0000-4000-8000-000000000000.png', parent: 'mediaFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {} };
+      const media = await freshMedia();
+      await media.directMediaBegin(begin, OWNER, google.env);
+      expect(sessionFile(google).parent).toBe('mediaFolder');
+    });
+
+    it('refuses to pick a folder when the only matching media belongs to someone else', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      google.files.decoy = { name: 'cxl-work-media-00000000-0000-4000-8000-00000000000d.png', parent: 'strangerFolder', bytes: Buffer.from('x'), mimeType: 'image/png', props: {}, ownedByMe: false };
+      const media = await freshMedia();
+      await expect(media.directMediaBegin(begin, OWNER, google.env)).rejects.toMatchObject({ code: 'MEDIA_UPLOAD_NOT_CONFIGURED' });
+    });
+
+    it('uses the configured media folder without searching Drive', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      const media = await freshMedia();
+      await media.directMediaBegin(begin, OWNER, { ...google.env, mediaFolderId: 'configuredFolder' });
+      expect(sessionFile(google).parent).toBe('configuredFolder');
+      expect(google.fetchMock.mock.calls.some(([url]) => String(url).includes(encodeURIComponent("name contains 'cxl-work-media-'")))).toBe(false);
+    });
+
+    it('never sends the Owner token to a session URI that is not Drive', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      const env = { ...google.env, mediaFolderId: 'mediaFolder' };
+      const media = await freshMedia();
+      await media.directMediaBegin(begin, OWNER, env);
+      const stored = sessionFile(google);
+      stored.content = { ...(stored.content as object), sessionUri: 'https://collector.invalid/upload/drive/v3/files?upload_id=x' };
+      await expect(media.directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, env)).rejects.toMatchObject({ code: 'MEDIA_UPLOAD_SESSION_NOT_FOUND' });
+      await expect(media.directMediaFinalize({ uploadId, mediaId }, OWNER, env)).rejects.toMatchObject({ code: 'MEDIA_UPLOAD_SESSION_NOT_FOUND' });
+      expect(google.fetchMock.mock.calls.some(([url]) => String(url).includes('collector.invalid'))).toBe(false);
+    });
+
+    it('rejects a duplicate or foreign upload session file', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      const env = { ...google.env, mediaFolderId: 'mediaFolder' };
+      const media = await freshMedia();
+      await media.directMediaBegin(begin, OWNER, env);
+      const stored = sessionFile(google);
+      google.files.foreignSession = { ...stored, ownedByMe: false };
+      await expect(media.directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, env)).resolves.toMatchObject({ stored: true });
+      google.files.duplicateSession = { ...stored };
+      await expect(media.directMediaFinalize({ uploadId, mediaId }, OWNER, env)).rejects.toMatchObject({ code: 'MEDIA_UPLOAD_IDEMPOTENCY_CONFLICT' });
+    });
   });
 
   it('finalizes an already-uploaded image on a retried save, and heals identical duplicate uploads', async () => {

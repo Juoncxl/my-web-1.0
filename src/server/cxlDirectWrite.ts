@@ -41,6 +41,8 @@ export interface DirectWriteEnv {
   publicSheetId: string;
   publicCreatorId: string;
   ownerFolderIds: () => Promise<string[]>;
+  /** Drive folder for private Work media (CXL_WORK_MEDIA_FOLDER_ID); found from Owner-owned media when unset. */
+  mediaFolderId?: string;
 }
 
 export type DirectUpdateResult = { fallback: true; reason: string } | { fallback: false; data: { data: Json; error: null } };

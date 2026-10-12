@@ -63,6 +63,8 @@ services:
         sync: false
       - key: CXL_INCOMING_FOLDER_ID
         sync: false
+      - key: CXL_WORK_MEDIA_FOLDER_ID
+        sync: false
       - key: CXL_GOOGLE_WORK_MEDIA_ENABLED
         sync: false
       - key: CXL_DIRECT_WRITES

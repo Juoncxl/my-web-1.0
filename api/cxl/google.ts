@@ -325,6 +325,7 @@ async function directWriteEnv(ownerUserId: string): Promise<DirectWriteEnv | nul
   return {
     ownerToken: await ownerDriveAccessToken(sealed, config),
     privateSheetId, publicSheetId, publicCreatorId: config.publicCreatorId,
+    mediaFolderId: process.env.CXL_WORK_MEDIA_FOLDER_ID?.trim() || undefined,
     ownerFolderIds: async () => (await directOwnerFolders(ownerUserId)).data.map(folder => String(folder.id))
   };
 }
