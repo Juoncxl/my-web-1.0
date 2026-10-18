@@ -11,9 +11,30 @@ import { API_ROUTES } from '../server/apiRoutes';
 import { SECURITY_HEADERS } from '../server/securityHeaders';
 import { setShareShellLoader } from '../api/cxl/share';
 import { runNodeHandler } from './nodeAdapter';
+import { setMediaObjectCache, type MediaObjectCache } from '../src/server/mediaObjectCache';
+
+interface R2Bucket {
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string } } | null>;
+  put(key: string, value: ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+}
 
 interface Env {
   ASSETS: { fetch(input: Request | URL | string, init?: RequestInit): Promise<Response> };
+  // R2 copy of Drive images (wrangler.jsonc r2_buckets); absent means Drive only.
+  MEDIA_BUCKET?: R2Bucket;
+}
+
+function r2MediaCache(bucket: R2Bucket): MediaObjectCache {
+  return {
+    async get(key) {
+      const object = await bucket.get(key);
+      if (!object) return null;
+      return { bytes: Buffer.from(await object.arrayBuffer()), mimeType: object.httpMetadata?.contentType || '' };
+    },
+    async put(key, bytes, mimeType) {
+      await bucket.put(key, bytes, { httpMetadata: { contentType: mimeType } });
+    }
+  };
 }
 
 function withSecurityHeaders(response: Response): Response {
@@ -44,6 +65,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    setMediaObjectCache(env.MEDIA_BUCKET ? r2MediaCache(env.MEDIA_BUCKET) : null);
     setShareShellLoader(async () => {
       const response = await env.ASSETS.fetch(new URL('/', request.url));
       if (!response.ok) throw new Error(`Shell HTTP ${response.status}`);

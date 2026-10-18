@@ -1,6 +1,7 @@
 import { createSign } from 'node:crypto';
 import { getOwnerAuthConfig } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, OWNER_DRIVE_CREDENTIAL_FILE, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
+import { driveMediaKey, mediaObjectCache } from '../../src/server/mediaObjectCache.js';
 
 /**
  * Direct, read-only Google Sheets/Drive access with a Service Account.
@@ -240,7 +241,26 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
   return downloadDriveImage(text(media.drive_file_id), text(media.mime_type));
 }
 
+/** A Drive image, served from the object store copy when there is one (see mediaObjectCache). */
 async function downloadDriveImage(fileId: string, declaredMimeType: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  const store = mediaObjectCache();
+  if (store) {
+    const stored = await store.get(driveMediaKey(fileId)).catch(() => null);
+    if (stored && stored.bytes.length && MEDIA_MIME_TYPES.has(stored.mimeType) && mediaSignatureMatches(stored.mimeType, stored.bytes)) {
+      console.info(JSON.stringify({ event: 'cxl_media_store', result: 'hit' }));
+      return stored;
+    }
+  }
+  const image = await downloadDriveImageFromDrive(fileId, declaredMimeType);
+  if (store) {
+    await store.put(driveMediaKey(fileId), image.bytes, image.mimeType)
+      .then(() => console.info(JSON.stringify({ event: 'cxl_media_store', result: 'stored' })))
+      .catch(error => console.info(JSON.stringify({ event: 'cxl_media_store', result: 'put_failed', reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown' })));
+  }
+  return image;
+}
+
+async function downloadDriveImageFromDrive(fileId: string, declaredMimeType: string): Promise<{ bytes: Buffer; mimeType: string }> {
   const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`);
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MEDIA_MAX_BYTES) throw new Error('Work media exceeds the size limit');

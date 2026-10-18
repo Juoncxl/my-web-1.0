@@ -78,6 +78,35 @@ describe('legacy Supabase images copied into Drive', () => {
     expect(calls.filter(url => url.includes('/drive/v3/files?q=')).length).toBe(1);
   });
 
+  it('stores a Drive image in the object store and serves the stored copy next time', async () => {
+    const calls = stubGoogle(
+      [{ id: MEDIA, storage_path: `user/${WORK}/${MEDIA}.jpg` }],
+      [{ id: 'legacyCopy', name: `${MEDIA}.jpg`, size: String(JPEG.length) }]
+    );
+    const stored = new Map<string, { bytes: Buffer; mimeType: string }>();
+    const { setMediaObjectCache } = await import('../../../src/server/mediaObjectCache');
+    setMediaObjectCache({ get: async key => stored.get(key) || null, put: async (key, bytes, mimeType) => { stored.set(key, { bytes, mimeType }); } });
+    const { directWorkMedia } = await import('../../../api/cxl/googleDirect');
+    expect((await directWorkMedia(WORK, `media:${MEDIA}`, 'owner', false))?.bytes.equals(JPEG)).toBe(true);
+    expect(stored.get('drive/legacyCopy')).toEqual({ bytes: JPEG, mimeType: 'image/jpeg' });
+    const driveDownloads = () => calls.filter(url => url.includes('/files/legacyCopy?alt=media')).length;
+    expect(driveDownloads()).toBe(1);
+    expect((await directWorkMedia(WORK, `media:${MEDIA}`, 'owner', false))?.bytes.equals(JPEG)).toBe(true);
+    expect(driveDownloads()).toBe(1);
+  });
+
+  it('falls back to Drive when the stored copy is unusable or the store fails', async () => {
+    const calls = stubGoogle(
+      [{ id: MEDIA, storage_path: `user/${WORK}/${MEDIA}.jpg` }],
+      [{ id: 'legacyCopy', name: `${MEDIA}.jpg`, size: String(JPEG.length) }]
+    );
+    const { setMediaObjectCache } = await import('../../../src/server/mediaObjectCache');
+    setMediaObjectCache({ get: async () => ({ bytes: Buffer.from('not an image'), mimeType: 'image/jpeg' }), put: async () => { throw new Error('R2 down'); } });
+    const { directWorkMedia } = await import('../../../api/cxl/googleDirect');
+    expect((await directWorkMedia(WORK, `media:${MEDIA}`, 'owner', false))?.bytes.equals(JPEG)).toBe(true);
+    expect(calls.filter(url => url.includes('/files/legacyCopy?alt=media')).length).toBe(1);
+  });
+
   it('does not serve an image the Work does not reference', async () => {
     const calls = stubGoogle([], [{ id: 'legacyCopy', name: 'other.jpg', size: '9' }]);
     const { directWorkMedia } = await import('../../../api/cxl/googleDirect');
