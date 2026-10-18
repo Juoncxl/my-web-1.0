@@ -4,6 +4,8 @@ import { loadSealedOwnerDriveCredential, OWNER_DRIVE_CREDENTIAL_FILE, ownerDrive
 import { driveMediaKey, mediaObjectCache } from '../../src/server/mediaObjectCache.js';
 import { isR2FileId, r2FindWorkMediaFiles, r2ReadMedia, mediaBucket } from '../../src/server/cxlR2Media.js';
 import { sourceText } from '../../src/server/cxlSourceStore.js';
+import { D1_PROJECTION_PREFIX, D1_RECORD_PREFIX, d1PrivateIndexRows, d1PublicRows, d1VirtualFile, importRecord, setWorkStoreMeta, storedRevisions, workStorePrimary } from '../../src/server/cxlWorkStore.js';
+import { d1CommitFields } from '../../src/server/cxlDirectWrite.js';
 
 /**
  * Direct, read-only Google Sheets/Drive access with a Service Account.
@@ -122,7 +124,19 @@ async function serviceAccountGet(url: string): Promise<globalThis.Response> {
 // Write verification must see Google itself, never a stored copy taken before the write.
 const readSource = (key: string, load: () => Promise<string>, fresh: boolean) => (fresh ? load() : sourceText(key, load));
 
+// Whether D1 holds the Works (checked at most every 30 s per instance).
+let primaryCheck: { value: boolean; until: number } | null = null;
+async function worksFromD1(): Promise<boolean> {
+  if (primaryCheck && primaryCheck.until > Date.now()) return primaryCheck.value;
+  const value = await workStorePrimary();
+  primaryCheck = { value, until: Date.now() + 30_000 };
+  return value;
+}
+export function forgetWorkStoreState(): void { primaryCheck = null; }
+
 async function privateIndexRows(fresh = false): Promise<Row[]> {
+  // `fresh` always means Google itself (write verification, the D1 importer).
+  if (!fresh && await worksFromD1()) return d1PrivateIndexRows();
   const cfg = config()!;
   // A1 notation without a sheet name targets the first sheet, matching sheet_() in Apps Script.
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cfg.privateSheetId)}/values/A:ZZ`
@@ -137,6 +151,11 @@ async function privateIndexRows(fresh = false): Promise<Row[]> {
 }
 
 async function driveJson(fileId: string, fresh = false): Promise<Row> {
+  if (fileId.startsWith(D1_RECORD_PREFIX) || fileId.startsWith(D1_PROJECTION_PREFIX)) {
+    const stored = await d1VirtualFile(fileId);
+    if (!stored) throw new Error('Work was not found');
+    return stored as Row;
+  }
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
   return JSON.parse(await readSource(`file:${fileId}`, async () => (await googleGet(url)).text(), fresh)) as Row;
 }
@@ -452,6 +471,14 @@ export function directPublicReadsEnabled(): boolean {
 }
 
 async function sheetRows(spreadsheetId: string, range: string): Promise<Row[]> {
+  if (spreadsheetId === process.env.CXL_PUBLIC_SHEET_ID?.trim() && await worksFromD1()) {
+    const publicRows = await d1PublicRows();
+    if (range === 'A:K') return publicRows;
+    if (range === 'WorkCreatorMap!A:ZZ') {
+      const creator = process.env.CXL_OWNER_PUBLIC_CREATOR_ID?.trim() || '';
+      return publicRows.map(row => ({ schemaVersion: 1, workId: row.id, publicCreatorId: creator }));
+    }
+  }
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`
     + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&majorDimension=ROWS';
   const body = JSON.parse(await sourceText(`sheet:${spreadsheetId}:${range}`, async () => (await googleGet(url)).text())) as { values?: unknown[][] };
@@ -676,6 +703,28 @@ export async function verifyOwnerWriteCommitted(action: string, args: unknown[])
   if (action === 'works.softDelete') return row && row.deleted_at ? { success: true, error: null } : null;
   if (action === 'works.restore') return row && !row.deleted_at ? { success: true, error: null } : null;
   return null;
+}
+
+/**
+ * Copies Works from Google into D1: any Work missing there or at an older revision. At most
+ * `limit` record files per call (Workers allow 50 outbound calls per request); call again
+ * until `remaining` is 0, which also marks the import complete.
+ */
+export async function importWorksToStore(limit = 25): Promise<{ imported: number; remaining: number; total: number }> {
+  const rows = (await privateIndexRows(true)).filter(row => text(row.id) && text(row.file_id));
+  const stored = await storedRevisions();
+  const todo = rows.filter(row => (stored.get(text(row.id)) ?? 0) < (Number(row.revision) || 1));
+  let imported = 0;
+  for (const row of todo.slice(0, limit)) {
+    const record = await driveJson(text(row.file_id), true);
+    if (text(((record.row || {}) as Row).id) !== text(row.id)) throw new Error(`Record file does not match Work ${text(row.id)}`);
+    await importRecord({ id: text(row.id), record, ...d1CommitFields(record) });
+    imported += 1;
+  }
+  const remaining = todo.length - imported;
+  if (!remaining) await setWorkStoreMeta('imported_at', new Date().toISOString());
+  forgetWorkStoreState();
+  return { imported, remaining, total: rows.length };
 }
 
 /**

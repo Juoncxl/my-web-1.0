@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
+import { cxlAssetFromRecord, d1CommitFields, DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, retryPendingMirrors, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
+import { d1WorkStore, importRecord, pendingMirrors, setWorkDb, workStoreStatus } from './cxlWorkStore';
+import { sqliteD1 } from './testing/sqliteD1';
 import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize, parseBatchResponse } from './cxlDirectMedia';
 import { setMediaBucket, type MediaBucket } from './cxlR2Media';
 import { sniffCreatorMediaType } from '../components/creator/creatorMediaModel';
@@ -335,6 +337,76 @@ describe('direct Work update', () => {
     const r5 = Object.values(google.files).find(file => file.name === `${WORK}__r5.json` && file.parent === 'privFolder')!.content as Record<string, any>;
     expect(r5.mediaRecords.some((m: { id: string }) => m.id === mediaId)).toBe(false);
     expect(media.props?.cxlState).toBe('retired');
+  });
+
+  describe('with D1 as the source of truth (Google is the backup)', () => {
+    afterEach(() => setWorkDb(null));
+    async function primed() {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      setWorkDb(sqliteD1());
+      // Import the Google state, as the store.import tool does before the switch is turned on.
+      const imported = JSON.parse(JSON.stringify(google.files.rec3.content));
+      await importRecord({ id: WORK, record: imported, ...d1CommitFields(imported) });
+      return { google, env: { ...google.env, store: d1WorkStore } as DirectWriteEnv };
+    }
+    const googleRecord = (google: ReturnType<typeof fakeGoogle>, revision: number) =>
+      Object.values(google.files).find(file => file.name === `${WORK}__r${revision}.json` && file.parent === 'privFolder')?.content as Record<string, any> | undefined;
+
+    it('commits an update to D1 first, then mirrors the same revision to Sheets/Drive', async () => {
+      const { google, env } = await primed();
+      const result = await directUpdateWork([WORK, { title: 'D1 title' }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, env);
+      expect(result).toMatchObject({ fallback: false, data: { data: { title: 'D1 title', revision: 4 } } });
+      const stored = await d1WorkStore.load(WORK);
+      expect(stored).toMatchObject({ revision: 4, row: { title: 'D1 title' }, lastWriteRequestId: REQUEST });
+      expect(googleRecord(google, 4)).toEqual(stored);
+      expect(google.sheets.priv[''][1][PRIVATE_HEADERS.indexOf('revision')]).toBe(4);
+      expect(google.sheets.pub[''][1][PUBLIC_HEADERS.indexOf('title')]).toBe('D1 title');
+      expect((await pendingMirrors(5)).works).toEqual([]);
+      // A retried request is answered from D1 without writing again.
+      await expect(directUpdateWork([WORK, { title: 'D1 title' }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, env)).resolves.toMatchObject({ data: { data: { revision: 4 } } });
+      await expect(directUpdateWork([WORK, { title: 'Late' }, { requestId: '22222222-2222-4222-8222-222222222222', expectedRevision: 3 }], OWNER, env)).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
+      expect((await d1WorkStore.load(WORK)).revision).toBe(4);
+    });
+
+    it('keeps the save when the backup fails, and catches the backup up later', async () => {
+      const { google, env } = await primed();
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/upload/drive/')) throw new Error('Google is offline');
+        return google.fetchMock(input as string, init);
+      });
+      await expect(directUpdateWork([WORK, { title: 'Offline save' }, { requestId: REQUEST, expectedRevision: 3 }], OWNER, env)).resolves.toMatchObject({ fallback: false });
+      expect((await d1WorkStore.load(WORK)).row.title).toBe('Offline save');
+      expect(googleRecord(google, 4)).toBeUndefined();
+      expect((await workStoreStatus()).mirrorPending).toBe(1);
+
+      vi.stubGlobal('fetch', google.fetchMock);
+      await expect(retryPendingMirrors(google.env, d1WorkStore, OWNER, await pendingMirrors(5))).resolves.toEqual({ mirrored: 1, failed: 0 });
+      expect(googleRecord(google, 4)).toMatchObject({ row: { title: 'Offline save' } });
+      expect(google.sheets.priv[''][1][PRIVATE_HEADERS.indexOf('revision')]).toBe(4);
+      expect((await workStoreStatus()).mirrorPending).toBe(0);
+    });
+
+    it('creates, trashes and permanently deletes in D1, mirroring each step to Google', async () => {
+      const { google, env } = await primed();
+      const input = { title: 'ใหม่ใน D1', category: 'prompts', status: 'draft', visibility: 'private', content: 'x', userId: OWNER };
+      await expect(directCreateWork([input, { requestId: REQUEST }], OWNER, env)).resolves.toMatchObject({ fallback: false });
+      const id = `asset_${REQUEST.replace(/-/g, '')}`;
+      expect(await d1WorkStore.load(id)).toMatchObject({ revision: 1, createRequestId: REQUEST });
+      expect(google.sheets.priv[''].some(values => values[0] === id)).toBe(true);
+      await expect(directCreateWork([input, { requestId: REQUEST }], OWNER, env)).resolves.toMatchObject({ data: { data: { id } } });
+
+      await expect(directPermanentDelete(id, OWNER, env)).rejects.toMatchObject({ code: 'WORK_NOT_IN_TRASH' });
+      await directSetTrash('works.softDelete', id, OWNER, env);
+      expect((await d1WorkStore.load(id)).row.deleted_at).toBeTruthy();
+      const row = google.sheets.priv[''].find(values => values[0] === id)!;
+      expect(row[PRIVATE_HEADERS.indexOf('deleted_at')]).toBeTruthy();
+
+      await expect(directPermanentDelete(id, OWNER, env)).resolves.toMatchObject({ data: { success: true, alreadyMissing: false } });
+      expect(await d1WorkStore.load(id)).toBeNull();
+      expect(google.sheets.priv[''].some(values => values[0] === id)).toBe(false);
+      expect((await pendingMirrors(5)).deletions).toEqual([]);
+    });
   });
 
   describe('with uploads going to R2 (CXL_MEDIA_UPLOAD_BACKEND=r2)', () => {

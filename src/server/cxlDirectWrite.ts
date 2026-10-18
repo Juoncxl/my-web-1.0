@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
 import { findWorkMediaFiles, patchDriveFiles, setLegacyMediaSharingMany, trashDriveFiles, type WorkMediaFile } from './cxlDirectMedia.js';
+import { D1_PROJECTION_PREFIX, D1_RECORD_PREFIX, type WorkStore } from './cxlWorkStore.js';
 
 /**
  * Direct Work update (step 3.1 of the Apps Script → Google API migration).
@@ -41,6 +42,8 @@ export interface DirectWriteEnv {
   publicSheetId: string;
   publicCreatorId: string;
   ownerFolderIds: () => Promise<string[]>;
+  /** Set when D1 is the source of truth: writes commit there, then mirror to Sheets/Drive. */
+  store?: WorkStore;
 }
 
 export type DirectUpdateResult = { fallback: true; reason: string } | { fallback: false; data: { data: Json; error: null } };
@@ -381,24 +384,34 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   const requestId = String(options.requestId).toLowerCase();
   const fingerprint = writeFingerprint('update', { id, updates, expectedRevision: options.expectedRevision });
 
-  // Private index row + canonical record.
-  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
-  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
-  const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
-  if (rowNumbers.length !== 1) return rowNumbers.length ? fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows') : fail('WORK_NOT_FOUND', 'Work was not found for this Owner');
-  const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
-  const previousFileId = String(indexed.file_id || '');
-  if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
-  const record = await driveJson(env, previousFileId);
+  // Private index row + canonical record (from D1 when it is the source of truth).
+  const store = env.store;
+  let privateHeaders: string[] = [], rowNumbers: number[] = [], previousFileId = '';
+  let record: Json, indexedRevision: number;
+  if (store) {
+    record = await store.load(id);
+    if (!record) fail('WORK_NOT_FOUND', 'Work was not found for this Owner');
+    indexedRevision = Number(record.revision) || 1;
+  } else {
+    privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+    if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+    rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+    if (rowNumbers.length !== 1) return rowNumbers.length ? fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows') : fail('WORK_NOT_FOUND', 'Work was not found for this Owner');
+    const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+    previousFileId = String(indexed.file_id || '');
+    if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
+    record = await driveJson(env, previousFileId);
+    indexedRevision = Number(indexed.revision) || 1;
+  }
   if (record.lastWriteRequestId === requestId) {
     // Retried request that already committed (Apps Script's idempotent path): answer it again.
     if (record.lastWriteFingerprint !== fingerprint) fail('IDEMPOTENCY_KEY_REUSED', 'Update requestId was already used with different Work data');
-    if (isPublicRow(record.row || {})) await publishWork(env, record).catch(error => { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); });
+    if (!store && isPublicRow(record.row || {})) await publishWork(env, record).catch(error => { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); });
     return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
   }
 
   if (!Number.isInteger(Number(options.expectedRevision)) || Number(options.expectedRevision) < 1) fail('REVISION_REQUIRED', 'Expected revision is required for update');
-  if (Number(options.expectedRevision) !== (Number(record.revision) || 1) || (Number(record.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work revision is stale; reload before saving');
+  if (Number(options.expectedRevision) !== (Number(record.revision) || 1) || (Number(record.revision) || 1) !== indexedRevision) fail('REVISION_CONFLICT', 'Work revision is stale; reload before saving');
   const existingAsset = cxlAssetFromRecord(record);
   if (String(existingAsset.userId || '') !== ownerUserId && String(record.row?.user_id || '') !== ownerUserId) fail('WORK_NOT_OWNED', 'Work is not owned by this authenticated Owner');
   const canonicalOwner = String(record.row?.user_id || record.cxlAsset?.userId || '');
@@ -436,9 +449,14 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   applyRowInput(record, asset);
   const r = record.row;
   if (r.collaboration_asset_id) {
-    const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', String(r.collaboration_asset_id));
-    const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
-    if (!linked || linked.category !== 'collab' || linked.id === r.id) fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+    const linkedId = String(r.collaboration_asset_id);
+    if (store) {
+      if (linkedId === r.id || (await store.category(linkedId)) !== 'collab') fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+    } else {
+      const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', linkedId);
+      const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
+      if (!linked || linked.category !== 'collab' || linked.id === r.id) fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+    }
   }
   r.is_public = r.visibility === 'public'; r.updated_at = now;
   record.collaborationDraft = asset.category === 'collab' ? (asset.collaboration || null) : null;
@@ -447,6 +465,18 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   const retiredMediaIds = await settleRecordMedia(record, previousMediaIds, env, new Set(previousMediaRecords.map((m: Json) => String(m.id))));
   record.revision = (Number(record.revision) || 1) + 1;
   const nowPublic = isPublicRow(r);
+
+  if (store) {
+    // D1 commit point (guarded by the revision), then media state, then the Sheets/Drive backup.
+    await commitToStore(store, record, indexedRevision);
+    try {
+      await markMediaAfterCommit(env, attachedMedia, retiredMediaIds, previousMediaRecords, id, record.revision);
+    } catch (error) {
+      throw new DirectWriteError(error instanceof Error ? error.message : 'Media state update failed', 'PUBLIC_SYNC_PENDING', true);
+    }
+    await mirrorAfterCommit(env, store, record);
+    return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
+  }
   const privateFolderId = await driveParent(env, previousFileId);
 
   // 1) canonical revision, 2) search chunks, 3) private index (commit point).
@@ -456,7 +486,7 @@ export async function directUpdateWork(args: unknown[], ownerUserId: string, env
   const searchHeaders = await appendSearchChunks(env, id, artifacts);
   // Re-check the revision right before the commit point (Apps Script may have written meanwhile).
   const latest = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
-  if (String(latest.id) !== id || (Number(latest.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work revision changed before save; reload before saving');
+  if (String(latest.id) !== id || (Number(latest.revision) || 1) !== indexedRevision) fail('REVISION_CONFLICT', 'Work revision changed before save; reload before saving');
   await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [privateIndexValues(privateHeaders, metadata, latest)]);
 
   // After the commit point: media state, public projection, stale search cleanup.
@@ -701,6 +731,93 @@ function applyRowInput(record: Json, asset: Json): void {
   if (r.category === 'collab') r.collaboration_asset_id = null;
 }
 
+// ------------------------------------------------- D1 primary + Google mirror
+
+/** The private index fields and public row/projection a D1 row keeps for this record. */
+export function d1CommitFields(record: Json): { indexMeta: Row; publicRow: Row | null; publicProjection: Json | null } {
+  const id = String(record.row.id);
+  const indexMeta = privateMeta(record, `${D1_RECORD_PREFIX}${id}`, ownerSearchArtifacts(cxlAssetFromRecord(record)));
+  if (!isPublicRow(record.row)) return { indexMeta, publicRow: null, publicProjection: null };
+  const pub = projection(record);
+  const publicRow: Row = { id: pub.id, title: pub.title, category: pub.category, status: pub.status, updated_at: pub.updated_at, tags: JSON.stringify(pub.tags),
+    short_description: pub.short_description || '', file_id: `${D1_PROJECTION_PREFIX}${id}`, active: 'true', cover_ref: pub.preview_image || '', summary_json: publicSummaryJson(pub) };
+  return { indexMeta, publicRow, publicProjection: pub };
+}
+
+async function commitToStore(store: WorkStore, record: Json, expectedRevision: number | null): Promise<void> {
+  await store.commit({ id: String(record.row.id), record, expectedRevision, ...d1CommitFields(record) });
+}
+
+/**
+ * Writes a D1 record to Sheets/Drive as the backup copy, whatever revision Google holds:
+ * revision file, search chunks, private index row (updated or appended), public row.
+ */
+export async function mirrorRecordToGoogle(env: DirectWriteEnv, record: Json): Promise<void> {
+  const id = String(record.row.id);
+  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) fail('SHEET_SCHEMA_INVALID', 'Private Index headers are unexpected');
+  const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+  if (rowNumbers.length > 1) fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows');
+  const existing = rowNumbers.length ? await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]) : null;
+  const folderId = existing?.file_id ? await driveParent(env, String(existing.file_id)) : await folderOfIndexedFiles(env, env.privateSheetId, privateHeaders);
+  if (!folderId) fail('PRIVATE_FOLDER_UNKNOWN', 'Private Work folder is unknown');
+  const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
+  const metadata = privateMeta(record, '', artifacts);
+  metadata.file_id = await putJsonRevision(env, folderId!, `${id}__r${record.revision}.json`, record);
+  const searchHeaders = await appendSearchChunks(env, id, artifacts);
+  if (rowNumbers.length) await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [privateIndexValues(privateHeaders, metadata, existing)]);
+  else await appendRows(env, env.privateSheetId, '', [privateIndexValues(privateHeaders, metadata, null)]);
+  if (isPublicRow(record.row)) await publishWork(env, record);
+  else await deactivatePublicWork(env, id);
+  await removeStaleSearchChunks(env, id, artifacts.token, searchHeaders);
+}
+
+/** Mirror after a D1 commit. A failure is recorded for a later retry; the save itself stands. */
+async function mirrorAfterCommit(env: DirectWriteEnv, store: WorkStore, record: Json): Promise<void> {
+  const googleOnly: DirectWriteEnv = { ...env, store: undefined };
+  try {
+    await mirrorRecordToGoogle(googleOnly, record);
+    await store.markMirrored(String(record.row.id), Number(record.revision), null);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Mirror failed';
+    console.info(JSON.stringify({ event: 'cxl_d1_mirror_failed', id: String(record.row.id), revision: record.revision, reason: reason.slice(0, 160) }));
+    await store.markMirrored(String(record.row.id), Number(record.revision), reason).catch(() => undefined);
+  }
+}
+
+/** Mirror a D1 permanent delete: bring Google's copy to the trashed record, then delete it there too. */
+async function mirrorDeleteAfterCommit(env: DirectWriteEnv, store: WorkStore, record: Json | null, workId: string, ownerUserId: string): Promise<void> {
+  const googleOnly: DirectWriteEnv = { ...env, store: undefined };
+  try {
+    if (record) await mirrorRecordToGoogle(googleOnly, record);
+    await directPermanentDelete(workId, ownerUserId, googleOnly);
+    await store.markDeleteMirrored(workId, null);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Mirror failed';
+    console.info(JSON.stringify({ event: 'cxl_d1_delete_mirror_failed', id: workId, reason: reason.slice(0, 160) }));
+    await store.markDeleteMirrored(workId, reason).catch(() => undefined);
+  }
+}
+
+/** Retry backups that fell behind (called after saves and from the Owner tool). */
+export async function retryPendingMirrors(env: DirectWriteEnv, store: WorkStore, ownerUserId: string, pending: { works: Json[]; deletions: { id: string; record: Json | null }[] }): Promise<{ mirrored: number; failed: number }> {
+  let mirrored = 0, failed = 0;
+  const googleOnly: DirectWriteEnv = { ...env, store: undefined };
+  for (const record of pending.works) {
+    try { await mirrorRecordToGoogle(googleOnly, record); await store.markMirrored(String(record.row.id), Number(record.revision), null); mirrored += 1; }
+    catch (error) { failed += 1; await store.markMirrored(String(record.row.id), Number(record.revision), error instanceof Error ? error.message : 'Mirror failed').catch(() => undefined); }
+  }
+  for (const { id, record } of pending.deletions) {
+    try {
+      if (record) await mirrorRecordToGoogle(googleOnly, record);
+      await directPermanentDelete(id, ownerUserId, googleOnly);
+      await store.markDeleteMirrored(id, null);
+      mirrored += 1;
+    } catch (error) { failed += 1; await store.markDeleteMirrored(id, error instanceof Error ? error.message : 'Mirror failed').catch(() => undefined); }
+  }
+  return { mirrored, failed };
+}
+
 // ------------------------------------------------------------------ create
 
 /**
@@ -719,18 +836,24 @@ export async function directCreateWork(args: unknown[], ownerUserId: string, env
   const id = `asset_${requestId.replace(/-/g, '')}`;
   const fingerprint = writeFingerprint('create', assetInput);
 
-  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
-  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+  const store = env.store;
+  let privateHeaders: string[] = [];
   // A retried create (same requestId) that already committed is answered again, like Apps Script.
-  const retried = await findRows(env, env.privateSheetId, '', privateHeaders, 'create_request_id', requestId);
-  if (retried.length) {
-    const row = await readRow(env, env.privateSheetId, '', privateHeaders, retried[0]);
-    const existing = await driveJson(env, String(row.file_id));
+  let existing: Json = null;
+  if (store) {
+    existing = await store.findByCreateRequest(requestId);
+  } else {
+    privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+    if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+    const retried = await findRows(env, env.privateSheetId, '', privateHeaders, 'create_request_id', requestId);
+    if (retried.length) existing = await driveJson(env, String((await readRow(env, env.privateSheetId, '', privateHeaders, retried[0])).file_id));
+  }
+  if (existing) {
     if (existing.createRequestId !== requestId || existing.lastWriteFingerprint !== fingerprint) fail('IDEMPOTENCY_KEY_REUSED', 'Create requestId was already used with different Work data');
-    if (isPublicRow(existing.row || {})) await publishWork(env, existing).catch(error => { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); });
+    if (!store && isPublicRow(existing.row || {})) await publishWork(env, existing).catch(error => { throw new DirectWriteError(error instanceof Error ? error.message : 'Public projection failed', 'PUBLIC_SYNC_PENDING', true); });
     return { fallback: false, data: { data: cxlAssetFromRecord(existing), error: null } };
   }
-  if ((await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id)).length) fail('IDEMPOTENCY_KEY_REUSED', 'Create requestId conflicts with an existing Work');
+  if (store ? await store.exists(id) : (await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id)).length) fail('IDEMPOTENCY_KEY_REUSED', 'Create requestId conflicts with an existing Work');
 
   const now = new Date().toISOString();
   const asset: Json = clone(assetInput);
@@ -746,9 +869,14 @@ export async function directCreateWork(args: unknown[], ownerUserId: string, env
   applyRowInput(record, asset);
   const r = record.row;
   if (r.collaboration_asset_id) {
-    const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', String(r.collaboration_asset_id));
-    const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
-    if (!linked || linked.category !== 'collab') fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+    const linkedId = String(r.collaboration_asset_id);
+    if (store) {
+      if ((await store.category(linkedId)) !== 'collab') fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+    } else {
+      const linkedRows = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', linkedId);
+      const linked = linkedRows.length === 1 ? await readRow(env, env.privateSheetId, '', privateHeaders, linkedRows[0]) : null;
+      if (!linked || linked.category !== 'collab') fail('INVALID_WORK', 'คอลแลปที่เชื่อมไม่ถูกต้อง');
+    }
   }
   r.is_public = r.visibility === 'public'; r.updated_at = now;
   record.collaborationDraft = asset.category === 'collab' ? (asset.collaboration || null) : null;
@@ -758,6 +886,16 @@ export async function directCreateWork(args: unknown[], ownerUserId: string, env
   await settleRecordMedia(record, new Set(), env);
   record.revision = 1;
 
+  if (store) {
+    await commitToStore(store, record, null);
+    try {
+      await markMediaAfterCommit(env, attachedMedia, [], [], id, record.revision);
+    } catch (error) {
+      throw new DirectWriteError(error instanceof Error ? error.message : 'Media state update failed', 'PUBLIC_SYNC_PENDING', true);
+    }
+    await mirrorAfterCommit(env, store, record);
+    return { fallback: false, data: { data: cxlAssetFromRecord(record), error: null } };
+  }
   const privateFolderId = await folderOfIndexedFiles(env, env.privateSheetId, privateHeaders);
   if (!privateFolderId) return { fallback: true, reason: 'private_folder_unknown' };
   const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
@@ -781,14 +919,24 @@ export async function directCreateWork(args: unknown[], ownerUserId: string, env
 export async function directSetTrash(action: 'works.softDelete' | 'works.restore', workId: unknown, ownerUserId: string, env: DirectWriteEnv): Promise<{ fallback: true; reason: string } | { fallback: false; data: { success: true; error: null } }> {
   const id = String(workId || '');
   if (!/^asset_[A-Za-z0-9_-]{1,96}$/.test(id)) fail('INVALID_WORK', 'Work ID is invalid');
-  const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
-  if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
-  const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
-  if (rowNumbers.length !== 1) return rowNumbers.length ? fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows') : fail('WORK_NOT_FOUND', 'Work was not found');
-  const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
-  const previousFileId = String(indexed.file_id || '');
-  if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
-  const record = await driveJson(env, previousFileId);
+  const store = env.store;
+  let privateHeaders: string[] = [], rowNumbers: number[] = [], previousFileId = '';
+  let record: Json, indexedRevision: number;
+  if (store) {
+    record = await store.load(id);
+    if (!record) fail('WORK_NOT_FOUND', 'Work was not found');
+    indexedRevision = Number(record.revision) || 1;
+  } else {
+    privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
+    if (PRIVATE_HEADERS.some(header => !privateHeaders.includes(header))) return { fallback: true, reason: 'private_headers' };
+    rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
+    if (rowNumbers.length !== 1) return rowNumbers.length ? fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows') : fail('WORK_NOT_FOUND', 'Work was not found');
+    const indexed = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
+    previousFileId = String(indexed.file_id || '');
+    if (!previousFileId) return { fallback: true, reason: 'no_record_file' };
+    record = await driveJson(env, previousFileId);
+    indexedRevision = Number(indexed.revision) || 1;
+  }
   const asset = cxlAssetFromRecord(record);
   if (String(record.row?.user_id || asset.userId || '') !== ownerUserId) fail('WORK_NOT_OWNED', 'Work is not owned by this authenticated Owner');
   if (String(record.row?.id) !== id) fail('WORK_NOT_FOUND', 'Work was not found');
@@ -801,13 +949,18 @@ export async function directSetTrash(action: 'works.softDelete' | 'works.restore
   record.row.updated_at = now; record.revision = (Number(record.revision) || 0) + 1;
   record.cxlAsset = Object.assign({}, asset, { deletedAt: record.row.deleted_at || null, updatedAt: now, revision: record.revision });
 
+  if (store) {
+    await commitToStore(store, record, indexedRevision);
+    await mirrorAfterCommit(env, store, record);
+    return { fallback: false, data: { success: true, error: null } };
+  }
   const privateFolderId = await driveParent(env, previousFileId);
   const artifacts = ownerSearchArtifacts(cxlAssetFromRecord(record));
   const searchHeaders = await appendSearchChunks(env, id, artifacts);
   const metadata = privateMeta(record, '', artifacts);
   metadata.file_id = await putJsonRevision(env, privateFolderId, `${id}__r${record.revision}.json`, record);
   const latest = await readRow(env, env.privateSheetId, '', privateHeaders, rowNumbers[0]);
-  if (String(latest.id) !== id || (Number(latest.revision) || 1) !== (Number(indexed.revision) || 1)) fail('REVISION_CONFLICT', 'Work changed before this update; reload and try again');
+  if (String(latest.id) !== id || (Number(latest.revision) || 1) !== indexedRevision) fail('REVISION_CONFLICT', 'Work changed before this update; reload and try again');
   await writeRange(env, env.privateSheetId, `A${rowNumbers[0]}:${columnLetter(privateHeaders.length - 1)}${rowNumbers[0]}`, [privateIndexValues(privateHeaders, metadata, latest)]);
 
   try {
@@ -855,6 +1008,25 @@ async function trashRevisionFiles(env: DirectWriteEnv, folderId: string | null, 
 export async function directPermanentDelete(workId: unknown, ownerUserId: string, env: DirectWriteEnv): Promise<{ fallback: false; data: { success: true; error: null; alreadyMissing: boolean } }> {
   const id = String(workId || '');
   if (!/^asset_[A-Za-z0-9_-]{1,96}$/.test(id)) fail('INVALID_WORK', 'Work ID is invalid');
+  if (env.store) {
+    const store = env.store;
+    const record = await store.load(id);
+    if (!record) return { fallback: false, data: { success: true, error: null, alreadyMissing: true } };
+    const asset = cxlAssetFromRecord(record);
+    if (String(record.row?.user_id || asset.userId || '') !== ownerUserId) fail('WORK_NOT_OWNED', 'Work is not owned by this authenticated Owner');
+    if (String(record.row?.id) !== id) fail('WORK_NOT_FOUND', 'Work was not found');
+    if (!record.row.deleted_at) fail('WORK_NOT_IN_TRASH', 'Move the Work to Trash before permanent deletion');
+    await store.remove(id, record);
+    try {
+      await trashDriveFiles(env, (record.mediaRecords || [])
+        .filter((media: Json) => media?.delivery === 'vercel_proxy' && media.drive_file_id && String(media.asset_id || id) === id)
+        .map((media: Json) => String(media.drive_file_id)));
+    } catch (error) {
+      throw new DirectWriteError(error instanceof Error ? error.message : 'Permanent delete cleanup failed', 'PUBLIC_SYNC_PENDING', true);
+    }
+    await mirrorDeleteAfterCommit(env, store, record, id, ownerUserId);
+    return { fallback: false, data: { success: true, error: null, alreadyMissing: false } };
+  }
   const privateHeaders = await sheetHeaders(env, env.privateSheetId, '');
   const rowNumbers = await findRows(env, env.privateSheetId, '', privateHeaders, 'id', id);
   if (rowNumbers.length > 1) fail('INDEX_ROW_AMBIGUOUS', 'Private Index contains duplicate Work rows');

@@ -18,6 +18,8 @@
   "r2_buckets": [{ "binding": "MEDIA_BUCKET", "bucket_name": "cxl-media" }],
   // Copies of the Sheets/Drive sources the API reads (src/server/cxlSourceStore.ts).
   "d1_databases": [{ "binding": "DATA_DB", "database_name": "cxl-data", "database_id": "feaa5c0a-64ce-47a1-884a-c7a8ae5d3013" }],
+  // Hourly: retry Sheets/Drive backups that fell behind D1 (worker/index.ts scheduled).
+  "triggers": { "crons": ["23 * * * *"] },
   // Branch and pull request builds run `wrangler preview`, which needs this block.
   "previews": {},
   // Keep the dashboard's variables and secrets on deploy (they are not listed here).

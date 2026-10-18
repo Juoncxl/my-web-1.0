@@ -14,6 +14,8 @@ import { runNodeHandler } from './nodeAdapter';
 import { setMediaObjectCache, type MediaObjectCache } from '../src/server/mediaObjectCache';
 import { setMediaBucket, type MediaBucket } from '../src/server/cxlR2Media';
 import { setSourceDb, type D1Like } from '../src/server/cxlSourceStore';
+import { setWorkDb } from '../src/server/cxlWorkStore';
+import { retryWorkStoreMirrors } from '../api/cxl/google';
 
 interface R2Bucket {
   get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string } } | null>;
@@ -62,6 +64,11 @@ function r2MediaCache(bucket: R2Bucket): MediaObjectCache {
   };
 }
 
+function bindStores(env: Env): void {
+  setSourceDb(env.DATA_DB || null);
+  setWorkDb(env.DATA_DB || null);
+}
+
 function withSecurityHeaders(response: Response): Response {
   const secured = new Response(response.body, response);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) secured.headers.set(name, value);
@@ -92,7 +99,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     setMediaObjectCache(env.MEDIA_BUCKET ? r2MediaCache(env.MEDIA_BUCKET) : null);
     setMediaBucket(env.MEDIA_BUCKET ? r2WorkMediaBucket(env.MEDIA_BUCKET) : null);
-    setSourceDb(env.DATA_DB || null);
+    bindStores(env);
     setShareShellLoader(async () => {
       const response = await env.ASSETS.fetch(new URL('/', request.url));
       if (!response.ok) throw new Error(`Shell HTTP ${response.status}`);
@@ -103,6 +110,17 @@ export default {
     } catch (error) {
       console.error(JSON.stringify({ event: 'cxl_worker_error', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }));
       return withSecurityHeaders(text(500, 'Server error'));
+    }
+  },
+
+  /** Hourly cron (wrangler.jsonc triggers): catch up Sheets/Drive backups that fell behind D1. */
+  async scheduled(_controller: unknown, env: Env): Promise<void> {
+    setMediaBucket(env.MEDIA_BUCKET ? r2WorkMediaBucket(env.MEDIA_BUCKET) : null);
+    bindStores(env);
+    try {
+      await retryWorkStoreMirrors(3);
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'cxl_scheduled_failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }));
     }
   }
 };

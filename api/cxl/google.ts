@@ -2,11 +2,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
 import { randomUUID } from 'node:crypto';
-import { directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, rewriteLegacyProfileImageUrls, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { importWorksToStore, directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, rewriteLegacyProfileImageUrls, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
-import { DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
+import { DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, retryPendingMirrors, type DirectWriteEnv } from '../../src/server/cxlDirectWrite.js';
+import { d1WorkStore, pendingMirrors, workStorePrimary, workStoreStatus } from '../../src/server/cxlWorkStore.js';
 import { clientIp, PUBLIC_API_RATE_LIMIT, rateLimitRetryAfter } from '../../src/server/rateLimit.js';
 import { publicErrorMessage, RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
@@ -21,7 +22,9 @@ const MEDIA_CLEANUP_ACTION = 'media.cleanup';
 const MEDIA_REPAIR_ACTION = 'media.work.repairDeliveryChunks';
 const WORK_DELETE_ACTIONS = new Set(['works.softDelete','works.restore','works.permanentDelete']);
 const FOLDER_WRITE_ACTIONS = new Set(['folders.create','folders.update','folders.delete']);
-const OWNER_ACTIONS = new Set(['works.create','works.update', ...WORK_DELETE_ACTIONS, 'folders.fetch', ...FOLDER_WRITE_ACTIONS,'public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION]);
+// Owner tools for D1 as the Works store: import from Google, retry backups, status.
+const WORK_STORE_ACTIONS = new Set(['store.import', 'store.mirror', 'store.status']);
+const OWNER_ACTIONS = new Set(['works.create','works.update', ...WORK_DELETE_ACTIONS, 'folders.fetch', ...FOLDER_WRITE_ACTIONS,'public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION, ...WORK_STORE_ACTIONS]);
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update', ...WORK_DELETE_ACTIONS]);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
@@ -303,7 +306,7 @@ function validOwnerActionArgs(action: string, args: unknown[], ownerId: string, 
   if (action === 'works.softDelete' || action === 'works.restore' || action === 'works.permanentDelete') {
     return args.length === 1 && typeof args[0] === 'string' && /^asset_[A-Za-z0-9_-]{1,96}$/.test(args[0]);
   }
-  if (action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) return args.length === 0;
+  if (action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION || WORK_STORE_ACTIONS.has(action)) return args.length === 0;
   if (MEDIA_UPLOAD_ACTIONS.has(action)) return validMediaUploadArgs(action, args);
   return false;
 }
@@ -327,8 +330,21 @@ async function directWriteEnv(ownerUserId: string): Promise<DirectWriteEnv | nul
   return {
     ownerToken: await ownerDriveAccessToken(sealed, config),
     privateSheetId, publicSheetId, publicCreatorId: config.publicCreatorId,
-    ownerFolderIds: async () => (await directOwnerFolders(ownerUserId)).data.map(folder => String(folder.id))
+    ownerFolderIds: async () => (await directOwnerFolders(ownerUserId)).data.map(folder => String(folder.id)),
+    // D1 is the source of truth once switched on and imported; writes then mirror to Google.
+    ...(await workStorePrimary() ? { store: d1WorkStore } : {})
   };
+}
+
+/** Hourly (Cloudflare cron): retry Sheets/Drive backups that fell behind D1. */
+export async function retryWorkStoreMirrors(limit = 3): Promise<{ mirrored: number; failed: number } | null> {
+  const ownerUserId = process.env.CXL_OWNER_USER_ID?.trim() || '';
+  if (!ownerUserId || !await workStorePrimary()) return null;
+  const env = await directWriteEnv(ownerUserId);
+  if (!env?.store) return null;
+  const result = await retryPendingMirrors(env, env.store, ownerUserId, await pendingMirrors(limit));
+  console.info(JSON.stringify({ event: 'cxl_d1_mirror_retry', ...result }));
+  return result;
 }
 
 let lastMediaCleanupAt = 0;
@@ -504,9 +520,21 @@ async function handleRequest(req: Request, res: Response) {
     if (authMode === 'supabase' && authenticatedOwnerId !== ownerUserId) return send(res, 403, { ok: false, error: 'Authenticated user is not the configured Owner' });
     if (!validOwnerActionArgs(action, body.args, authenticatedOwnerId, authMode))
       return send(res, 400, { ok: false, error: `Invalid ${action} request` });
-    if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action) || FOLDER_WRITE_ACTIONS.has(action) || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION) && authMode === 'vercel'
+    if ((action === 'works.create' || action === 'works.update' || WORK_DELETE_ACTIONS.has(action) || FOLDER_WRITE_ACTIONS.has(action) || action === 'public.snapshot.rebuild' || MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || action === MEDIA_REPAIR_ACTION || WORK_STORE_ACTIONS.has(action)) && authMode === 'vercel'
       && !verifyCsrfRequest(req.headers.origin, process.env.CXL_OWNER_APP_ORIGIN?.trim() || '', req.headers.cookie, req.headers['x-cxl-csrf'] as string | undefined)) {
       return send(res, 403, { ok: false, error: 'Request origin or CSRF token is invalid' });
+    }
+    if (WORK_STORE_ACTIONS.has(action)) {
+      if (authMode !== 'vercel') return send(res, 403, { ok: false, error: 'Owner session authentication is required' });
+      try {
+        if (action === 'store.status') return send(res, 200, { ok: true, data: { ...(await workStoreStatus()), primary: await workStorePrimary() } });
+        if (action === 'store.import') return send(res, 200, { ok: true, data: await importWorksToStore() });
+        const result = await retryWorkStoreMirrors(5);
+        return send(res, 200, { ok: true, data: result || { mirrored: 0, failed: 0 } });
+      } catch (error) {
+        console.info(JSON.stringify({ event: 'cxl_work_store_action_failed', action, reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
+        return send(res, 502, { ok: false, error: error instanceof Error ? error.message.slice(0, 300) : 'Work store action failed' });
+      }
     }
     const endpoint = gasEndpoint(process.env.CXL_GAS_OWNER_URL);
     const secret = process.env.CXL_API_SHARED_SECRET;
@@ -565,10 +593,14 @@ async function handleRequest(req: Request, res: Response) {
     }
     // Direct Google API update (Preview by default). Unsupported cases and unexpected
     // failures fall through to Apps Script, whose idempotent path repairs a partial write.
-    if (DIRECT_WRITE_ACTIONS.has(action) && directWritesEnabled()) {
+    // With D1 as the source of truth, a Work write must never reach Apps Script: it would
+    // change only the Google backup and leave D1 behind.
+    const d1Primary = DIRECT_WRITE_ACTIONS.has(action) && await workStorePrimary();
+    if (DIRECT_WRITE_ACTIONS.has(action) && (directWritesEnabled() || d1Primary)) {
       const started = Date.now();
       try {
         const env = await directWriteEnv(authenticatedOwnerId);
+        if (d1Primary && !env?.store) return send(res, 503, { ok: false, error: 'Work storage is temporarily unavailable, retry', code: 'WORK_STORE_UNAVAILABLE' });
         if (env) {
           const result = action === 'works.update' ? await directUpdateWork(requestArgs, authenticatedOwnerId, env)
             // Create uses the exact args Apps Script would receive (Owner userId injected) so a
@@ -583,12 +615,14 @@ async function handleRequest(req: Request, res: Response) {
             await cleanupWorkMediaHourly(env);
             return send(res, 200, { ok: true, data: saved });
           }
+          if (d1Primary) return send(res, 422, { ok: false, error: `This change is not supported (${result.reason})`, code: 'UNSUPPORTED_WORK_CHANGE' });
         }
       } catch (error) {
         const code = error instanceof DirectWriteError ? error.code : undefined;
-        console.info(JSON.stringify({ event: 'cxl_direct_write_failed', action, code, committed: error instanceof DirectWriteError && error.committed, reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
+        console.info(JSON.stringify({ event: 'cxl_direct_write_failed', action, code, d1Primary, committed: error instanceof DirectWriteError && error.committed, reason: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
         if (error instanceof DirectWriteError && !error.committed && DIRECT_WRITE_USER_ERRORS.has(error.code))
           return send(res, ownerErrorStatus(error.code), { ok: false, error: error.message, code: error.code });
+        if (d1Primary) return send(res, ownerErrorStatus(code), { ok: false, error: error instanceof Error ? error.message.slice(0, 300) : 'Work save failed', ...(code ? { code } : {}) });
         // Media uploaded through the direct path is invisible to Apps Script, so a save that
         // attaches it cannot fall back; report the failure and let the browser retry.
         const writeOptions = (action === 'works.create' ? requestArgs[1] : action === 'works.update' ? requestArgs[2] : null) as Record<string, unknown> | null;
