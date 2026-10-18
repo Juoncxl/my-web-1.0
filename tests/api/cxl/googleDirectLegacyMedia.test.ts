@@ -107,6 +107,15 @@ describe('legacy Supabase images copied into Drive', () => {
     expect(calls.filter(url => url.includes('/files/legacyCopy?alt=media')).length).toBe(1);
   });
 
+  it('reads images uploaded straight to R2 from the bucket, never from Drive', async () => {
+    const calls = stubGoogle([{ id: MEDIA, drive_file_id: `r2:media/${MEDIA}`, delivery: 'vercel_proxy', asset_id: WORK, mime_type: 'image/jpeg' }], []);
+    const { setMediaBucket } = await import('../../../src/server/cxlR2Media');
+    setMediaBucket({ get: async key => key === `media/${MEDIA}` ? { bytes: JPEG, contentType: 'image/jpeg' } : null, put: async () => {}, delete: async () => {}, list: async () => ({ keys: [] }) });
+    const { directWorkMedia } = await import('../../../api/cxl/googleDirect');
+    expect((await directWorkMedia(WORK, `media:${MEDIA}`, 'owner', true))?.bytes.equals(JPEG)).toBe(true);
+    expect(calls.some(url => url.includes('alt=media') && !url.includes('recordFile'))).toBe(false);
+  });
+
   it('does not serve an image the Work does not reference', async () => {
     const calls = stubGoogle([], [{ id: 'legacyCopy', name: 'other.jpg', size: '9' }]);
     const { directWorkMedia } = await import('../../../api/cxl/googleDirect');

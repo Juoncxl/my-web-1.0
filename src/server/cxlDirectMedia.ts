@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
+import { isR2FileId, mediaBucket, r2CleanupWorkMedia, r2FindWorkMediaFiles, r2MediaBegin, r2MediaChunk, r2MediaFinalize, r2PatchMedia, r2TrashMedia, r2UploadSession, r2UploadsEnabled } from './cxlR2Media.js';
 
 /**
  * Direct Work media upload (replaces Apps Script media.upload.begin/chunk/finalize).
@@ -76,6 +77,14 @@ const FIND_IDS_PER_QUERY = 20;
  * can attach dozens of images.
  */
 export async function findWorkMediaFiles(env: DirectMediaEnv, mediaIds: string[]): Promise<Map<string, WorkMediaFile | null>> {
+  // Images uploaded to R2 win; only the rest are looked up in Drive.
+  const inR2 = mediaBucket() ? await r2FindWorkMediaFiles(mediaIds) : new Map<string, WorkMediaFile | null>();
+  const driveIds = mediaIds.filter(id => !inR2.get(id));
+  const fromDrive = driveIds.length ? await findDriveWorkMediaFiles(env, driveIds) : new Map<string, WorkMediaFile | null>();
+  return new Map(mediaIds.map(id => [id, inR2.get(id) || fromDrive.get(id) || null]));
+}
+
+async function findDriveWorkMediaFiles(env: DirectMediaEnv, mediaIds: string[]): Promise<Map<string, WorkMediaFile | null>> {
   const ids = [...new Set(mediaIds.filter(id => UUID_RE.test(id)))];
   const byId = new Map<string, WorkMediaFile[]>(ids.map(id => [id, []]));
   const collect = async (group: string[]) => {
@@ -121,6 +130,7 @@ export async function findWorkMediaFiles(env: DirectMediaEnv, mediaIds: string[]
 }
 
 export async function markWorkMediaState(env: DirectMediaEnv, fileId: string, props: Record<string, string>): Promise<void> {
+  if (isR2FileId(fileId)) { await r2PatchMedia(fileId, props); return; }
   await drive(env, `${DRIVE_FILES}/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appProperties: props })
   });
@@ -178,12 +188,25 @@ const filePath = (fileId: string, suffix = '') => `/drive/v3/files/${encodeURICo
 /** PATCHes many Drive files in one batch. Returns whether each one succeeded, in order. */
 export async function patchDriveFiles(env: DirectMediaEnv, patches: { fileId: string; body: Json }[]): Promise<boolean[]> {
   if (!patches.length) return [];
-  const results = await driveBatch(env, patches.map(patch => ({ method: 'PATCH', path: filePath(patch.fileId, '?supportsAllDrives=true&fields=id'), body: patch.body })));
-  return results.map(result => batchOk(result));
+  // R2 media keep their manifest in R2; only appProperties patches apply to them.
+  const ok = new Array<boolean>(patches.length).fill(false);
+  const drivePatches: number[] = [];
+  for (const [index, patch] of patches.entries()) {
+    if (isR2FileId(patch.fileId)) ok[index] = await r2PatchMedia(patch.fileId, patch.body?.appProperties || {}).catch(() => false);
+    else drivePatches.push(index);
+  }
+  if (drivePatches.length) {
+    const results = await driveBatch(env, drivePatches.map(index => ({ method: 'PATCH', path: filePath(patches[index].fileId, '?supportsAllDrives=true&fields=id'), body: patches[index].body })));
+    results.forEach((result, position) => { ok[drivePatches[position]] = batchOk(result); });
+  }
+  return ok;
 }
 
 /** Moves many files to the Owner's Drive trash (recoverable for 30 days) in one batch. Files already gone count as done. */
-export async function trashDriveFiles(env: DirectMediaEnv, fileIds: string[]): Promise<void> {
+export async function trashDriveFiles(env: DirectMediaEnv, allFileIds: string[]): Promise<void> {
+  const r2Files = allFileIds.filter(isR2FileId);
+  if (r2Files.length) await r2TrashMedia(r2Files);
+  const fileIds = allFileIds.filter(fileId => !isR2FileId(fileId));
   if (!fileIds.length) return;
   const results = await driveBatch(env, fileIds.map(fileId => ({ method: 'PATCH', path: filePath(fileId, '?supportsAllDrives=true&fields=id'), body: { trashed: true } })));
   const failed = results.find(result => !batchOk(result, [404]));
@@ -290,6 +313,7 @@ async function uploadStatus(env: DirectMediaEnv, sessionUri: string, total: numb
 
 export async function directMediaBegin(input: Json, ownerUserId: string, env: DirectMediaEnv): Promise<Json> {
   if (input.contextId && String(input.contextId).length > 100) fail('INVALID_MEDIA_UPLOAD_REQUEST', 'Work media context is too long');
+  if (r2UploadsEnabled()) return r2MediaBegin(input, ownerUserId);
   const existing = await findWorkMediaFile(env, input.mediaId);
   if (existing) {
     let manifest = mediaFileManifest(existing);
@@ -340,6 +364,9 @@ export async function directMediaBegin(input: Json, ownerUserId: string, env: Di
 }
 
 export async function directMediaChunk(input: Json, ownerUserId: string, env: DirectMediaEnv): Promise<Json> {
+  // An upload begun in R2 stays in R2 even if the switch changes mid-upload.
+  const r2Session = await r2UploadSession(input.uploadId);
+  if (r2Session) return r2MediaChunk(input, r2Session, ownerUserId);
   const folderId = await workMediaFolderId(env);
   const known = await findSessionFileSettled(env, folderId, input.uploadId);
   if (!known) fail('MEDIA_UPLOAD_SESSION_NOT_FOUND', 'Work media upload session was not found');
@@ -396,7 +423,8 @@ export async function cleanupWorkMedia(env: DirectMediaEnv, now = Date.now()): P
   }
   const chosen = candidates.slice(0, CLEANUP_MAX_ITEMS);
   await trashDriveFiles(env, chosen);
-  const trashed = chosen.length;
+  const fromR2 = await r2CleanupWorkMedia(now);
+  const trashed = chosen.length + fromR2.trashed;
   return { trashed };
 }
 
@@ -430,6 +458,13 @@ async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expec
 }
 
 export async function directMediaFinalize(input: Json, ownerUserId: string, env: DirectMediaEnv): Promise<Json> {
+  const r2Session = await r2UploadSession(input.uploadId);
+  if (r2Session) return r2MediaFinalize(input, r2Session, ownerUserId);
+  // Finalized in R2 earlier (its session is gone): answer from the R2 manifest.
+  if (mediaBucket() && input.mediaId) {
+    const stored = (await r2FindWorkMediaFiles([input.mediaId])).get(input.mediaId);
+    if (stored) return r2MediaFinalize(input, null, ownerUserId);
+  }
   const folderId = await workMediaFolderId(env);
   const known = await findSessionFileSettled(env, folderId, input.uploadId);
   let file: WorkMediaFile | null;

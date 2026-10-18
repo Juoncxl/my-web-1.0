@@ -2,6 +2,7 @@ import { createSign } from 'node:crypto';
 import { getOwnerAuthConfig } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, OWNER_DRIVE_CREDENTIAL_FILE, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 import { driveMediaKey, mediaObjectCache } from '../../src/server/mediaObjectCache.js';
+import { isR2FileId, r2FindWorkMediaFiles, r2ReadMedia, mediaBucket } from '../../src/server/cxlR2Media.js';
 
 /**
  * Direct, read-only Google Sheets/Drive access with a Service Account.
@@ -243,6 +244,12 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
 
 /** A Drive image, served from the object store copy when there is one (see mediaObjectCache). */
 async function downloadDriveImage(fileId: string, declaredMimeType: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  // Images uploaded straight to R2 have no Drive file at all.
+  if (isR2FileId(fileId)) {
+    const image = await r2ReadMedia(fileId);
+    if (!image || !image.bytes.length || !MEDIA_MIME_TYPES.has(image.mimeType) || !mediaSignatureMatches(image.mimeType, image.bytes)) throw new Error('Work media file is invalid');
+    return image;
+  }
   const store = mediaObjectCache();
   if (store) {
     const stored = await store.get(driveMediaKey(fileId)).catch(() => null);
@@ -365,6 +372,10 @@ function legacyCopyFileIdByStem(stem: string): Promise<string | null> {
  */
 export async function verifyWorkMediaFinalized(uploadId: string, mediaId: string): Promise<Row | null> {
   if (!/^[a-f0-9-]{36}$/i.test(mediaId)) return null;
+  if (mediaBucket()) {
+    const stored = (await r2FindWorkMediaFiles([mediaId]).catch(() => new Map())).get(mediaId);
+    if (stored && ['finalized', 'attached'].includes(stored.props.cxlState)) return { uploadId, mediaId, finalized: true };
+  }
   const query = `name contains 'cxl-work-media-${mediaId}.' and trashed = false`;
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,size)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true`;
   const listed = await (await googleGet(url)).json() as { files?: { name?: string; size?: string }[] };

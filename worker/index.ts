@@ -12,10 +12,32 @@ import { SECURITY_HEADERS } from '../server/securityHeaders';
 import { setShareShellLoader } from '../api/cxl/share';
 import { runNodeHandler } from './nodeAdapter';
 import { setMediaObjectCache, type MediaObjectCache } from '../src/server/mediaObjectCache';
+import { setMediaBucket, type MediaBucket } from '../src/server/cxlR2Media';
 
 interface R2Bucket {
   get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string } } | null>;
-  put(key: string, value: ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  put(key: string, value: ArrayBuffer | Uint8Array | string, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  delete(keys: string | string[]): Promise<void>;
+  list(options: { prefix?: string; cursor?: string; limit?: number }): Promise<{ objects: { key: string; uploaded: Date }[]; truncated: boolean; cursor?: string }>;
+}
+
+function r2WorkMediaBucket(bucket: R2Bucket): MediaBucket {
+  return {
+    async get(key) {
+      const object = await bucket.get(key);
+      return object ? { bytes: Buffer.from(await object.arrayBuffer()), contentType: object.httpMetadata?.contentType || '' } : null;
+    },
+    async put(key, value, contentType) {
+      await bucket.put(key, value, { httpMetadata: { contentType } });
+    },
+    async delete(keys) {
+      if (keys.length) await bucket.delete(keys);
+    },
+    async list(prefix, cursor) {
+      const page = await bucket.list({ prefix, cursor, limit: 1000 });
+      return { keys: page.objects.map(object => ({ key: object.key, uploaded: object.uploaded.getTime() })), cursor: page.truncated ? page.cursor : undefined };
+    }
+  };
 }
 
 interface Env {
@@ -66,6 +88,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     setMediaObjectCache(env.MEDIA_BUCKET ? r2MediaCache(env.MEDIA_BUCKET) : null);
+    setMediaBucket(env.MEDIA_BUCKET ? r2WorkMediaBucket(env.MEDIA_BUCKET) : null);
     setShareShellLoader(async () => {
       const response = await env.ASSETS.fetch(new URL('/', request.url));
       if (!response.ok) throw new Error(`Shell HTTP ${response.status}`);

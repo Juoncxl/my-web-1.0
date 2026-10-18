@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { cxlAssetFromRecord, DirectWriteError, directCreateWork, directPermanentDelete, directSetTrash, directUpdateWork, writeFingerprint, type DirectWriteEnv } from './cxlDirectWrite';
 import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize, parseBatchResponse } from './cxlDirectMedia';
+import { setMediaBucket, type MediaBucket } from './cxlR2Media';
 import { sniffCreatorMediaType } from '../components/creator/creatorMediaModel';
 
 const PRIVATE_HEADERS = ['id','title','category','status','visibility','is_public','deleted_at','folder_id','tags','updated_at','revision','file_id','has_collab_draft','media_count','cover_ref','create_request_id','user_id','created_at','summary_json','summary_version','search_version','search_chunk_count','search_index_token'];
@@ -334,6 +335,85 @@ describe('direct Work update', () => {
     const r5 = Object.values(google.files).find(file => file.name === `${WORK}__r5.json` && file.parent === 'privFolder')!.content as Record<string, any>;
     expect(r5.mediaRecords.some((m: { id: string }) => m.id === mediaId)).toBe(false);
     expect(media.props?.cxlState).toBe('retired');
+  });
+
+  describe('with uploads going to R2 (CXL_MEDIA_UPLOAD_BACKEND=r2)', () => {
+    function memoryBucket() {
+      const objects = new Map<string, { bytes: Buffer; contentType: string; uploaded: number }>();
+      const bucket: MediaBucket = {
+        get: async key => objects.get(key) || null,
+        put: async (key, value, contentType) => { objects.set(key, { bytes: Buffer.isBuffer(value) ? value : Buffer.from(value), contentType, uploaded: Date.now() }); },
+        delete: async keys => { keys.forEach(key => objects.delete(key)); },
+        list: async prefix => ({ keys: [...objects.entries()].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ key, uploaded: value.uploaded })) })
+      };
+      return { objects, bucket, manifest: (id: string) => JSON.parse(objects.get(`upload/${id}.json`)!.bytes.toString('utf8')) };
+    }
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 5)]);
+    const mediaId = '33333333-3333-4333-8333-333333333333', uploadId = '44444444-4444-4444-8444-444444444444';
+    const sha256 = createHash('sha256').update(png).digest('hex');
+    const begin = { uploadId, mediaId, workId: WORK, totalFileSize: png.length, rawChunkSize: 2 * 1024 * 1024, totalChunks: 1, mimeType: 'image/png', sha256, purpose: 'gallery', contextId: null, sortOrder: 1, isCover: false };
+    afterEach(() => { setMediaBucket(null); vi.unstubAllEnvs(); });
+
+    it('stores the image in R2, attaches it as r2:media/<id>, then retires and trashes it', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      const r2 = memoryBucket();
+      setMediaBucket(r2.bucket);
+      vi.stubEnv('CXL_MEDIA_UPLOAD_BACKEND', 'r2');
+      const driveFilesBefore = Object.keys(google.files).length;
+
+      await expect(directMediaBegin(begin, OWNER, google.env)).resolves.toMatchObject({ finalized: false });
+      await expect(directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256: 'b'.repeat(64) }, OWNER, google.env)).rejects.toMatchObject({ code: 'MEDIA_UPLOAD_CHUNK_CHECKSUM' });
+      await expect(directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, google.env)).resolves.toMatchObject({ stored: true });
+      await expect(directMediaFinalize({ uploadId, mediaId }, OWNER, google.env)).resolves.toMatchObject({ finalized: true, mediaId });
+      expect(r2.objects.get(`media/${mediaId}`)).toMatchObject({ bytes: png, contentType: 'image/png' });
+      expect(r2.manifest(mediaId).props).toMatchObject({ cxlMediaId: mediaId, cxlWorkId: WORK, cxlOwner: OWNER, cxlState: 'finalized', cxlPurpose: 'gallery', cxlSortOrder: '1' });
+      expect([...r2.objects.keys()].some(key => key.startsWith('session/') || key.startsWith('chunk/'))).toBe(false);
+      // Retries after finalize: begin and finalize both answer from the manifest.
+      await expect(directMediaBegin(begin, OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+      await expect(directMediaFinalize({ uploadId, mediaId }, OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+      expect(Object.keys(google.files).length).toBe(driveFilesBefore);
+
+      await directUpdateWork([WORK, { previewImages: ['media:m1', `media:${mediaId}`] }, { requestId: REQUEST, expectedRevision: 3, mediaIds: [mediaId] }], OWNER, google.env);
+      const r4 = Object.values(google.files).find(file => file.name === `${WORK}__r4.json` && file.parent === 'privFolder')!.content as Record<string, any>;
+      expect(r4.mediaRecords.find((m: { id: string }) => m.id === mediaId)).toMatchObject({ drive_file_id: `r2:media/${mediaId}`, delivery: 'vercel_proxy', mime_type: 'image/png', file_size: png.length });
+      expect(r2.manifest(mediaId).props.cxlState).toBe('attached');
+
+      await directUpdateWork([WORK, { previewImages: ['media:m1'] }, { requestId: '55555555-5555-4555-8555-555555555555', expectedRevision: 4 }], OWNER, google.env);
+      expect(r2.manifest(mediaId).props.cxlState).toBe('retired');
+
+      // Cleanup marks it trashed a day later and deletes it 30 days after that; Drive is untouched.
+      const retiredAt = Date.parse(r2.manifest(mediaId).props.cxlRetiredAt);
+      await cleanupWorkMedia(google.env, retiredAt + 25 * 60 * 60 * 1000);
+      expect(r2.manifest(mediaId).props.cxlState).toBe('trashed');
+      expect(r2.objects.has(`media/${mediaId}`)).toBe(true);
+      await cleanupWorkMedia(google.env, retiredAt + 32 * 24 * 60 * 60 * 1000);
+      expect(r2.objects.has(`media/${mediaId}`)).toBe(false);
+      expect(r2.objects.has(`upload/${mediaId}.json`)).toBe(false);
+    });
+
+    it('rejects GIF bytes, keeps Drive uploads in Drive when the switch is off, and finishes an R2 upload after the switch flips', async () => {
+      const google = fakeGoogle();
+      vi.stubGlobal('fetch', google.fetchMock);
+      const r2 = memoryBucket();
+      setMediaBucket(r2.bucket);
+      vi.stubEnv('CXL_MEDIA_UPLOAD_BACKEND', 'r2');
+      const gif = Buffer.from('GIF89a' + 'x'.repeat(30));
+      const gifSha = createHash('sha256').update(gif).digest('hex');
+      const gifUpload = '66666666-6666-4666-8666-666666666666', gifMedia = '77777777-7777-4777-8777-777777777777';
+      await directMediaBegin({ ...begin, uploadId: gifUpload, mediaId: gifMedia, totalFileSize: gif.length, sha256: gifSha }, OWNER, google.env);
+      await directMediaChunk({ uploadId: gifUpload, chunkIndex: 0, base64: gif.toString('base64'), sha256: gifSha }, OWNER, google.env);
+      await expect(directMediaFinalize({ uploadId: gifUpload, mediaId: gifMedia }, OWNER, google.env)).rejects.toMatchObject({ code: 'MEDIA_UPLOAD_MIME_MISMATCH' });
+      expect(r2.objects.has(`media/${gifMedia}`)).toBe(false);
+
+      // Begun in R2, then the switch goes back to Drive: the upload still completes in R2.
+      await directMediaBegin(begin, OWNER, google.env);
+      vi.stubEnv('CXL_MEDIA_UPLOAD_BACKEND', 'drive');
+      await directMediaChunk({ uploadId, chunkIndex: 0, base64: png.toString('base64'), sha256 }, OWNER, google.env);
+      await expect(directMediaFinalize({ uploadId, mediaId }, OWNER, google.env)).resolves.toMatchObject({ finalized: true });
+      expect(r2.objects.has(`media/${mediaId}`)).toBe(true);
+      expect(Object.values(google.files).some(file => file.props?.cxlMediaId === mediaId)).toBe(false);
+    });
   });
 
   it('finalizes an already-uploaded image on a retried save, and heals identical duplicate uploads', async () => {
