@@ -3,6 +3,7 @@ import { getOwnerAuthConfig } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, OWNER_DRIVE_CREDENTIAL_FILE, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 import { driveMediaKey, mediaObjectCache } from '../../src/server/mediaObjectCache.js';
 import { isR2FileId, r2FindWorkMediaFiles, r2ReadMedia, mediaBucket } from '../../src/server/cxlR2Media.js';
+import { sourceText } from '../../src/server/cxlSourceStore.js';
 
 /**
  * Direct, read-only Google Sheets/Drive access with a Service Account.
@@ -118,12 +119,15 @@ async function serviceAccountGet(url: string): Promise<globalThis.Response> {
 }
 
 /** First tab of the private Index sheet, as header-keyed objects (like objectRows_). */
-async function privateIndexRows(): Promise<Row[]> {
+// Write verification must see Google itself, never a stored copy taken before the write.
+const readSource = (key: string, load: () => Promise<string>, fresh: boolean) => (fresh ? load() : sourceText(key, load));
+
+async function privateIndexRows(fresh = false): Promise<Row[]> {
   const cfg = config()!;
   // A1 notation without a sheet name targets the first sheet, matching sheet_() in Apps Script.
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cfg.privateSheetId)}/values/A:ZZ`
     + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&majorDimension=ROWS';
-  const body = await (await googleGet(url)).json() as { values?: unknown[][] };
+  const body = JSON.parse(await readSource(`sheet:${cfg.privateSheetId}:A:ZZ`, async () => (await googleGet(url)).text(), fresh)) as { values?: unknown[][] };
   const [headers = [], ...rows] = body.values || [];
   return rows.map(values => {
     const row: Row = {};
@@ -132,9 +136,9 @@ async function privateIndexRows(): Promise<Row[]> {
   });
 }
 
-async function driveJson(fileId: string): Promise<Row> {
+async function driveJson(fileId: string, fresh = false): Promise<Row> {
   const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-  return await (await googleGet(url)).json() as Row;
+  return JSON.parse(await readSource(`file:${fileId}`, async () => (await googleGet(url)).text(), fresh)) as Row;
 }
 
 const flag = (value: unknown) => value === true || String(value).toLowerCase() === 'true';
@@ -390,16 +394,21 @@ export function directFoldersEnabled(): boolean {
 }
 
 /** Returns the Apps Script folders.fetch data shape: { data: Folder[], error: null }. */
-export async function directOwnerFolders(ownerUserId: string): Promise<{ data: Row[]; error: null }> {
+export async function directOwnerFolders(ownerUserId: string, fresh = false): Promise<{ data: Row[]; error: null }> {
   if (!ownerUserId) throw new Error('Authenticated Owner is required');
   const folderId = process.env.CXL_INCOMING_FOLDER_ID!.trim();
   const query = `'${folderId.replace(/['\\]/g, '\\$&')}' in parents and name = 'folders.jsonl' and trashed = false`;
   const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-  const listed = await (await googleGet(listUrl)).json() as { files?: { id?: string }[] };
-  const fileId = listed.files?.[0]?.id;
-  if (!fileId) return { data: [], error: null };
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
-  const lines = (await (await googleGet(url)).text()).split(/\r?\n/).filter(Boolean);
+  // Lookup and contents travel together so one D1 copy answers both; '' means no folders file.
+  const source = await readSource(`folders:${folderId}`, async () => {
+    const listed = await (await googleGet(listUrl)).json() as { files?: { id?: string }[] };
+    const fileId = listed.files?.[0]?.id;
+    if (!fileId) return '';
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+    return (await googleGet(url)).text();
+  }, fresh);
+  if (!source) return { data: [], error: null };
+  const lines = source.split(/\r?\n/).filter(Boolean);
   const folders = lines.map(line => JSON.parse(line) as Row)
     .filter(folder => folder && text(folder.user_id) === ownerUserId)
     .map(folder => {
@@ -415,7 +424,7 @@ export async function directOwnerFolders(ownerUserId: string): Promise<{ data: R
  * `args` are the Apps Script arguments (create carries the server-chosen ID).
  */
 export async function verifyOwnerFolderCommitted(action: string, args: unknown[], ownerUserId: string): Promise<unknown | null> {
-  const { data: folders } = await directOwnerFolders(ownerUserId);
+  const { data: folders } = await directOwnerFolders(ownerUserId, true);
   if (action === 'folders.delete') return folders.some(folder => folder.id === text(args[0])) ? null : { success: true, error: null };
   const input = (action === 'folders.create' ? args[0] : args[1]) as Row | undefined;
   const id = action === 'folders.create' ? text(input?.id) : text(args[0]);
@@ -445,7 +454,7 @@ export function directPublicReadsEnabled(): boolean {
 async function sheetRows(spreadsheetId: string, range: string): Promise<Row[]> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`
     + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&majorDimension=ROWS';
-  const body = await (await googleGet(url)).json() as { values?: unknown[][] };
+  const body = JSON.parse(await sourceText(`sheet:${spreadsheetId}:${range}`, async () => (await googleGet(url)).text())) as { values?: unknown[][] };
   const [headers = [], ...rows] = body.values || [];
   const names = headers.map(value => text(value));
   if (new Set(names.filter(Boolean)).size !== names.filter(Boolean).length) throw new Error('Public snapshot source has duplicate columns');
@@ -648,7 +657,7 @@ export async function directPublicWorkDetail(assetId: string): Promise<Row | nul
  * Returns the same `data` shape Apps Script would have returned, or null.
  */
 export async function verifyOwnerWriteCommitted(action: string, args: unknown[]): Promise<unknown | null> {
-  const rows = await privateIndexRows();
+  const rows = await privateIndexRows(true);
   if (action === 'works.update' || action === 'works.create') {
     const options = (action === 'works.update' ? args[2] : args[1]) as { requestId?: unknown } | undefined;
     const requestId = text(options?.requestId).toLowerCase();
@@ -657,7 +666,7 @@ export async function verifyOwnerWriteCommitted(action: string, args: unknown[])
       ? rows.find(item => text(item.id) === text(args[0]))
       : rows.find(item => text(item.create_request_id).toLowerCase() === requestId);
     if (!row || !text(row.file_id)) return null;
-    const record = await driveJson(text(row.file_id));
+    const record = await driveJson(text(row.file_id), true);
     if (text(record.lastWriteRequestId).toLowerCase() !== requestId) return null;
     return { data: assetFromRecord(record), error: null };
   }

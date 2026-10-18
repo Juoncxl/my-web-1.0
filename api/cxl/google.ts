@@ -10,6 +10,7 @@ import { DirectWriteError, directCreateWork, directPermanentDelete, directSetTra
 import { clientIp, PUBLIC_API_RATE_LIMIT, rateLimitRetryAfter } from '../../src/server/rateLimit.js';
 import { publicErrorMessage, RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
+import { markSourcesDirty } from '../../src/server/cxlSourceStore.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -428,7 +429,21 @@ export async function fetchPublicWorkDetail(assetId: string) {
   return filterGoogleWorks(validateAssetList([raw.data]), { assetId, detail: 'full', limit: 1 });
 }
 
+// Owner writes that can change the Sheets rows or Drive files the read copies mirror.
+const SOURCE_CHANGING_ACTIONS = new Set(['works.create', 'works.update', ...WORK_DELETE_ACTIONS, ...FOLDER_WRITE_ACTIONS, 'public.snapshot.rebuild']);
+
 export default async function handler(req: Request, res: Response) {
+  const body = (() => { try { return parseBody(req); } catch { return null; } })();
+  const action = record(body) && typeof body.action === 'string' ? body.action : '';
+  try {
+    return await handleRequest(req, res);
+  } finally {
+    // Whatever the outcome (a stalled write may still commit), stored read copies are stale now.
+    if (req.method === 'POST' && SOURCE_CHANGING_ACTIONS.has(action)) await markSourcesDirty();
+  }
+}
+
+async function handleRequest(req: Request, res: Response) {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
   // Signed-out callers share a per-IP budget; the Owner's own requests are never limited.
   if (!verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE)) && !req.headers.authorization) {

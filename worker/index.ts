@@ -13,6 +13,7 @@ import { setShareShellLoader } from '../api/cxl/share';
 import { runNodeHandler } from './nodeAdapter';
 import { setMediaObjectCache, type MediaObjectCache } from '../src/server/mediaObjectCache';
 import { setMediaBucket, type MediaBucket } from '../src/server/cxlR2Media';
+import { setSourceDb, type D1Like } from '../src/server/cxlSourceStore';
 
 interface R2Bucket {
   get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string } } | null>;
@@ -44,6 +45,8 @@ interface Env {
   ASSETS: { fetch(input: Request | URL | string, init?: RequestInit): Promise<Response> };
   // R2 copy of Drive images (wrangler.jsonc r2_buckets); absent means Drive only.
   MEDIA_BUCKET?: R2Bucket;
+  // D1 copies of the Sheets/Drive sources the API reads (wrangler.jsonc d1_databases).
+  DATA_DB?: D1Like;
 }
 
 function r2MediaCache(bucket: R2Bucket): MediaObjectCache {
@@ -89,6 +92,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     setMediaObjectCache(env.MEDIA_BUCKET ? r2MediaCache(env.MEDIA_BUCKET) : null);
     setMediaBucket(env.MEDIA_BUCKET ? r2WorkMediaBucket(env.MEDIA_BUCKET) : null);
+    setSourceDb(env.DATA_DB || null);
     setShareShellLoader(async () => {
       const response = await env.ASSETS.fetch(new URL('/', request.url));
       if (!response.ok) throw new Error(`Shell HTTP ${response.status}`);
