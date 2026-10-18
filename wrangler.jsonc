@@ -14,6 +14,8 @@
     "run_worker_first": ["/api/*", "/work/*", "/@*"]
   },
   "observability": { "enabled": true },
+  // Branch and pull request builds run `wrangler preview`, which needs this block.
+  "previews": {},
   // Keep the dashboard's variables and secrets on deploy (they are not listed here).
   "keep_vars": true
 }
