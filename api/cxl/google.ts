@@ -252,7 +252,8 @@ function validMediaUploadArgs(action: string, args: unknown[]): boolean {
       && input.rawChunkSize === 2 * 1024 * 1024
       && Number.isInteger(input.totalChunks) && Number(input.totalChunks) === Math.ceil(Number(input.totalFileSize) / (2 * 1024 * 1024))
       && Number(input.totalChunks) >= 1 && Number(input.totalChunks) <= 5
-      && ['image/jpeg','image/png','image/webp','image/gif'].includes(String(input.mimeType))
+      // GIF uploads are closed (the Owner stopped using them); stored GIFs still display.
+      && ['image/jpeg','image/png','image/webp'].includes(String(input.mimeType))
       && typeof input.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(input.sha256)
       && ['icon','gallery','prompt_example','collab_reference'].includes(String(input.purpose))
       && (input.contextId === undefined || input.contextId === null || (typeof input.contextId === 'string' && input.contextId.length <= 128))

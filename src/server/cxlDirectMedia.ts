@@ -422,7 +422,9 @@ async function verifyAndFinalize(env: DirectMediaEnv, file: WorkMediaFile, expec
     head = Buffer.from(await (await drive(env, `${DRIVE_FILES}/${encodeURIComponent(file.id)}?alt=media&supportsAllDrives=true`, { headers: { Range: 'bytes=0-15' } }, [206])).arrayBuffer());
   }
   if (sha256 !== expectedSha256) fail('MEDIA_UPLOAD_FINAL_CHECKSUM', 'Work media checksum did not match');
-  if (!EXTENSIONS[signatureMime(head)]) fail('MEDIA_UPLOAD_MIME_MISMATCH', 'Work media is not a supported image (JPEG, PNG, WebP or GIF)');
+  const detected = signatureMime(head);
+  // GIF uploads are closed; a GIF declared as another type is caught here by its bytes.
+  if (!EXTENSIONS[detected] || detected === 'image/gif') fail('MEDIA_UPLOAD_MIME_MISMATCH', 'Work media is not a supported image (JPEG, PNG or WebP)');
   await ensurePrivate(env, file.id);
   if (file.props.cxlState === 'uploading') await markWorkMediaState(env, file.id, { cxlState: 'finalized', cxlFinalizedAt: new Date().toISOString() });
 }

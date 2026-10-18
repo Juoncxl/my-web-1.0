@@ -64,7 +64,9 @@ describe('Creator Composer unified media draft', () => {
     expect(source).toContain('aria-label={`${title} ${countLabel}`}');
     expect(source).toContain('accept="image/png,image/jpeg,image/webp"');
     expect(source).not.toContain('เพิ่มรูป / GIF');
-    expect(workspaceSource).toContain('accept="image/png,image/jpeg,image/webp,image/gif"');
+    // GIF uploads are closed: the Work icon picker offers still images only.
+    expect(workspaceSource).toContain('accept="image/png,image/jpeg,image/webp"');
+    expect(workspaceSource).not.toContain('image/webp,image/gif');
   });
 
   it('uses the existing six-item global media limit and rejects additional items', () => {

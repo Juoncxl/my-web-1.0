@@ -6,7 +6,9 @@ import { callGoogleBackend } from './googleTransport';
 
 export const GOOGLE_WORK_MEDIA_CHUNK_BYTES = 2 * 1024 * 1024;
 export const GOOGLE_WORK_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
-const SUPPORTED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+// GIF uploads are closed (the Owner stopped using them); stored GIFs still display.
+const SUPPORTED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+export const GIF_UPLOAD_CLOSED_MESSAGE = 'ไม่รับไฟล์ GIF แล้ว กรุณาใช้รูป JPG, PNG หรือ WebP';
 
 export type GoogleWorkAssetInput = Partial<Asset> & { workMediaDraft?: StandardWorkMediaDraft[] };
 export type GooglePendingWorkMedia = StandardWorkMediaDraft & { blob: Blob; mimeType: string; fileSize: number };
@@ -59,6 +61,7 @@ export async function prepareGoogleWorkMedia(input: GoogleWorkAssetInput): Promi
     if (!isInlineMediaUrl(draft.source)) continue;
     const blob = await shrinkImageForUpload(await sourceBlob(draft.source, draft.mimeType));
     const mimeType = (blob.type || draft.mimeType || '').toLowerCase();
+    if (mimeType === 'image/gif') throw new Error(GIF_UPLOAD_CLOSED_MESSAGE);
     if (!SUPPORTED_MIME_TYPES.has(mimeType)) throw new Error(`ไม่รองรับไฟล์ชนิด ${mimeType || 'ไม่ทราบชนิด'}`);
     if (blob.size <= 0 || blob.size > GOOGLE_WORK_MEDIA_MAX_BYTES) throw new Error('รูปต้องมีขนาดไม่เกิน 10MB ต่อไฟล์');
     pending.push({ ...draft, blob, mimeType, fileSize: blob.size });

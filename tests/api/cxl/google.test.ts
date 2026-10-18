@@ -422,6 +422,8 @@ describe('Vercel Google Works read proxy', () => {
 
     const missingCsrf = await invoke({ action: 'media.upload.begin', args: [begin] }, undefined, 'POST', { cookie, origin: 'https://cxl.example' });
     const invalid = await invoke({ action: 'media.upload.begin', args: [{ ...begin, driveId: 'must-not-pass' }] }, undefined, 'POST', headers);
+    const gif = await invoke({ action: 'media.upload.begin', args: [{ ...begin, mimeType: 'image/gif' }] }, undefined, 'POST', headers);
+    expect(gif.statusCode).toBe(400);
     const accepted = await invoke({ action: 'media.upload.begin', args: [begin] }, undefined, 'POST', headers);
     const workMediaId = begin.mediaId;
     const commit = await invoke({ action: 'works.create', args: [{
