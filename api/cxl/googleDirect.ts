@@ -281,9 +281,31 @@ async function authorizeWorkMedia(workId: string, ref: string, scope: 'public' |
   // A record with a Drive file wins over a duplicate entry without one.
   const matches = mediaRecords.filter(item => text(item.id) === mediaId || item.storage_path === ref || item.original_ref === ref);
   const media = matches.find(item => text(item.drive_file_id)) || matches[0];
-  if (!media || !text(media.drive_file_id)) return null;
-  if (requireProxy && (media.delivery !== 'vercel_proxy' || text(media.asset_id) !== workId)) return null;
-  return media;
+  if (requireProxy) {
+    if (!media || !text(media.drive_file_id) || media.delivery !== 'vercel_proxy' || text(media.asset_id) !== workId) return null;
+    return media;
+  }
+  if (media && text(media.drive_file_id)) return media;
+  // Images that lived only in Supabase Storage were copied into Drive under their
+  // original file name (<mediaId>.<ext>); the Work's reference was already checked above.
+  const legacyFileId = await legacySupabaseCopyFileId(mediaId, text(media?.storage_path));
+  return legacyFileId ? { ...(media || {}), drive_file_id: legacyFileId } : null;
+}
+
+const LEGACY_COPY_NAME = /^[A-Za-z0-9_-]{1,128}\.(jpg|jpeg|png|gif|webp)$/i;
+
+/** Drive file ID of a Supabase-era image copied into Drive by name, or null. */
+async function legacySupabaseCopyFileId(mediaId: string, storagePath: string): Promise<string | null> {
+  const base = storagePath.split('/').pop() || '';
+  const stem = LEGACY_COPY_NAME.test(base) ? base.replace(/\.[^.]+$/, '') : mediaId;
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(stem)) return null;
+  return cachedRead(`legacy-copy:${stem}`, RECORD_FILE_CACHE_MS, async () => {
+    const query = `name contains '${stem}.' and trashed = false and mimeType contains 'image/'`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,size)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const listed = await (await googleGet(url)).json() as { files?: { id?: string; name?: string; size?: string }[] };
+    const file = (listed.files || []).find(item => LEGACY_COPY_NAME.test(item.name || '') && (item.name || '').replace(/\.[^.]+$/, '') === stem && Number(item.size) > 0);
+    return file?.id || null;
+  });
 }
 
 /**
