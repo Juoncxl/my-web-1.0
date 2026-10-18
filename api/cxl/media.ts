@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleMediaPoc } from '../../src/server/cxlMediaPoc.js';
 import { handleGoogleWorkMediaRead, ownerSessionValid } from '../../src/server/cxlGoogleWorkMedia.js';
-import { directOwnerReadsEnabled, directWorkMedia } from './googleDirect.js';
+import { directLegacyProfileImage, directOwnerReadsEnabled, directWorkMedia, LEGACY_PROFILE_IMAGE_NAME } from './googleDirect.js';
 import { clientIp, PUBLIC_MEDIA_RATE_LIMIT, rateLimitRetryAfter } from '../../src/server/rateLimit.js';
 import { RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 export { mediaPocLimits } from '../../src/server/cxlMediaPoc.js';
@@ -161,6 +161,28 @@ async function publicIconHandler(req: Request, res: Response) {
   }
 }
 
+/** Profile cover/avatar from the former public Supabase bucket, now read from its Drive copy. */
+async function legacyProfileImageHandler(req: Request, res: Response, name: string) {
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return sendError(res, 405, 'Method not allowed');
+  }
+  if (!LEGACY_PROFILE_IMAGE_NAME.test(name)) return sendError(res, 400, 'Invalid profile image');
+  try {
+    const image = await directLegacyProfileImage(name);
+    if (!image) return sendError(res, 404, 'Profile image is unavailable');
+    const etag = `"${createHash('sha256').update(image.bytes).digest('hex')}"`;
+    cacheHeaders(res, etag);
+    res.setHeader('Content-Type', image.mimeType);
+    res.setHeader('Content-Length', String(image.bytes.length));
+    if (req.headers['if-none-match'] === etag) { res.statusCode = 304; return res.end(); }
+    res.statusCode = 200;
+    return res.end(image.bytes);
+  } catch {
+    return sendError(res, 502, 'Profile image is unavailable');
+  }
+}
+
 export default async function handler(req: Request, res: Response) {
   let params: URLSearchParams;
   try { params = new URL(req.url || '/', 'https://cxl.invalid').searchParams; }
@@ -175,6 +197,8 @@ export default async function handler(req: Request, res: Response) {
     }
     return handleMediaPoc(req, res);
   }
+
+  if (params.has('profile')) return legacyProfileImageHandler(req, res, params.get('profile') || '');
 
   // Google Work media references opt into the private, association-checked
   // proxy with an explicit scope. Legacy media continues through its existing

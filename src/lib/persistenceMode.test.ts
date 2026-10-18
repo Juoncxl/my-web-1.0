@@ -31,7 +31,7 @@ describe('resolvePersistenceMode', () => {
     })).toBe('mock');
   });
 
-  it('does not enable cloud persistence without both Supabase values', () => {
-    expect(resolvePersistenceMode({ MODE: 'production', PROD: true })).toBe('mock');
+  it('keeps a deployed build on its real backends without any Supabase values', () => {
+    expect(resolvePersistenceMode({ MODE: 'production', PROD: true })).toBe('supabase');
   });
 });

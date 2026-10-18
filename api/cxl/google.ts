@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Asset } from '../../src/types';
 import type { FetchAssetsOptions } from '../../src/lib/supabaseService';
 import { randomUUID } from 'node:crypto';
-import { directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
+import { directDriveGet, directFoldersEnabled, directOwnerFolders, directOwnerReadsEnabled, directOwnerWorksFetch, verifyOwnerFolderCommitted, verifyWorkMediaFinalized, directPublicReadsEnabled, rewriteLegacyProfileImageUrls, directPublicWorkDetail, directPublicWorksList, verifyOwnerWriteCommitted } from './googleDirect.js';
 import { filterGoogleWorks } from '../../src/data/googleWorksRead.js';
 import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, selectOwnerAuthMode, verifyCsrfRequest, verifyOwnerSessionToken } from '../../src/server/cxlOwnerAuth.js';
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
@@ -29,7 +29,7 @@ function send(res: Response, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
-  res.end(JSON.stringify(body));
+  res.end(rewriteLegacyProfileImageUrls(JSON.stringify(body)));
 }
 function record(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 function workMediaEnabled() {

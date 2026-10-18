@@ -60,6 +60,24 @@ describe('legacy Supabase images copied into Drive', () => {
     expect(calls.some(url => url.includes('/drive/v3/files?q='))).toBe(false);
   });
 
+  it('points saved Supabase profile image URLs at the Drive-backed route', async () => {
+    const { rewriteLegacyProfileImageUrls } = await import('../../../api/cxl/googleDirect');
+    const saved = JSON.stringify({ coverUrl: 'https://iqyefjwykydurxtisjap.supabase.co/storage/v1/object/public/profile-media/a7254db7-f89d-4fce-92af-c339846771cc/cover-1788621717440-78bdecf4.png', other: 'https://x.supabase.co/storage/v1/object/public/work-media/a/b.png' });
+    expect(JSON.parse(rewriteLegacyProfileImageUrls(saved))).toEqual({
+      coverUrl: '/api/cxl/media?profile=cover-1788621717440-78bdecf4.png',
+      other: 'https://x.supabase.co/storage/v1/object/public/work-media/a/b.png'
+    });
+  });
+
+  it('serves a profile cover only by its Supabase-era name pattern', async () => {
+    const calls = stubGoogle([], [{ id: 'legacyCopy', name: 'cover-1788621717440-78bdecf4.jpg', size: String(JPEG.length) }]);
+    const { directLegacyProfileImage } = await import('../../../api/cxl/googleDirect');
+    expect((await directLegacyProfileImage('cover-1788621717440-78bdecf4.jpg'))?.bytes.equals(JPEG)).toBe(true);
+    expect(await directLegacyProfileImage(`${MEDIA}.jpg`)).toBeNull();
+    expect(await directLegacyProfileImage("cover-1-78bdecf4.jpg' or name contains 'x")).toBeNull();
+    expect(calls.filter(url => url.includes('/drive/v3/files?q=')).length).toBe(1);
+  });
+
   it('does not serve an image the Work does not reference', async () => {
     const calls = stubGoogle([], [{ id: 'legacyCopy', name: 'other.jpg', size: '9' }]);
     const { directWorkMedia } = await import('../../../api/cxl/googleDirect');

@@ -237,14 +237,40 @@ export async function directWorkMedia(workId: string, ref: string, scope: 'publi
     mediaAuthorizations.set(authKey, { media, expiresAt: Date.now() + MEDIA_AUTHORIZATION_CACHE_MS });
     if (mediaAuthorizations.size > 2000) for (const [key, entry] of mediaAuthorizations) if (entry.expiresAt <= Date.now()) mediaAuthorizations.delete(key);
   }
-  const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(text(media.drive_file_id))}?alt=media&supportsAllDrives=true`);
+  return downloadDriveImage(text(media.drive_file_id), text(media.mime_type));
+}
+
+async function downloadDriveImage(fileId: string, declaredMimeType: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  const response = await googleGet(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`);
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MEDIA_MAX_BYTES) throw new Error('Work media exceeds the size limit');
   const bytes = Buffer.from(await response.arrayBuffer());
-  const mimeType = (response.headers.get('content-type') || text(media.mime_type)).split(';')[0].trim().toLowerCase();
+  const mimeType = (response.headers.get('content-type') || declaredMimeType).split(';')[0].trim().toLowerCase();
   if (!bytes.length || bytes.length > MEDIA_MAX_BYTES || !MEDIA_MIME_TYPES.has(mimeType) || !mediaSignatureMatches(mimeType, bytes))
     throw new Error('Work media file is invalid');
   return { bytes, mimeType };
+}
+
+/** Supabase-era profile cover/avatar file names, e.g. cover-1788621717440-78bdecf4.png. */
+export const LEGACY_PROFILE_IMAGE_NAME = /^(?:cover|avatar)-\d{1,16}-[a-f0-9]{8}\.(?:png|jpe?g|gif|webp)$/;
+
+const LEGACY_PROFILE_IMAGE_URL = /https:\/\/[a-z0-9]+\.supabase\.co\/storage\/v1\/object\/public\/profile-media\/[A-Za-z0-9_-]+\/((?:cover|avatar)-\d{1,16}-[a-f0-9]{8}\.(?:png|jpe?g|gif|webp))/g;
+
+/** Point saved Supabase profile image URLs at this site's Drive-backed copy. */
+export function rewriteLegacyProfileImageUrls(json: string): string {
+  return json.replace(LEGACY_PROFILE_IMAGE_URL, (_match, name: string) => `/api/cxl/media?profile=${name}`);
+}
+
+/**
+ * A profile cover or avatar that lived in the public Supabase profile-media bucket,
+ * read from its Drive copy (same file name). Only that naming pattern is served, so
+ * this cannot be used to fetch other images the Service Account can see.
+ */
+export async function directLegacyProfileImage(name: string): Promise<{ bytes: Buffer; mimeType: string } | null> {
+  if (!LEGACY_PROFILE_IMAGE_NAME.test(name) || !directOwnerReadsEnabled()) return null;
+  const stem = name.replace(/\.[^.]+$/, '');
+  const fileId = await legacyCopyFileIdByStem(stem);
+  return fileId ? downloadDriveImage(fileId, '') : null;
 }
 
 // A media reference resolves to the same Drive file for its lifetime, so a successful
@@ -299,6 +325,10 @@ async function legacySupabaseCopyFileId(mediaId: string, storagePath: string): P
   const base = storagePath.split('/').pop() || '';
   const stem = LEGACY_COPY_NAME.test(base) ? base.replace(/\.[^.]+$/, '') : mediaId;
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(stem)) return null;
+  return legacyCopyFileIdByStem(stem);
+}
+
+function legacyCopyFileIdByStem(stem: string): Promise<string | null> {
   return cachedRead(`legacy-copy:${stem}`, RECORD_FILE_CACHE_MS, async () => {
     const query = `name contains '${stem}.' and trashed = false and mimeType contains 'image/'`;
     const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,size)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`;
