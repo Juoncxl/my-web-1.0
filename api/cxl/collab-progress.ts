@@ -5,6 +5,7 @@ import { cookieValue, getOwnerAuthConfig, OWNER_SESSION_COOKIE, verifyCsrfReques
 import { loadSealedOwnerDriveCredential, ownerDriveAccessToken } from '../../src/server/cxlOwnerDrive.js';
 import { findOwnerFile, readOwnerJson, writeOwnerJson } from '../../src/server/cxlOwnerFiles.js';
 import { applyIdeaOp, IdeaError, ideaOpLanded, parseIdeaOp, sanitizeIdeaFile } from '../../src/server/cxlIdeas.js';
+import { READ_ONLY_ERROR, readOnlySite } from '../../src/server/readOnlySite.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse;
@@ -61,6 +62,7 @@ function parseBody(req: Request): Record<string, unknown> | null {
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'GET' && req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
+  if (req.method === 'POST' && readOnlySite()) return send(res, 403, { ok: false, error: READ_ONLY_ERROR });
   if (!verifyOwnerSessionToken(cookieValue(req.headers.cookie, OWNER_SESSION_COOKIE))) {
     return send(res, 401, { ok: false, error: 'Owner authentication required' });
   }

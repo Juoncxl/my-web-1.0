@@ -88,6 +88,19 @@ describe('owner files on the collab-progress function', () => {
     expect((drive.files['cxl-owner-ideas.json'].content as { ideas: unknown[] }).ideas).toHaveLength(1);
   });
 
+  it('refuses changes but still reads on a read-only backup host', async () => {
+    vi.stubEnv('CXL_READ_ONLY', 'on');
+    const drive = fakeDrive();
+    vi.stubGlobal('fetch', drive.fetchMock);
+    const denied = response();
+    await handler(post('/api/cxl/collab-progress?store=ideas', { op: 'add', text: 'ทหารเรือ' }) as never, denied as never);
+    expect(denied.statusCode).toBe(403);
+    expect(drive.files['cxl-owner-ideas.json']).toBeUndefined();
+    const read = response();
+    await handler(get('/api/cxl/collab-progress?store=ideas') as never, read as never);
+    expect(read.statusCode).toBe(200);
+  });
+
   it('answers 404 for an unknown idea and 400 for a malformed one', async () => {
     vi.stubGlobal('fetch', fakeDrive().fetchMock);
     const missing = response();

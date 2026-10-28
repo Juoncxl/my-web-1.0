@@ -67,6 +67,16 @@ services:
         sync: false
       - key: CXL_DIRECT_WRITES
         sync: false
+      # Backup host: show the site, refuse changes (Cloudflare D1 holds the Works).
+      - key: CXL_READ_ONLY
+        value: "on"
+      # Read-only R2 key (Object Read on cxl-media) so images uploaded on Cloudflare load here.
+      - key: CXL_R2_ACCOUNT_ID
+        sync: false
+      - key: CXL_R2_ACCESS_KEY_ID
+        sync: false
+      - key: CXL_R2_SECRET_ACCESS_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY

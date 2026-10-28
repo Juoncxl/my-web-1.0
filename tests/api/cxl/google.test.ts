@@ -139,6 +139,25 @@ describe('Vercel Google Works read proxy', () => {
     expect(JSON.stringify(gasRequest)).not.toContain('attacker-controlled-id');
   });
 
+  it('refuses Owner changes on a read-only backup host but still lists folders', async () => {
+    vi.stubEnv('CXL_READ_ONLY', 'on');
+    vi.stubEnv('CXL_OWNER_AUTH_BACKEND', 'vercel');
+    vi.stubEnv('CXL_OWNER_GOOGLE_SUB', 'google-owner-subject-123456789');
+    vi.stubEnv('CXL_OWNER_SESSION_SECRET', 'session-secret-that-is-at-least-32-characters-long');
+    vi.stubEnv('CXL_OWNER_APP_ORIGIN', 'https://cxl.example');
+    const token = createOwnerSessionToken('google-owner-subject-123456789', undefined, process.env.CXL_OWNER_SESSION_SECRET!).token;
+    const headers = { cookie: `__Host-cxl_owner=${token}; __Host-cxl_csrf=csrf-token`, origin: 'https://cxl.example', 'x-cxl-csrf': 'csrf-token' };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    for (const action of ['works.update', 'works.create', 'works.softDelete', 'folders.create', 'media.upload.begin', 'store.mirror']) {
+      const result = await invoke({ action, args: [] }, undefined, 'POST', headers);
+      expect(result.statusCode, action).toBe(403);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect((await invoke({ action: 'folders.fetch', args: [] }, undefined, 'POST', headers)).statusCode).toBe(200);
+  });
+
   it('rejects unauthenticated, non-owner, malformed, and out-of-scope mutation requests before GAS', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

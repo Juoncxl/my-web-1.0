@@ -12,6 +12,7 @@ import { clientIp, PUBLIC_API_RATE_LIMIT, rateLimitRetryAfter } from '../../src/
 import { publicErrorMessage, RATE_LIMITED_MESSAGE } from '../../src/lib/publicApiErrors.js';
 import { cleanupWorkMedia, directMediaBegin, directMediaChunk, directMediaFinalize } from '../../src/server/cxlDirectMedia.js';
 import { markSourcesDirty } from '../../src/server/cxlSourceStore.js';
+import { READ_ONLY_ERROR, readOnlySite } from '../../src/server/readOnlySite.js';
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { json?: (body: unknown) => void };
@@ -25,6 +26,8 @@ const FOLDER_WRITE_ACTIONS = new Set(['folders.create','folders.update','folders
 // Owner tools for D1 as the Works store: import from Google, retry backups, status.
 const WORK_STORE_ACTIONS = new Set(['store.import', 'store.mirror', 'store.status']);
 const OWNER_ACTIONS = new Set(['works.create','works.update', ...WORK_DELETE_ACTIONS, 'folders.fetch', ...FOLDER_WRITE_ACTIONS,'public.snapshot.rebuild', ...MEDIA_UPLOAD_ACTIONS, MEDIA_CLEANUP_ACTION, MEDIA_REPAIR_ACTION, ...WORK_STORE_ACTIONS]);
+// Owner actions a read-only backup host (CXL_READ_ONLY=on) still serves.
+const READ_ONLY_OWNER_ACTIONS = new Set(['folders.fetch', 'store.status']);
 const GAS_TIMEOUT_MS = 30_000;
 const OWNER_TIMING_ACTIONS = new Set(['works.fetch','folders.fetch','works.create','works.update', ...WORK_DELETE_ACTIONS]);
 const OWNER_TIMING_PHASES = new Set(['auth_request_validation','existing_work_index_lookup','canonical_drive_json_read','revision_idempotency_validation','write_payload_prepare','search_artifact_generation','search_chunk_write','stale_search_cleanup','drive_revision_write','private_index_update','private_public_transition','public_projection_sync','response_construction','owner_index_read','owner_search_index_read','summary_parse_projection','folders_drive_read','folders_projection','script_lock_wait','locked_revision_read']);
@@ -493,6 +496,7 @@ async function handleRequest(req: Request, res: Response) {
     }
   }
   if (OWNER_ACTIONS.has(action)) {
+    if (readOnlySite() && !READ_ONLY_OWNER_ACTIONS.has(action)) return send(res, 403, { ok: false, error: READ_ONLY_ERROR });
     if (action === MEDIA_REPAIR_ACTION && process.env.VERCEL_ENV !== 'preview')
       return send(res, 404, { ok: false, error: 'Work media repair is available only in Preview' });
     if ((MEDIA_UPLOAD_ACTIONS.has(action) || action === MEDIA_CLEANUP_ACTION || ((action === 'works.create' || action === 'works.update')

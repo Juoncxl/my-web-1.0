@@ -14,6 +14,11 @@ import { gzipSync } from 'node:zlib';
 import { API_ROUTES } from './apiRoutes';
 import { SECURITY_HEADERS } from './securityHeaders';
 import share from '../api/cxl/share';
+import { setMediaBucket } from '../src/server/cxlR2Media';
+import { r2ReadOnlyBucketFromEnv } from '../src/server/r2ReadOnlyBucket';
+
+// Images uploaded on Cloudflare live only in R2; read them with a read-only key when one is set.
+setMediaBucket(r2ReadOnlyBucketFromEnv());
 
 const DIST = path.resolve(process.cwd(), 'dist');
 // Media upload chunks are ~2 MiB of base64 inside JSON.
