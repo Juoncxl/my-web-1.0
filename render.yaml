@@ -22,10 +22,6 @@ services:
         sync: false
       - key: VITE_PERSISTENCE_MODE
         sync: false
-      - key: VITE_SUPABASE_URL
-        sync: false
-      - key: VITE_SUPABASE_ANON_KEY
-        sync: false
       # Server-only settings.
       - key: CXL_OWNER_AUTH_BACKEND
         sync: false
@@ -76,8 +72,4 @@ services:
       - key: CXL_R2_ACCESS_KEY_ID
         sync: false
       - key: CXL_R2_SECRET_ACCESS_KEY
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_ANON_KEY
         sync: false
