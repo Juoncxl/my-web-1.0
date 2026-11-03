@@ -2,6 +2,7 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import './styles/collabParticipantTools.css';
 import {normalizeEncodedProfilePath} from './lib/appRoutes';
 
 // Show and route profile links as /@slug even when a host handed us /%40slug.

@@ -120,7 +120,17 @@ export interface AssetCollaborationDeadline {
   date: string;
 }
 
+export interface AssetCollaborationLink {
+  id: string;
+  label: string;
+  url: string;
+  visibility: 'private' | 'public';
+}
+
 export interface AssetCollaborationParticipant {
+  links?: AssetCollaborationLink[];
+  groups?: string[];
+  detailLabel?: string;
   id: string;
   isOwner: boolean;
   creatorName: string;
@@ -153,6 +163,8 @@ export interface AssetCollaborationVisibilityPolicy {
 }
 
 export interface AssetCollaboration {
+  links?: AssetCollaborationLink[];
+  groups?: string[];
   name: string;
   sharedTag: string;
   platforms: string[];
@@ -163,6 +175,9 @@ export interface AssetCollaboration {
 }
 
 export interface PublicAssetCollaborationParticipant {
+  links?: AssetCollaborationLink[];
+  groups?: string[];
+  detailLabel?: string;
   id: string;
   isOwner: boolean;
   creatorName: string;
@@ -178,6 +193,8 @@ export interface PublicAssetCollaborationParticipant {
 }
 
 export interface PublicAssetCollaboration {
+  links?: AssetCollaborationLink[];
+  groups?: string[];
   name: string;
   sharedTag: string;
   platforms: string[];

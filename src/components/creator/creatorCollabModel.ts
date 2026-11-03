@@ -1,4 +1,6 @@
-import type { PublicAssetCollaboration, WorkContentBlock } from '../../types';
+import type { AssetCollaborationLink, PublicAssetCollaboration, WorkContentBlock } from '../../types';
+import { normalizeCollabLinks, publicCollabLinks } from '../../lib/collabLinks';
+import { getCollabGroups, normalizeCollabGroups } from '../../lib/collabParticipantFilters';
 import { CREATOR_MEDIA_MAX_ITEMS, type CreatorMediaItem } from './creatorMediaModel';
 
 export type CreatorCollabDeadlineKind = 'data' | 'image' | 'publish' | 'custom';
@@ -19,6 +21,9 @@ export interface CreatorCollabSharedInformation {
 }
 
 export interface CreatorCollabParticipant {
+  links?: AssetCollaborationLink[];
+  groups?: string[];
+  detailLabel?: string;
   id: string;
   /** Only the organizer's own entry can be marked as owner. */
   isOwner: boolean;
@@ -38,6 +43,8 @@ export interface CreatorCollabParticipant {
 }
 
 export interface CreatorCollaborationDraft {
+  links?: AssetCollaborationLink[];
+  groups?: string[];
   name: string;
   sharedTag: string;
   platforms: string[];
@@ -96,16 +103,18 @@ export function createBlankCollabSharedInformation(input: Partial<CreatorCollabS
 
 export function createBlankCollabParticipant(input: Partial<CreatorCollabParticipant> = {}): CreatorCollabParticipant {
   return {
+    groups: normalizeCollabGroups(input.groups), detailLabel: input.detailLabel || '', links: normalizeCollabLinks(input.links),
     id: input.id || createCollabId('participant'), isOwner: input.isOwner ?? false, creatorName: input.creatorName || '', houseTag: input.houseTag || '', platforms: [...(input.platforms || [])], contact: input.contact || '', externalWorkName: input.externalWorkName || '', dataStatus: input.dataStatus || 'not_submitted', imageStatus: input.imageStatus || 'not_submitted', notes: input.notes || '', referenceImages: (input.referenceImages || []).map(image => ({ ...image })), linkedWorkIds: [...(input.linkedWorkIds || [])], deadlineOverrides: { ...(input.deadlineOverrides || {}) }, useDeadlineOverrides: input.useDeadlineOverrides ?? false
   };
 }
 
 export function cloneCreatorCollaborationDraft(draft: CreatorCollaborationDraft): CreatorCollaborationDraft {
   return {
+    groups: getCollabGroups(draft.groups, draft.participants), links: normalizeCollabLinks(draft.links),
     name: draft.name, sharedTag: draft.sharedTag, platforms: [...draft.platforms],
     sharedInformation: draft.sharedInformation.map(item => ({ ...item, platforms: [...item.platforms] })),
     deadlines: draft.deadlines.map(deadline => ({ ...deadline })),
-    participants: draft.participants.map(participant => ({ ...participant, platforms: [...participant.platforms], referenceImages: participant.referenceImages.map(image => ({ ...image })), linkedWorkIds: [...participant.linkedWorkIds], deadlineOverrides: { ...participant.deadlineOverrides } })),
+    participants: draft.participants.map(participant => ({ ...participant, links: normalizeCollabLinks(participant.links), groups: normalizeCollabGroups(participant.groups), detailLabel: participant.detailLabel || '', platforms: [...participant.platforms], referenceImages: participant.referenceImages.map(image => ({ ...image })), linkedWorkIds: [...participant.linkedWorkIds], deadlineOverrides: { ...participant.deadlineOverrides } })),
     visibilityPolicy: {
       showParticipantStatuses: draft.visibilityPolicy?.showParticipantStatuses ?? false,
       showParticipantNotes: draft.visibilityPolicy?.showParticipantNotes ?? false,
@@ -116,6 +125,8 @@ export function cloneCreatorCollaborationDraft(draft: CreatorCollaborationDraft)
 
 export function updateCollabDraft(draft: CreatorCollaborationDraft, update: Partial<CreatorCollaborationDraft>): CreatorCollaborationDraft {
   const next = cloneCreatorCollaborationDraft(draft);
+  if (update.groups) next.groups = normalizeCollabGroups(update.groups);
+  if (update.links) next.links = normalizeCollabLinks(update.links);
   if (update.name !== undefined) next.name = update.name;
   if (update.sharedTag !== undefined) next.sharedTag = update.sharedTag;
   if (update.platforms) next.platforms = [...update.platforms];
@@ -215,10 +226,21 @@ export function updateCollabParticipant(draft: CreatorCollaborationDraft, partic
   const participant = next.participants.find(item => item.id === participantId);
   if (!participant) return next;
   Object.assign(participant, update);
+  if (update.groups) participant.groups = normalizeCollabGroups(update.groups);
+  if (update.links) participant.links = normalizeCollabLinks(update.links);
   if (update.platforms) participant.platforms = [...update.platforms];
   if (update.referenceImages) participant.referenceImages = update.referenceImages.map(image => ({ ...image }));
   if (update.linkedWorkIds) participant.linkedWorkIds = [...update.linkedWorkIds];
   if (update.deadlineOverrides) participant.deadlineOverrides = { ...update.deadlineOverrides };
+  return next;
+}
+
+/** Rename or remove a group without deleting the participant records that used it. */
+export function updateCollabGroup(draft: CreatorCollaborationDraft, oldName: string, newName: string): CreatorCollaborationDraft {
+  const next = cloneCreatorCollaborationDraft(draft);
+  const replace = (groups: string[] | undefined) => normalizeCollabGroups((groups || []).map(group => group === oldName ? newName.trim() : group));
+  next.groups = replace(next.groups);
+  next.participants.forEach(person => { person.groups = replace(person.groups); });
   return next;
 }
 
@@ -263,6 +285,8 @@ export function createPublicCollaborationSnapshot(draft: CreatorCollaborationDra
 
   return {
     name: draft.name.trim(),
+    links: publicCollabLinks(draft.links),
+    groups: getCollabGroups(draft.groups, draft.participants),
     sharedTag: draft.sharedTag.trim().replace(/^#/, ''),
     platforms: draft.platforms.map(value => value.trim()).filter(Boolean),
     sharedInformation: draft.sharedInformation
@@ -284,6 +308,9 @@ export function createPublicCollaborationSnapshot(draft: CreatorCollaborationDra
         id: participant.id,
         isOwner: participant.isOwner,
         creatorName: participant.creatorName.trim(),
+        links: publicCollabLinks(participant.links),
+        groups: normalizeCollabGroups(participant.groups),
+        detailLabel: (participant.detailLabel || '').trim(),
         houseTag: participant.houseTag.trim().replace(/^#/, ''),
         platforms: participant.platforms.map(value => value.trim()).filter(Boolean),
         externalWorkName: participant.externalWorkName.trim(),
@@ -302,6 +329,8 @@ export function createPublicCollaborationSnapshot(draft: CreatorCollaborationDra
 export function createCollabDraftFromPublicSnapshot(snapshot: PublicAssetCollaboration): CreatorCollaborationDraft {
   return {
     name: snapshot.name,
+    links: publicCollabLinks(snapshot.links),
+    groups: getCollabGroups(snapshot.groups, snapshot.participants),
     sharedTag: snapshot.sharedTag,
     platforms: [...snapshot.platforms],
     sharedInformation: snapshot.sharedInformation.map(item => ({ ...item, platforms: [...item.platforms] })),

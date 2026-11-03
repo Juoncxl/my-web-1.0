@@ -1,3 +1,5 @@
+import { getCollabGroups, normalizeCollabGroups } from './collabParticipantFilters';
+import { publicCollabLinks } from './collabLinks';
 import type { Asset, PublicAssetCollaboration, WorkContentBlock } from '../types';
 import {
   CREATOR_COLLAB_IDENTITY_BLOCK_ID,
@@ -38,6 +40,8 @@ function normalizePublicCollaboration(value: PublicAssetCollaboration | null | u
   if (!value || typeof value !== 'object') return null;
   return {
     ...value,
+    ...(value.links ? { links: publicCollabLinks(value.links) } : {}),
+    groups: getCollabGroups(value.groups, records<PublicAssetCollaboration['participants'][number]>(value.participants)),
     name: text(value.name),
     sharedTag: text(value.sharedTag),
     platforms: list<string>(value.platforms).filter(item => typeof item === 'string'),
@@ -48,7 +52,10 @@ function normalizePublicCollaboration(value: PublicAssetCollaboration | null | u
       .map(item => ({ ...item, label: text(item.label), date: text(item.date) })),
     participants: records<PublicAssetCollaboration['participants'][number]>(value.participants).map(participant => ({
       ...participant,
+      ...(participant.links ? { links: publicCollabLinks(participant.links) } : {}),
       creatorName: text(participant.creatorName),
+      groups: normalizeCollabGroups(participant.groups),
+      detailLabel: text(participant.detailLabel),
       houseTag: text(participant.houseTag),
       externalWorkName: text(participant.externalWorkName),
       platforms: list<string>(participant.platforms).filter(item => typeof item === 'string'),

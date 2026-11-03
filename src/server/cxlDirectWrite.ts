@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { publicCollabLinks, safeCollabLinkUrl } from '../lib/collabLinks.js';
 import { DirectWriteError, fail } from './cxlDirectErrors.js';
 import { findWorkMediaFiles, patchDriveFiles, setLegacyMediaSharingMany, trashDriveFiles, type WorkMediaFile } from './cxlDirectMedia.js';
 import { D1_PROJECTION_PREFIX, D1_RECORD_PREFIX, type WorkStore } from './cxlWorkStore.js';
@@ -259,7 +260,10 @@ function privateMeta(record: Json, fileId: string, artifacts: ReturnType<typeof 
 
 function sanitizeCxlAsset(asset: Json): Json {
   const copy = clone(asset); delete copy.userId; delete copy.revision; delete copy.authorEmail; delete copy.email; delete copy.collaboration;
-  if (copy.publicCollaboration) (copy.publicCollaboration.participants || []).forEach((p: Json) => { delete p.contact; delete p.email; });
+  if (copy.publicCollaboration) {
+    copy.publicCollaboration.links = publicCollabLinks(copy.publicCollaboration.links);
+    (copy.publicCollaboration.participants || []).forEach((p: Json) => { delete p.contact; delete p.email; p.links = publicCollabLinks(p.links); });
+  }
   return copy;
 }
 
@@ -267,12 +271,13 @@ function publicSnapshot(d: Json): Json {
   if (!d) return null;
   const p = d.visibilityPolicy || {};
   const policy = { showParticipantStatuses: !!p.showParticipantStatuses, showParticipantNotes: !!p.showParticipantNotes, showParticipantDeadlineOverrides: !!p.showParticipantDeadlineOverrides };
-  return { name: d.name || '', sharedTag: d.sharedTag || '', platforms: d.platforms || [],
+  return { name: d.name || '', sharedTag: d.sharedTag || '', platforms: d.platforms || [], groups: d.groups || [], links: publicCollabLinks(d.links),
     sharedInformation: (d.sharedInformation || []).filter((x: Json) => x.title || x.content).map((x: Json) => ({ id: x.id, title: x.title, type: x.type, content: x.content, appScope: x.appScope, platforms: x.platforms || [] })),
     deadlines: (d.deadlines || []).filter((x: Json) => x.label || x.date),
     participants: (d.participants || []).filter((x: Json) => x.creatorName || x.externalWorkName || (x.referenceImages || []).length).map((x: Json) => {
-      const q: Json = { id: x.id, isOwner: !!x.isOwner, creatorName: x.creatorName || '', houseTag: x.houseTag || '', platforms: x.platforms || [], externalWorkName: x.externalWorkName || '', referenceImages: x.referenceImages || [], linkedWorkIds: x.linkedWorkIds || [] };
+      const q: Json = { id: x.id, isOwner: !!x.isOwner, creatorName: x.creatorName || '', houseTag: x.houseTag || '', platforms: x.platforms || [], externalWorkName: x.externalWorkName || '', referenceImages: x.referenceImages || [], linkedWorkIds: x.linkedWorkIds || [], groups: x.groups || [], detailLabel: x.detailLabel || '' };
       if (policy.showParticipantStatuses) { q.dataStatus = x.dataStatus; q.imageStatus = x.imageStatus; }
+      q.links = publicCollabLinks(x.links);
       if (policy.showParticipantNotes) q.notes = x.notes || '';
       if (policy.showParticipantDeadlineOverrides && x.useDeadlineOverrides) q.deadlineOverrides = x.deadlineOverrides || {};
       return q;
@@ -343,6 +348,15 @@ export function writeFingerprint(operation: string, value: unknown): string {
 function validateCollaborationDraft(draft: Json): void {
   if (!draft || typeof draft !== 'object' || Array.isArray(draft)) fail('INVALID_COLLAB_DRAFT', 'Collaboration draft is invalid');
   if (JSON.stringify(draft).length > 600000) fail('INVALID_COLLAB_DRAFT', 'Collaboration draft is too large');
+  const validateGroups = (groups: unknown) => {
+    if (groups !== undefined && (!Array.isArray(groups) || groups.length > 80 || groups.some(group => typeof group !== 'string' || !group.trim() || group.length > 100))) fail('INVALID_COLLAB_DRAFT', 'Collaboration groups are invalid');
+  };
+  validateGroups(draft.groups);
+  const validateLinks = (links: unknown) => {
+    if (links === undefined) return;
+    if (!Array.isArray(links) || links.length > 30 || links.some(link => !link || typeof link.id !== 'string' || link.id.length > 128 || typeof link.label !== 'string' || link.label.length > 160 || typeof link.url !== 'string' || link.url.length > 2048 || (link.url.trim() && !safeCollabLinkUrl(link.url)) || !['private', 'public'].includes(link.visibility))) fail('INVALID_COLLAB_DRAFT', 'Collaboration links must use valid HTTP or HTTPS URLs');
+  };
+  validateLinks(draft.links);
   if (typeof draft.name !== 'string' || typeof draft.sharedTag !== 'string' || !Array.isArray(draft.platforms)
     || !Array.isArray(draft.sharedInformation) || draft.sharedInformation.length > 100
     || !Array.isArray(draft.deadlines) || draft.deadlines.length > 100
@@ -350,6 +364,9 @@ function validateCollaborationDraft(draft: Json): void {
   draft.participants.forEach((participant: Json) => {
     if (!participant || typeof participant !== 'object' || Array.isArray(participant) || typeof participant.id !== 'string' || participant.id.length > 128
       || !Array.isArray(participant.referenceImages) || participant.referenceImages.length > 6) fail('INVALID_COLLAB_DRAFT', 'Collaboration participant data is invalid');
+    validateGroups(participant.groups);
+    validateLinks(participant.links);
+    if (participant.detailLabel !== undefined && (typeof participant.detailLabel !== 'string' || participant.detailLabel.length > 200)) fail('INVALID_COLLAB_DRAFT', 'Collaboration participant label is invalid');
     participant.referenceImages.forEach((image: Json) => {
       if (!image || typeof image !== 'object' || Array.isArray(image) || typeof image.id !== 'string' || typeof image.src !== 'string') fail('INVALID_COLLAB_DRAFT', 'Collaboration reference image is invalid');
     });

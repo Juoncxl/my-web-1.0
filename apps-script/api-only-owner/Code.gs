@@ -1623,7 +1623,7 @@ function publicSnapshot_(d) {
   if (!d) return null;
   var p=d.visibilityPolicy||{};
   var policy={showParticipantStatuses:!!p.showParticipantStatuses,showParticipantNotes:!!p.showParticipantNotes,showParticipantDeadlineOverrides:!!p.showParticipantDeadlineOverrides};
-  return {name:d.name||'',sharedTag:d.sharedTag||'',platforms:d.platforms||[],sharedInformation:(d.sharedInformation||[]).filter(function(x){return x.title||x.content;}).map(function(x){return {id:x.id,title:x.title,type:x.type,content:x.content,appScope:x.appScope,platforms:x.platforms||[]};}),deadlines:(d.deadlines||[]).filter(function(x){return x.label||x.date;}),participants:(d.participants||[]).filter(function(x){return x.creatorName||x.externalWorkName||(x.referenceImages||[]).length;}).map(function(x){var q={id:x.id,isOwner:!!x.isOwner,creatorName:x.creatorName||'',houseTag:x.houseTag||'',platforms:x.platforms||[],externalWorkName:x.externalWorkName||'',referenceImages:x.referenceImages||[],linkedWorkIds:x.linkedWorkIds||[]};if(policy.showParticipantStatuses){q.dataStatus=x.dataStatus;q.imageStatus=x.imageStatus;}if(policy.showParticipantNotes)q.notes=x.notes||'';if(policy.showParticipantDeadlineOverrides&&x.useDeadlineOverrides)q.deadlineOverrides=x.deadlineOverrides||{};return q;}),visibilityPolicy:policy};
+  return {name:d.name||'',sharedTag:d.sharedTag||'',platforms:d.platforms||[],groups:d.groups||[],links:publicCollabLinks_(d.links),sharedInformation:(d.sharedInformation||[]).filter(function(x){return x.title||x.content;}).map(function(x){return {id:x.id,title:x.title,type:x.type,content:x.content,appScope:x.appScope,platforms:x.platforms||[]};}),deadlines:(d.deadlines||[]).filter(function(x){return x.label||x.date;}),participants:(d.participants||[]).filter(function(x){return x.creatorName||x.externalWorkName||(x.referenceImages||[]).length;}).map(function(x){var q={id:x.id,isOwner:!!x.isOwner,creatorName:x.creatorName||'',houseTag:x.houseTag||'',platforms:x.platforms||[],externalWorkName:x.externalWorkName||'',groups:x.groups||[],detailLabel:x.detailLabel||'',links:publicCollabLinks_(x.links),referenceImages:x.referenceImages||[],linkedWorkIds:x.linkedWorkIds||[]};if(policy.showParticipantStatuses){q.dataStatus=x.dataStatus;q.imageStatus=x.imageStatus;}if(policy.showParticipantNotes)q.notes=x.notes||'';if(policy.showParticipantDeadlineOverrides&&x.useDeadlineOverrides)q.deadlineOverrides=x.deadlineOverrides||{};return q;}),visibilityPolicy:policy};
 }
 
 function publicSummaryEnvelope_(pub) {
@@ -2144,9 +2144,13 @@ function rowByCreateRequestId_(sheet,requestId) { return rowByColumnValue_(sheet
 
 function rowById_(sheet,id) { return rowByColumnValue_(sheet,'id',id); }
 
+function publicCollabLinks_(links) {
+  return (Array.isArray(links)?links:[]).filter(function(x){return x&&x.visibility==='public'&&typeof x.url==='string'&&/^https?:\/\/[^\/;?#\s@]+(?:[\/;?#]|$)/i.test(x.url.trim());}).slice(0,30).map(function(x){return {id:String(x.id||'').slice(0,128),label:String(x.label||'').trim().slice(0,160),url:x.url.trim().slice(0,2048),visibility:'public'};});
+}
+
 function sanitizeCxlAsset_(asset) {
   var clone=JSON.parse(JSON.stringify(asset));delete clone.userId;delete clone.revision;delete clone.authorEmail;delete clone.email;delete clone.collaboration;
-  if(clone.publicCollaboration)(clone.publicCollaboration.participants||[]).forEach(function(p){delete p.contact;delete p.email;});
+  if(clone.publicCollaboration){clone.publicCollaboration.links=publicCollabLinks_(clone.publicCollaboration.links);(clone.publicCollaboration.participants||[]).forEach(function(p){delete p.contact;delete p.email;p.links=publicCollabLinks_(p.links);});}
   return clone;
 }
 

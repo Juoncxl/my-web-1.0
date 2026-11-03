@@ -1,4 +1,5 @@
 import type { Asset } from '../../../types';
+import { publicCollabLinks } from '../../../lib/collabLinks';
 
 export type GoogleStoredWork = {
   schemaVersion: number;
@@ -36,9 +37,9 @@ export function projectGooglePublicWork(asset: Asset): Partial<Asset> {
   Object.entries(asset).forEach(([key, value]) => {
     if (PRIVATE_FIELDS.has(key) || key === 'collaboration') return;
     if (key === 'publicCollaboration' && publicCollaboration) {
-      output[key] = { ...publicCollaboration, participants: publicCollaboration.participants.map(person => {
+      output[key] = { ...publicCollaboration, links: publicCollabLinks(publicCollaboration.links), participants: publicCollaboration.participants.map(person => {
         const { contact: _contact, ...safe } = person as typeof person & { contact?: string };
-        return safe;
+        return { ...safe, links: publicCollabLinks(safe.links) };
       }) };
     } else output[key] = value;
   });

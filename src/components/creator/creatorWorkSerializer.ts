@@ -9,6 +9,7 @@ import type {
   WorkContentBlock
 } from '../../types';
 import { CREATOR_CONTENT_TYPE_META } from './creatorContentModel';
+import { publicCollabLinks } from '../../lib/collabLinks';
 import type { CreatorMediaDraft } from './creatorMediaModel';
 import type { StandardWorkMediaDraft } from '../../lib/workMedia';
 import { mediaReference } from '../../lib/workMedia';
@@ -200,5 +201,12 @@ export function serializeCreatorWorkDraft(draft: SerializableCreatorWorkDraft): 
 /** Public-safe export shape. Owner-only Collaboration draft data is deliberately excluded. */
 export function createPublicAssetExport(asset: Asset): Asset {
   const { collaboration: _privateCollaboration, qaStorageKey: _qaStorageKey, ...publicAsset } = asset;
+  if (publicAsset.publicCollaboration) {
+    publicAsset.publicCollaboration = {
+      ...publicAsset.publicCollaboration,
+      links: publicCollabLinks(publicAsset.publicCollaboration.links),
+      participants: publicAsset.publicCollaboration.participants.map(person => ({ ...person, links: publicCollabLinks(person.links) }))
+    };
+  }
   return publicAsset as Asset;
 }

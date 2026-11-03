@@ -31,6 +31,10 @@ import { AUDIENCE_RATING_LABELS, CATEGORIES } from '../lib/constants';
 import { getWorkStatusDisplay } from '../lib/workStatus';
 import { displayDeadlineLabel } from '../lib/collabSchedule';
 import { summarizeCollabParticipants } from '../lib/collabParticipantSummary';
+import { CollabLinks } from './CollabLinks';
+import { CollabProgressSummary } from './CollabProgressSummary';
+import { CollabParticipantFilters } from './CollabParticipantFilters';
+import { filterCollabParticipants, getCollabGroups, type ParticipantFilters } from '../lib/collabParticipantFilters';
 import { IdeaList } from './IdeaList';
 import { acquireViewportScrollLock } from '../lib/viewportScrollLock';
 import { canViewAssetDetail } from '../lib/accessPolicy';
@@ -207,7 +211,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
   // Participants are folded once a Collab has more than three; each opens on its own.
   const [openParticipantIds, setOpenParticipantIds] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => { setOpenParticipantIds(new Set()); }, [asset?.id]);
+  const [participantFilters, setParticipantFilters] = useState<ParticipantFilters>({});
+  useEffect(() => { setOpenParticipantIds(new Set()); setParticipantFilters({}); }, [asset?.id]);
   const [galleryImageError, setGalleryImageError] = useState<string | null>(null);
   const [tagCopyStatus, setTagCopyStatus] = useState<'success' | 'error' | null>(null);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
@@ -295,9 +300,12 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
   const { contentBlocks, shortDescription, uiCode, legacyContent: resolvedLegacyContent } = resolveWorkPresentationContent(asset);
   const display = getWorkDisplayPresentation(asset);
   const publicCollaboration = display.collaboration;
-  const participantSummary = summarizeCollabParticipants(publicCollaboration?.participants || []);
+  const visibleParticipants = filterCollabParticipants(publicCollaboration?.participants || [], participantFilters);
+  const participantGroups = getCollabGroups(publicCollaboration?.groups, publicCollaboration?.participants || []);
+  const showParticipantStatuses = Boolean(publicCollaboration?.participants.some(person => person.dataStatus || person.imageStatus));
+  const participantSummary = summarizeCollabParticipants(visibleParticipants);
   const participantsCollapsible = (publicCollaboration?.participants?.length || 0) > 3;
-  const allParticipantsOpen = Boolean(publicCollaboration?.participants?.length) && (publicCollaboration?.participants || []).every(item => openParticipantIds.has(item.id));
+  const allParticipantsOpen = Boolean(publicCollaboration?.participants?.length) && visibleParticipants.length > 0 && visibleParticipants.every(item => openParticipantIds.has(item.id));
   const collaborationMemberWorks = display.isCollaborationFocused
     ? allAssets.filter(candidate => candidate.collaborationAssetId === asset.id)
       .filter(candidate => canViewAssetDetail(candidate, isOwner && candidate.userId === asset.userId))
@@ -590,6 +598,8 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ข้อมูลคอลแลป</strong><span>ข้อมูลสาธารณะสำหรับครีเอเตอร์ที่เข้าร่วม</span></div></div></div>
           <div className="work-detail-collaboration-card">
             <strong>{publicCollaboration.name || display.collaborationTitle}</strong>
+            {Boolean(publicCollaboration.participants.length) && <button type="button" className="work-detail-participant-toggle-all collab-participant-jump" onClick={event => { const section = event.currentTarget.closest('[role="dialog"], .work-detail-modal, .work-detail-embedded')?.querySelector<HTMLElement>('[data-work-detail-section="collaboration-participants"]'); section?.scrollIntoView({ behavior: 'smooth', block: 'start' }); section?.focus({ preventScroll: true }); }}>ดูผู้เข้าร่วม / เช็กงาน</button>}
+            <CollabLinks links={isOwner ? asset.collaboration?.links ?? publicCollaboration.links : publicCollaboration.links} owner={isOwner} />
             <div className="work-detail-collaboration-chips">
               {publicCollaboration.sharedTag && <div className="work-detail-collaboration-tag-wrap">
                 <button
@@ -622,16 +632,19 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
           <div className="work-detail-collaboration-deadline-grid">{publicCollaboration.deadlines.map(deadline => <article key={deadline.id}><strong>{displayDeadlineLabel(deadline.label, deadline.kind)}</strong><time dateTime={deadline.date}>{deadline.date || 'ยังไม่ระบุวันที่'}</time></article>)}</div>
         </section> : null}
 
-        {display.isCollaborationFocused && publicCollaboration?.participants?.length ? <section className="work-detail-section work-detail-collaboration-participants" data-work-detail-section="collaboration-participants">
-          <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div>{participantsCollapsible && <button type="button" className="work-detail-participant-toggle-all" onClick={() => setOpenParticipantIds(allParticipantsOpen ? new Set() : new Set(publicCollaboration.participants.map(item => item.id)))}>{allParticipantsOpen ? 'ปิดทั้งหมด' : 'เปิดทั้งหมด'}</button>}</div>
-          {participantSummary && <div className="work-detail-participant-summary" role="status"><strong>ข้อมูลผ่าน {participantSummary.dataApproved}/{participantSummary.total} · รูปผ่าน {participantSummary.imageApproved}/{participantSummary.total}</strong><span>{participantSummary.missing.length ? `ยังขาด: ${participantSummary.missing.map(item => `${item.name} (${item.items.join(', ')})`).join(' · ')}` : 'ส่งครบทุกคนแล้ว 🎉'}</span></div>}
-          <div className="work-detail-participant-grid">{publicCollaboration.participants.map(participant => {
+        {display.isCollaborationFocused && publicCollaboration?.participants?.length ? <section className="work-detail-section work-detail-collaboration-participants" tabIndex={-1} data-work-detail-section="collaboration-participants">
+          <div className="work-detail-section-heading"><div><FileText aria-hidden="true" /><div><strong>ผู้เข้าร่วม {publicCollaboration.participants.length} คน</strong><span>ข้อมูลสาธารณะที่ผู้สร้างคอลแลปเลือกให้แสดง</span></div></div>{participantsCollapsible && <button type="button" className="work-detail-participant-toggle-all" onClick={() => setOpenParticipantIds(allParticipantsOpen ? new Set() : new Set(visibleParticipants.map(item => item.id)))}>{allParticipantsOpen ? 'ปิดทั้งหมด' : 'เปิดทั้งหมด'}</button>}</div>
+          <CollabParticipantFilters value={participantFilters} onChange={setParticipantFilters} groups={participantGroups} showStatuses={showParticipantStatuses} count={visibleParticipants.length} total={publicCollaboration.participants.length} />
+          <CollabProgressSummary summary={participantSummary} />
+          <div className="work-detail-participant-grid">{visibleParticipants.map(participant => {
             const participantTagText = participantTagCopy(participant);
             const participantContentText = participantContentCopy(participant);
             const isParticipantOpen = !participantsCollapsible || openParticipantIds.has(participant.id);
             const participantStatusText = [participant.dataStatus && `${getCollabStatusLabel(participant.dataStatus)} ข้อมูล`, participant.imageStatus && `${getCollabStatusLabel(participant.imageStatus)} รูป`].filter(Boolean).join(' · ');
             return <article key={participant.id} className={isParticipantOpen ? '' : 'is-folded'}>
             <header><div>{participantsCollapsible ? <button type="button" className="work-detail-participant-toggle" aria-expanded={isParticipantOpen} onClick={() => setOpenParticipantIds(current => { const next = new Set(current); if (next.has(participant.id)) next.delete(participant.id); else next.add(participant.id); return next; })}><strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong><ChevronDown aria-hidden="true" className={isParticipantOpen ? 'is-open' : ''} /></button> : <strong>{participant.creatorName || 'ยังไม่ได้ระบุชื่อ'}</strong>}{participant.isOwner && <span>เจ้าของคอลแลป</span>}</div>{participantContentText && <CopyButton copied={copiedKey === `participant-content-${participant.id}`} label="คัดลอกเนื้อหา" onClick={() => copyToClipboard(participantContentText, `participant-content-${participant.id}`)} />}</header>
+            {(participant.detailLabel || participant.externalWorkName || participant.groups?.length) ? <p className="collab-participant-card-label">{participant.detailLabel || participant.externalWorkName}{participant.groups?.length ? <span>{participant.groups.join(" · ")}</span> : null}</p> : null}
+            <CollabLinks links={isOwner ? asset.collaboration?.participants.find(item => item.id === participant.id)?.links ?? participant.links : participant.links} owner={isOwner} />
             {!isParticipantOpen && participantStatusText && <p className="work-detail-participant-status-compact">{participantStatusText}</p>}
             {isParticipantOpen && <>
             <div className="work-detail-collaboration-chips">{participantTagText && <CopyButton copied={copiedKey === `participant-tag-${participant.id}`} label={participantTagText} onClick={() => copyToClipboard(participantTagText, `participant-tag-${participant.id}`)} />}{participant.platforms?.map(platform => <span key={platform}>{platform}</span>)}</div>
@@ -647,6 +660,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
             </>}
           </article>;
           })}</div>
+          {!visibleParticipants.length && <p className="collab-participant-empty">ไม่พบรายการตามตัวกรอง ลองค้นหาด้วยชื่อครีเอเตอร์หรือแท็กบ้าน หรือกดล้างตัวกรอง</p>}
         </section> : null}
 
         {display.isCollaborationFocused && !publicCollaboration && publicCollaborationBlocks.length > 0 && <section className="work-detail-section work-detail-collaboration-content" data-work-detail-section="collaboration-content-legacy">

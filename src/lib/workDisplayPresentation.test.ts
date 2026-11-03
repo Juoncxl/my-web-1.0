@@ -41,7 +41,7 @@ describe('shared Work display presentation', () => {
       name: 'คอลแลปเต็ม', sharedTag: 'บ้านA', platforms: ['Doki Chat'], sharedInformation: [], deadlines: [], participants: [],
       visibilityPolicy: { showParticipantStatuses: false, showParticipantNotes: false, showParticipantDeadlineOverrides: false }
     };
-    expect(getWorkDisplayPresentation({ ...baseAsset, publicCollaboration: collaboration }).collaboration).toEqual(collaboration);
+    expect(getWorkDisplayPresentation({ ...baseAsset, publicCollaboration: collaboration }).collaboration).toEqual({ ...collaboration, groups: [] });
     expect(getWorkDisplayPresentation({ ...baseAsset, collaboration: { ...collaboration, participants: [] } }).collaboration).toBeNull();
   });
 });
