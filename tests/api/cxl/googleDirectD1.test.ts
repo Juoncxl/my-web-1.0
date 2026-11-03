@@ -58,6 +58,43 @@ describe('reads with D1 as the source of truth', () => {
     expect(await directPublicWorkDetail(PRIVATE_WORK)).toBeNull();
   });
 
+  it('keeps saved collaboration groups, memberships, labels and public links through real owner/public detail reads', async () => {
+    const { importRecord } = await import('../../../src/server/cxlWorkStore');
+    const { d1CommitFields } = await import('../../../src/server/cxlDirectWrite');
+    const { createBlankCollaborationDraft, createBlankCollabParticipant } = await import('../../../src/components/creator/creatorCollabModel');
+    const { directOwnerWorksFetch, directPublicWorkDetail } = await import('../../../api/cxl/googleDirect');
+    const { getWorkDisplayPresentation } = await import('../../../src/lib/workDisplayPresentation');
+    const { getCollabGroups, filterCollabParticipants } = await import('../../../src/lib/collabParticipantFilters');
+    const links = [
+      { id: 'public', label: 'Drive', url: 'https://drive.google.com/drive/folders/public', visibility: 'public' as const },
+      { id: 'private', label: 'Owner only', url: 'https://example.com/private', visibility: 'private' as const },
+      { id: 'unsafe', label: 'Unsafe', url: 'javascript:alert(1)', visibility: 'public' as const }
+    ];
+    const draft = { ...createBlankCollaborationDraft(), name: '77 provinces', groups: ['เหนือ', 'กลาง', 'ยังไม่มีสมาชิก'], links,
+      participants: Array.from({ length: 53 }, (_, i) => createBlankCollabParticipant({ id: `person-${i}`, creatorName: `Creator ${i}`, groups: [i % 2 ? 'กลาง' : 'เหนือ'], detailLabel: `Province ${i}`, links, contact: 'PRIVATE_CONTACT' })) };
+    const value: any = record(PUBLIC_WORK, 'public');
+    value.revision = 3;
+    value.row.category = value.cxlAsset.category = 'collab';
+    value.collaborationDraft = draft;
+    value.cxlAsset.collaboration = draft;
+    await importRecord({ id: PUBLIC_WORK, record: value, ...d1CommitFields(value) });
+    const [owner] = (await directOwnerWorksFetch({ assetId: PUBLIC_WORK, detail: 'full' }))!;
+    const guest = (await directPublicWorkDetail(PUBLIC_WORK))!;
+    for (const asset of [owner, guest]) {
+      const shown = getWorkDisplayPresentation(asset as any).collaboration!;
+      expect(getCollabGroups(shown.groups, shown.participants)).toEqual(draft.groups);
+      expect(shown.participants).toHaveLength(53);
+      expect(filterCollabParticipants(shown.participants, { group: 'เหนือ' })).toHaveLength(27);
+      expect(filterCollabParticipants(shown.participants, { query: 'Province 52' })[0]).toMatchObject({ id: 'person-52', detailLabel: 'Province 52' });
+      expect(shown.links).toEqual([links[0]]);
+      expect(shown.participants[52].links).toEqual([links[0]]);
+      expect(JSON.stringify(shown)).not.toContain('PRIVATE_CONTACT');
+    }
+    expect(JSON.stringify(guest)).not.toContain('Owner only');
+    expect(JSON.stringify(guest)).not.toContain('javascript:');
+    expect((owner.collaboration as any).links).toEqual(links);
+  });
+
   it('authorizes a public image from the D1 record and reads it from R2', async () => {
     const { setMediaBucket } = await import('../../../src/server/cxlR2Media');
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]);

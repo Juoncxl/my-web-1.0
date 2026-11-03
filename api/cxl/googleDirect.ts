@@ -6,6 +6,8 @@ import { isR2FileId, r2FindWorkMediaFiles, r2ReadMedia, mediaBucket } from '../.
 import { sourceText } from '../../src/server/cxlSourceStore.js';
 import { D1_PROJECTION_PREFIX, D1_RECORD_PREFIX, d1PrivateIndexRows, d1PublicRows, d1VirtualFile, importRecord, setWorkStoreMeta, storedRevisions, workStorePrimary } from '../../src/server/cxlWorkStore.js';
 import { d1CommitFields } from '../../src/server/cxlDirectWrite.js';
+import { getCollabGroups, normalizeCollabGroups } from '../../src/lib/collabParticipantFilters.js';
+import { publicCollabLinks } from '../../src/lib/collabLinks.js';
 
 /**
  * Direct, read-only Google Sheets/Drive access with a Service Account.
@@ -188,12 +190,14 @@ function publicSnapshotFromDraft(draft: Row): Row {
   const list = (value: unknown) => (Array.isArray(value) ? value : []) as Row[];
   return {
     name: draft.name || '', sharedTag: draft.sharedTag || '', platforms: draft.platforms || [],
+    groups: getCollabGroups(draft.groups, list(draft.participants).map(x => ({ id: text(x.id), groups: normalizeCollabGroups(x.groups) }))), links: publicCollabLinks(draft.links),
     sharedInformation: list(draft.sharedInformation).filter(x => x && (x.title || x.content))
       .map(x => ({ id: x.id, title: x.title, type: x.type, content: x.content, appScope: x.appScope, platforms: x.platforms || [] })),
     deadlines: list(draft.deadlines).filter(x => x && (x.label || x.date)),
     participants: list(draft.participants).filter(x => x && (x.creatorName || x.externalWorkName || list(x.referenceImages).length)).map(x => {
       const q: Row = { id: x.id, isOwner: !!x.isOwner, creatorName: x.creatorName || '', houseTag: x.houseTag || '', platforms: x.platforms || [],
-        externalWorkName: x.externalWorkName || '', referenceImages: x.referenceImages || [], linkedWorkIds: x.linkedWorkIds || [] };
+        externalWorkName: x.externalWorkName || '', referenceImages: x.referenceImages || [], linkedWorkIds: x.linkedWorkIds || [],
+        groups: normalizeCollabGroups(x.groups), detailLabel: text(x.detailLabel), links: publicCollabLinks(x.links) };
       if (policy.showParticipantStatuses) { q.dataStatus = x.dataStatus; q.imageStatus = x.imageStatus; }
       if (policy.showParticipantNotes) q.notes = x.notes || '';
       if (policy.showParticipantDeadlineOverrides && x.useDeadlineOverrides) q.deadlineOverrides = x.deadlineOverrides || {};
@@ -535,6 +539,8 @@ function sanitizePublicWork(asset: Row | null, fullDetail: boolean): Row | null 
     const collab = safe.publicCollaboration, policy = isObject(collab.visibilityPolicy) ? collab.visibilityPolicy : {};
     safe.publicCollaboration = {
       name: text(collab.name), sharedTag: text(collab.sharedTag), platforms: strings(collab.platforms, 20),
+      groups: getCollabGroups(collab.groups, (Array.isArray(collab.participants) ? collab.participants : []).filter(isObject).map(x => ({ id: text(x.id), groups: normalizeCollabGroups(x.groups) }))),
+      links: publicCollabLinks(collab.links),
       sharedInformation: (Array.isArray(collab.sharedInformation) ? collab.sharedInformation : []).slice(0, 20).map((item: unknown) => {
         const out: Row = {};
         if (isObject(item)) {
@@ -547,7 +553,10 @@ function sanitizePublicWork(asset: Row | null, fullDetail: boolean): Row | null 
       participants: (Array.isArray(collab.participants) ? collab.participants : []).map((raw: unknown) => {
         const item = isObject(raw) ? raw : {};
         const p: Row = {};
-        ['isOwner','creatorName','houseTag','platforms','externalWorkName'].forEach(key => { if (item[key] !== undefined) p[key] = item[key]; });
+        ['id','isOwner','creatorName','houseTag','platforms','externalWorkName'].forEach(key => { if (item[key] !== undefined) p[key] = item[key]; });
+        p.groups = normalizeCollabGroups(item.groups);
+        p.detailLabel = text(item.detailLabel);
+        p.links = publicCollabLinks(item.links);
         p.referenceImages = (Array.isArray(item.referenceImages) ? item.referenceImages : []).map((ref: unknown, index: number) => {
           const refObject = isObject(ref) ? ref : null;
           let value = typeof ref === 'string' ? ref : text(refObject?.src || refObject?.storageKey);
